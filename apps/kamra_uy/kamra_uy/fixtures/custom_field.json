@@ -1,0 +1,38 @@
+[
+ {
+  "doctype": "Custom Field",
+  "name": "Property-uy_iva_room_pct",
+  "dt": "Property",
+  "fieldname": "uy_iva_room_pct",
+  "fieldtype": "Percent",
+  "label": "IVA habitación (%)",
+  "insert_after": "gst_rate_high",
+  "module": "Kamra UY",
+  "default": "10",
+  "description": "Tasa de IVA de las noches de habitación en Uruguay. Pendiente del contador (HR-7)."
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "Property-uy_iva_standard_pct",
+  "dt": "Property",
+  "fieldname": "uy_iva_standard_pct",
+  "fieldtype": "Percent",
+  "label": "IVA comida, bebida y servicios (%)",
+  "insert_after": "uy_iva_room_pct",
+  "module": "Kamra UY",
+  "default": "22",
+  "description": "Tasa de IVA de comida, bebida y servicios en Uruguay. Pendiente del contador (HR-7)."
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "Guest-residence_country",
+  "dt": "Guest",
+  "fieldname": "residence_country",
+  "fieldtype": "Link",
+  "label": "País de residencia",
+  "insert_after": "nationality",
+  "module": "Kamra UY",
+  "options": "Country",
+  "description": "País donde reside el huésped: lo usa el IVA de no residentes al facturar."
+ }
+]

@@ -1,0 +1,46 @@
+[
+ {
+  "doctype": "Property Setter",
+  "name": "Folio Payment-mode-options",
+  "doc_type": "Folio Payment",
+  "doctype_or_field": "DocField",
+  "field_name": "mode",
+  "property": "options",
+  "property_type": "Text",
+  "value": "Cash\nForeign Cash\nCard\nUPI\nBank Transfer\nOTA Prepaid\nCompany Credit\nPayment Link\nTarjeta local\nTarjeta extranjera",
+  "module": "Kamra UY"
+ },
+ {
+  "doctype": "Property Setter",
+  "name": "Cashier Transaction-mode-options",
+  "doc_type": "Cashier Transaction",
+  "doctype_or_field": "DocField",
+  "field_name": "mode",
+  "property": "options",
+  "property_type": "Text",
+  "value": "Cash\nForeign Cash\nCard\nUPI\nBank Transfer\nOTA Prepaid\nCompany Credit\nPayment Link\nOther\nTarjeta local\nTarjeta extranjera",
+  "module": "Kamra UY"
+ },
+ {
+  "doctype": "Property Setter",
+  "name": "POS Order-payment_mode-options",
+  "doc_type": "POS Order",
+  "doctype_or_field": "DocField",
+  "field_name": "payment_mode",
+  "property": "options",
+  "property_type": "Text",
+  "value": "\nCash\nCard\nUPI\nTarjeta local\nTarjeta extranjera",
+  "module": "Kamra UY"
+ },
+ {
+  "doctype": "Property Setter",
+  "name": "Banquet Receipt-mode-options",
+  "doc_type": "Banquet Receipt",
+  "doctype_or_field": "DocField",
+  "field_name": "mode",
+  "property": "options",
+  "property_type": "Text",
+  "value": "Cash\nCard\nUPI\nBank Transfer\nCheque\nOther\nTarjeta local\nTarjeta extranjera",
+  "module": "Kamra UY"
+ }
+]

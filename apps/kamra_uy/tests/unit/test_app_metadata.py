@@ -38,9 +38,16 @@ def test_identity() -> None:
     assert hooks["app_license"] == "agpl-3.0"
 
 
-def test_does_not_declare_kamra_localization_yet() -> None:
-    # La declaración de la localización llega con HR-23; antes de eso no hay nada que declarar.
-    assert "kamra_localization" not in _hooks()
+def test_claims_uruguay() -> None:
+    # kamra_uy se instala después de kamra: pack_for_country toma el último valor del hook, así que este reclama Uruguay.
+    assert _hooks()["kamra_localization"] == {"Uruguay": "kamra_uy.localization.uruguay"}
+
+
+def test_exports_its_own_customizations_only() -> None:
+    assert _hooks()["fixtures"] == [
+        {"dt": "Custom Field", "filters": [["module", "=", "Kamra UY"]]},
+        {"dt": "Property Setter", "filters": [["module", "=", "Kamra UY"]]},
+    ]
 
 
 def test_targets_frappe_16() -> None:
