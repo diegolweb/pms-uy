@@ -11,6 +11,8 @@ export type SiteInfo = {
   brand_name?: string | null
   brand_logo?: string | null
   frappe_version?: string
+  /** AGPL §13: where to get the source of each app, Kamra first. */
+  source_code?: { app: string; url: string }[]
 }
 
 let cached: Promise<SiteInfo> | null = null

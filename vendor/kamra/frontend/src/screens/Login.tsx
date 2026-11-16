@@ -3,6 +3,7 @@ import { useEffect, useState } from "react"
 import { login } from "../lib/api"
 import { asset } from "../lib/asset"
 import { Button } from "../components/ui/button"
+import { SourceCodeLink } from "../components/SourceCodeLink"
 import { getSiteInfo, versionLabel } from "../lib/siteInfo"
 import { LANGS, getLang, setLang, type Lang } from "../lib/dir"
 import { useT, t as translate } from "../lib/i18n"
@@ -184,6 +185,7 @@ export default function Login(props: { onSuccess: () => void }) {
             Kamra PMS v{version}
           </p>
         )}
+        <SourceCodeLink className="mt-1 block text-center text-[11px]" />
       </div>
     </div>
   )

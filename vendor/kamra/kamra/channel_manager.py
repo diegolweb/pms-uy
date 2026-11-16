@@ -19,6 +19,7 @@ import re
 from decimal import Decimal
 
 import frappe
+from frappe import _
 from frappe.utils import add_days, nowdate
 
 from kamra.authz import require_roles
@@ -284,11 +285,17 @@ def on_reservation_change(doc, method=None):
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-def webhook(connection: str, **kwargs):
+def webhook(connection: str | None = None, **kwargs):
 	"""One URL per connection:
 	/api/method/kamra.channel_manager.webhook?connection=CMC-00001
 	Authenticated by the connection's webhook secret (X-Webhook-Secret
 	header or `secret` in the payload)."""
+	# A JSON body makes Frappe build the arguments from the body alone
+	# (app.make_form_dict), so the ?connection= of that URL comes from here.
+	connection = connection or (frappe.request.args.get("connection")
+	                            if frappe.request else None)
+	if not connection:
+		frappe.throw("Missing connection.", frappe.ValidationError)
 	conn = frappe.get_doc("Channel Manager Connection", connection)
 	if not conn.active:
 		return {"ok": False, "reason": "connection_inactive"}
@@ -317,19 +324,65 @@ def _room_type_for(connection: str, external_id: str) -> str | None:
 		"room_type")
 
 
-def _find_or_create_guest(name: str, phone: str, email: str) -> str:
-	for filt in ({"phone": phone} if phone else None,
+def _storable_phone(phone: str | None) -> bool:
+	"""Whether the Guest's Data/Phone field takes it: the check Frappe runs on
+	insert (document.py, validate_phone_number(data, throw=True))."""
+	return not phone or frappe.utils.validate_phone_number(phone)
+
+
+def _storable_email(email: str | None) -> bool:
+	"""Whether the Guest's Data/Email field takes it: every address Frappe
+	splits out of it must be valid, as it checks on insert."""
+	text = (email or "").strip()
+	return not text or all(frappe.utils.validate_email_address(a)
+	                       for a in frappe.utils.split_emails(text))
+
+
+def _unstorable_contact(phone: str | None, email: str | None,
+                        property: str | None) -> list[str]:
+	"""The OTA contact the guest profile can't hold, exactly as it came (#468
+	follow-up): a phone or an email Frappe would refuse on the Guest insert.
+	It goes to the reservation's notes, so the booking is never lost over it."""
+	from kamra import phone as phone_mod
+	items = []
+	typed = (phone or "").strip()
+	if typed and not _storable_phone(phone_mod.for_property(typed, property)[0]):
+		items.append(typed)
+	mail = (email or "").strip()
+	if not _storable_email(mail):
+		items.append(mail)
+	return items
+
+
+def _find_or_create_guest(name: str, phone: str, email: str,
+                          property: str | None = None) -> str:
+	"""The OTA guest's profile. The phone is read with the property's
+	country (#468); one that can't be read is kept as typed and flagged,
+	never a reason to drop an already-acknowledged booking."""
+	from kamra import phone as phone_mod
+	typed = (phone or "").strip()
+	phone, problem = phone_mod.for_property(typed, property)
+	# #468 follow-up: what Frappe would refuse on the Guest insert stays off
+	# the profile (blank) and on the reservation instead - see
+	# _unstorable_contact. The phone is still flagged, without the number.
+	if not _storable_phone(phone):
+		phone, problem = "", phone_mod.INVALID
+	if not _storable_email(email):
+		email = ""
+	for filt in ({"phone": phone_mod.matching(typed, property)} if phone else None,
 	             {"email": email} if email else None):
 		if filt:
 			g = frappe.db.get_value("Guest", filt)
 			if g:
 				return g
 	parts = (name or "OTA Guest").split(" ", 1)
-	return frappe.get_doc({
+	guest = frappe.get_doc({
 		"doctype": "Guest", "first_name": parts[0],
 		"last_name": parts[1] if len(parts) > 1 else "",
 		"phone": phone or "", "email": email or "",
 	}).insert(ignore_permissions=True).name
+	phone_mod.flag(problem, "Guest", guest, property, "an OTA booking")
+	return guest
 
 
 def _reservations_for_booking(property: str, booking_id: str) -> list[dict]:
@@ -428,7 +481,14 @@ def _apply_event(conn, e: dict, requested_reason: str | None = None) -> dict:
 		        "reservation": existing.name}
 
 	guest = _find_or_create_guest(e.get("guest_name"), e.get("phone"),
-	                              e.get("email"))
+	                              e.get("email"), conn.property)
+	notes = e.get("notes") or ""
+	unstorable = _unstorable_contact(e.get("phone"), e.get("email"), conn.property)
+	if unstorable:
+		# #468 follow-up: keep this when the feed rewrites _apply_event (HR-15).
+		notes = "\n".join(s for s in (notes, _(
+			"Contact from {0} could not be saved on the guest profile and is kept here: {1}"
+		).format(e.get("channel"), ", ".join(unstorable))) if s)
 	doc = frappe.get_doc({
 		"doctype": "Reservation",
 		"property": conn.property,
@@ -442,7 +502,7 @@ def _apply_event(conn, e: dict, requested_reason: str | None = None) -> dict:
 		"status": "Requested" if requested_reason else "Confirmed",
 		"channel": e.get("channel"),
 		"ota_ref": e.get("ota_ref"),
-		"special_requests": e.get("notes") or None,
+		"special_requests": notes or None,
 		# the OTA already sold at its price - keep their number, don't reprice
 		"auto_price": 0 if requested_reason or e.get("total") else 1,
 	})

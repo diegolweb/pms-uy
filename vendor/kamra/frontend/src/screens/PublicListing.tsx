@@ -14,6 +14,7 @@ import { callGuest } from "../lib/api"
 import { serverError } from "../lib/resource"
 import { accentVars } from "../lib/accents"
 import { Badge } from "../components/ui/badge"
+import { SourceCodeLink } from "../components/SourceCodeLink"
 import { Button } from "../components/ui/button"
 import { Sheet } from "../components/ui/sheet"
 import { cur, moneyLocale, adoptUiLocale } from "../lib/money"
@@ -846,6 +847,7 @@ export default function PublicListing() {
           </aside>
         </div>
       </div>
+      <SourceCodeLink className="block px-5 pb-8 text-center text-xs" />
 
       {booking && (
         <Sheet

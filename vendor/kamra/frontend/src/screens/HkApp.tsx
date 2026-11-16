@@ -10,6 +10,7 @@ import {
 } from "../lib/api"
 import { subscribeRealtime } from "../lib/realtime"
 import { Badge } from "../components/ui/badge"
+import { SourceCodeLink } from "../components/SourceCodeLink"
 import { cn } from "../lib/utils"
 import { asset } from "../lib/asset"
 import Login from "./Login"
@@ -483,6 +484,7 @@ export default function HkApp() {
 
         {view === "laundry" && <HkLaundry rooms={data?.rooms ?? []} />}
       </main>
+      <SourceCodeLink className="block px-4 pb-4 text-center text-xs" />
 
       <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-zinc-200 bg-white">
         {(

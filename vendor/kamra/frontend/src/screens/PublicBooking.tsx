@@ -36,6 +36,7 @@ import { petChargeBasis } from "../lib/pets"
 import { useT, t as translate } from "../lib/i18n"
 import { adoptGuestLanguage } from "../lib/dir"
 import { LanguageSwitcher } from "../components/LanguageSwitcher"
+import { SourceCodeLink } from "../components/SourceCodeLink"
 import { addDays, nightsBetween, parseDate, stayFromParams, todayPlus } from "../lib/stay"
 import ChildAges, {
   agesToSend, canReserve, sizeAges, StayNotice,
@@ -308,6 +309,7 @@ function PropertyChooser({
             </Link>
           ))}
         </div>
+        <SourceCodeLink className="mt-12 block text-center text-xs" />
       </div>
     </div>
   )
@@ -787,7 +789,7 @@ export default function PublicBooking() {
 
   if (loadFailed)
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-4">
+      <div data-testid="booking-unavailable" className="flex min-h-screen items-center justify-center bg-zinc-50 px-4">
         <div className="max-w-md rounded-2xl border border-zinc-200 bg-white p-8 text-center">
           <CalendarDays className="mx-auto size-10 text-zinc-300" aria-hidden />
           <h1 className="mt-4 text-xl font-semibold text-zinc-900">
@@ -805,6 +807,7 @@ export default function PublicBooking() {
               <Button onClick={() => window.location.reload()}>{t("Try again")}</Button>
             )}
           </div>
+          <SourceCodeLink className="mt-6 block text-center text-xs" />
         </div>
       </div>
     )
@@ -1634,6 +1637,7 @@ export default function PublicBooking() {
               <p className="text-center text-xs text-zinc-400">
                 {t("Powered by Kamra - the open-source, agent-ready hotel PMS")}
               </p>
+              <SourceCodeLink className="text-center text-xs" />
             </div>
           </div>
 

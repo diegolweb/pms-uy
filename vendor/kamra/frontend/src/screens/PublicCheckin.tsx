@@ -11,6 +11,7 @@ import { adoptUiLocale } from "../lib/money"
 import { useT, t as translate } from "../lib/i18n"
 import { adoptGuestLanguage } from "../lib/dir"
 import { LanguageSwitcher } from "../components/LanguageSwitcher"
+import { SourceCodeLink } from "../components/SourceCodeLink"
 
 
 /** Downscale a picked/captured photo so the upload stays small (max edge
@@ -473,6 +474,7 @@ export default function PublicCheckin() {
             </p>
           </div>
         )}
+        <SourceCodeLink className="mt-8 block text-center text-xs" />
       </div>
     </div>
   )

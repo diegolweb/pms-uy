@@ -36,6 +36,7 @@ import { loadLocale } from "./lib/money"
 import { cn } from "./lib/utils"
 import { useKiosk } from "./lib/kiosk"
 import { getSiteInfo, versionLabel } from "./lib/siteInfo"
+import { SourceCodeLink } from "./components/SourceCodeLink"
 import AlertSettings from "./components/AlertSettings"
 import NotificationHost from "./components/NotificationHost"
 
@@ -472,6 +473,7 @@ export default function AppShell() {
             title={t("The Kamra version this site is running")}
           >
             Kamra v{build}
+            <SourceCodeLink className="before:mx-1 before:content-['·']" />
           </p>
         ) : null}
       </aside>
@@ -575,6 +577,7 @@ export default function AppShell() {
           />
           </ErrorBoundary>
         </main>
+        {!kiosk && <SourceCodeLink className="block px-4 pb-4 text-[11px] sm:hidden" />}
       </div>
 
       {/* Never float over the till / kitchen pass in focus mode. */}

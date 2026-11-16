@@ -259,7 +259,37 @@ def site_info():
 		"channel": (frappe.conf.get("kamra_channel") or "")[:20] or None,
 		"build": (frappe.conf.get("kamra_build") or "")[:12] or None,
 		**_brand(),
+		# AGPL §13: the screens link to the corresponding source once the
+		# deployment points them at its published copy with
+		# `bench --site <site> set-config -p source_code_urls
+		# '{"kamra": "<url>", "<app>": "<url>"}'`. Unset, no link (D-HR-25).
+		"source_code": _source_code_links(frappe.conf.get("source_code_urls"),
+			frappe.get_installed_apps()),
 	}
+
+
+def _source_code_links(conf_value, installed_apps: list[str]) -> list[dict[str, str]]:
+	"""Where to get the source of each installed app, Kamra first.
+
+	``conf_value`` is the site config ``source_code_urls`` ({app: url}).
+	Anything that is not an object, any URL that is not http(s) and any app
+	that is not installed is ignored: site_info is public and never raises.
+	Without a usable URL of Kamra's own nothing is offered and no screen paints
+	the link: it stays off until the deployment sets the key (D-HR-25)."""
+	urls = conf_value if isinstance(conf_value, dict) else {}
+
+	def usable(app):
+		url = urls.get(app)
+		if isinstance(url, str) and url.strip().lower().startswith(("https://", "http://")):
+			return url.strip()
+		return None
+
+	if not usable("kamra"):
+		return []
+	links = [{"app": "kamra", "url": usable("kamra")}]
+	links += [{"app": app, "url": usable(app)} for app in installed_apps
+	          if app != "kamra" and usable(app)]
+	return links
 
 
 def _brand() -> dict:
