@@ -569,6 +569,124 @@ class ChannexAriFlushTestCase(_AriWorkerMixin, IntegrationTestCase):
 		self.assertEqual(len(self.rows()), before)
 
 
+class ChannexAriClaimTestCase(_AriWorkerMixin, IntegrationTestCase):
+	"""The worker claims its rows before it computes the cells: a change saved
+	while the call is on the wire gets a row of its own and goes out next."""
+
+	def change_during(self, season, value, path="restrictions"):
+		"""warn_fn: the revenue manager saves `season` at `value` while the
+		worker's `path` call is on the wire (once)."""
+		state = {"done": False}
+
+		def during(p, payload):
+			if p == path and not state["done"]:
+				state["done"] = True
+				doc = frappe.get_doc("Season", season.name)
+				doc.adjustment_value = value
+				doc.save(ignore_permissions=True)
+			return None
+		return during
+
+	def rates(self, plan="rp-twin-bar") -> list:
+		return [v.get("rate") for call in self.fake.posts("restrictions") for v in call
+		        if v.get("rate_plan_id") == plan]
+
+	def test_a_change_saved_during_the_call_is_not_lost(self):
+		season = self.season(self.twin, 5, value=150)
+		self.fake.warn_fn = self.change_during(season, 160)
+		self.flush()
+		self.fake.warn_fn = None
+		pending = self.rows(status="Pending")
+		self.assertEqual(len(pending), 1, f"rows after the 1st flush: {self.rows()}")
+		self.assertEqual(self.rows(status="Sending"), [])
+		self.tick(120)
+		self.flush()
+		self.assertEqual(self.rates(), ["150.00", "160.00"])
+		self.assertEqual(self.sent("restrictions", "rp-twin-bar")[day(5)]["rate"], "160.00")
+		self.assertEqual({r.status for r in self.rows()}, {"Sent"})
+
+	def test_a_5xx_gives_the_claimed_rows_back_with_their_wait_and_no_copies(self):
+		self.fake.fail("restrictions", channex.ChannexError(500, "boom"))
+		season = self.season(self.twin, 5, value=150)
+		before = [r.name for r in self.rows()]
+		t0 = self.clock[0]
+		self.assertIn("retry", self.flush()["restrictions"])
+		rows = self.rows()
+		self.assertEqual([r.name for r in rows], before)
+		self.assertEqual([(r.status, r.attempts) for r in rows], [("Pending", 1)])
+		self.assertEqual(frappe.utils.get_datetime(rows[0].next_attempt_at), self.ari._dt(t0 + 30))
+		# a change saved during the retried call joins nothing: it waits in its own row
+		self.tick(30)
+		self.fake.warn_fn = self.change_during(season, 160)
+		self.flush()
+		self.fake.warn_fn = None
+		self.assertEqual(len(self.rows(status="Pending")), 1)
+		self.tick(120)
+		self.flush()
+		self.assertEqual(self.rates(), ["150.00", "150.00", "160.00"])
+		self.assertEqual({r.status for r in self.rows()}, {"Sent"})
+
+	def test_a_429_gives_the_claimed_rows_back_with_the_pause_and_no_copies(self):
+		self.fake.fail("restrictions", channex.ChannexRateLimited(429, "slow down", 30))
+		self.season(self.twin, 5)
+		before = [r.name for r in self.rows()]
+		self.assertEqual(self.flush()["restrictions"], {"paused": 30})
+		rows = self.rows()
+		self.assertEqual([r.name for r in rows], before)
+		self.assertEqual([(r.status, r.kinds, r.attempts) for r in rows], [("Pending", "restrictions", 0)])
+		self.tick(31)
+		self.flush()
+		self.assertEqual(self.rates(), ["150.00", "150.00"])
+		self.assertEqual({r.status for r in self.rows()}, {"Sent"})
+
+	def test_a_waiting_kind_gives_its_rows_back_untouched(self):
+		frappe.db.set_value("Channel Manager Connection", self.conn.name, "ari_batch_seconds", 60)
+		self.season(self.twin, 5)
+		self.assertIn("waiting", self.flush()["restrictions"])
+		rows = self.rows()
+		self.assertEqual([(r.status, r.attempts, r.next_attempt_at) for r in rows], [("Pending", 0, None)])
+		self.tick(61)
+		self.flush()
+		self.assertEqual({r.status for r in self.rows()}, {"Sent"})
+
+	def test_an_unexpected_error_gives_the_claimed_rows_back(self):
+		self.season(self.twin, 5)
+		with patch.object(self.ari, "restriction_cells", side_effect=RuntimeError("bug")):
+			with self.assertRaises(RuntimeError):
+				self.flush()
+		self.assertEqual([(r.status, r.next_attempt_at) for r in self.rows()], [("Pending", None)])
+		self.flush()
+		self.assertEqual({r.status for r in self.rows()}, {"Sent"})
+
+	def test_a_row_another_worker_holds_is_left_alone_until_its_claim_lapses(self):
+		self.season(self.twin, 5)
+		name = self.rows()[0].name
+		frappe.db.set_value("Channel ARI Outbox", name, {
+			"status": "Sending", "next_attempt_at": self.ari._dt(self.clock[0] + 60)})
+		self.assertEqual(self.flush()["restrictions"], {"nothing": True})
+		self.assertEqual(self.fake.posts("restrictions"), [])
+		self.assertEqual(self.ari.outbox_status(self.conn.name)["pending"], 1)
+		with patch.object(self.ari, "enqueue_flush") as enqueue:
+			self.ari.enqueue_ari_flushes()
+		self.assertIn(self.conn.name, [c.args[0] for c in enqueue.call_args_list])
+		# the worker died mid-call: once its claim lapses the row is taken again
+		self.tick(61)
+		self.flush()
+		self.assertEqual(self.rates(), ["150.00"])
+		self.assertEqual(self.rows()[0].status, "Sent")
+
+	def test_a_change_never_joins_a_row_another_transaction_queued(self):
+		# a Pending row another request committed: the worker may be claiming it
+		# right now, unseen by this transaction's snapshot
+		other = self.ari._insert_row({"connection": self.conn.name, "property": self.property,
+			"status": "Pending", "kinds": "both", "full": 0, "date_from": day(5), "date_to": day(5),
+			"attempts": 0, "queued_at": self.ari._dt(self.clock[0])})
+		mine = self.ari.enqueue_ari_change(self.property, day(5), day(5), reason="test")
+		self.assertTrue(mine and other not in mine, (other, mine))
+		# the same change twice in one transaction is still one row
+		self.assertEqual(self.ari.enqueue_ari_change(self.property, day(5), day(5), reason="test"), mine)
+
+
 class ChannexAriTriggersTestCase(_AriWorkerMixin, IntegrationTestCase):
 	BASELINE_DAYS = 0
 

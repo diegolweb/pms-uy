@@ -504,8 +504,10 @@ def search_stay(property: str, check_in_date: str, check_out_date: str,
 						if season else
 						frappe._("These dates need a stay of at least {0} nights.").format(need)))
 				elif rules.get("max_stay") and nights > int(rules["max_stay"]):
-					row.update(available=False, reason=frappe._(
-						"These dates allow a stay of at most {0} nights.").format(int(rules["max_stay"])))
+					most = int(rules["max_stay"])
+					row.update(available=False, reason=(
+						frappe._("These dates allow a stay of at most 1 night.") if most == 1 else
+						frappe._("These dates allow a stay of at most {0} nights.").format(most)))
 			except Exception:
 				pass  # still list the room type even if this date range cannot be quoted
 		results.append(row)

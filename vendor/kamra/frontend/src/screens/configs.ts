@@ -828,7 +828,6 @@ export const channelManagerConfig: ScreenConfig = {
     { field: "sync_days", label: "Days to push", type: "int" },
     { field: "ari_calls_per_minute", label: "ARI calls per minute", type: "int", hint: "Per endpoint (availability and restrictions count apart). Channex allows 10." },
     { field: "ari_batch_seconds", label: "Rate batch window (seconds)", type: "int", hint: "Rate changes made within this window go out together in one call." },
-    { field: "last_full_sync", label: "Last full sync", type: "readonly" },
     { field: "active", label: "Active", type: "check" },
   ],
   extra: ChannelConnectionActions,

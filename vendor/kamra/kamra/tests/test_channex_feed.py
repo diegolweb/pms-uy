@@ -515,6 +515,61 @@ class ChannexFeedTestCase(_ChannexConnectionMixin, IntegrationTestCase):
 			self.assertNotIn(secret, values)
 
 
+	# ── one property per connection, and a quiet Error Log ─────────────
+
+	def feed_logs(self) -> int:
+		return frappe.db.count("Error Log", {"method": f"Channex feed {self.conn.name}"})
+
+	def revision_logs(self, rev) -> int:
+		return frappe.db.count("Error Log", {"method": ("like", f"Channex revision {rev['id']}%")})
+
+	def test_a_connection_without_a_channex_property_never_reads_the_feed(self):
+		# without filter[property_id] the feed is the whole account's: acking
+		# it would wipe another property's guests in Channex
+		frappe.db.set_value("Channel Manager Connection", self.conn.name, "external_property_id", "")
+		self.fake.serve(self.rev())
+		before = self.feed_logs()
+		self.assertEqual(self.pull(), {"acked": 0, "failed": 0, "skipped": 0})
+		self.assertEqual(self.pull(), {"acked": 0, "failed": 0, "skipped": 0})
+		self.assertEqual(self.fake.calls, [])
+		self.assertEqual(self.feed_logs(), before + 1)
+		log = frappe.get_all("Error Log", filters={"method": f"Channex feed {self.conn.name}"},
+		                     fields=["error"], order_by="creation desc", limit=1)[0]
+		self.assertIn("external_property_id", log.error)
+
+	def test_a_revision_of_another_property_is_neither_applied_nor_acked(self):
+		theirs = self.rev(property_id="prop-someone-else")
+		mine = self.rev()
+		self.fake.serve(theirs)
+		self.fake.serve(mine)
+		self.assertEqual(self.pull(), {"acked": 1, "failed": 0, "skipped": 1})
+		self.assertEqual(self.fake.acks(), [mine["id"]])
+		self.assertEqual(self.reservations(theirs["ota_reservation_code"]), [])
+		self.assertFalse(frappe.db.exists("Channel Booking Revision", theirs["id"]))
+		self.assertEqual(len(self.reservations(mine["ota_reservation_code"])), 1)
+		# a revision that says no property is nobody's either
+		anonymous = self.rev()
+		anonymous.pop("property_id")
+		self.fake.serve(anonymous)
+		self.assertEqual(self.pull(), {"acked": 0, "failed": 0, "skipped": 2})
+		self.assertNotIn(anonymous["id"], self.fake.acks())
+
+	def test_a_revision_failing_every_pass_logs_once_an_hour(self):
+		rev = self.rev()
+		self.fake.serve(rev)
+		with patch.object(cm, "_apply_event", side_effect=RuntimeError("boom")):
+			for _ in range(3):
+				self.assertEqual(self.pull()["failed"], 1)
+		row = self.row(rev)
+		self.assertEqual((row.status, row.attempts), ("Failed", 3))
+		self.assertEqual(self.revision_logs(rev), 1)
+		self.assertEqual(self.fake.acks(), [])
+		# an hour later (the mark expired) the next failure logs again
+		frappe.cache.delete_value(f"channex_revision_error::{self.conn.name}::{rev['id']}")
+		with patch.object(cm, "_apply_event", side_effect=RuntimeError("boom")):
+			self.pull()
+		self.assertEqual((self.row(rev).attempts, self.revision_logs(rev)), (4, 2))
+
 class ChannexWebhookTestCase(_ChannexConnectionMixin, IntegrationTestCase):
 	"""The webhook is a signal: authenticate, enqueue the feed pull, answer."""
 

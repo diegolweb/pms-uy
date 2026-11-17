@@ -1104,27 +1104,30 @@ Contact from {0} could not be saved on the guest profile and is kept here: {1},C
 Arrival time: {0},Hora de llegada: {0}
 "Service: {0} × {1}, {2} {3}","Servicio: {0} × {1}, {2} {3}"
 The end date cannot be before the start date.,La fecha final no puede ser anterior a la inicial.
-{0} cannot be negative.,{0} no puede ser negativo.
+{0} cannot be negative.,{0} no admite valores negativos.
 "Set at least one restriction: stop sell, closed to arrival, closed to departure, a minimum stay of two nights or more, or a maximum stay.","Indique al menos una restricción: cierre de venta, cerrado a la llegada, cerrado a la salida, una estadía mínima de dos noches o más, o una estadía máxima."
 The maximum stay ({0} nights) cannot be shorter than the minimum stay ({1} nights).,La estadía máxima ({0} noches) no puede ser menor que la mínima ({1} noches).
+The maximum stay (1 night) cannot be shorter than the minimum stay ({0} nights).,La estadía máxima (1 noche) no puede ser menor que la mínima ({0} noches).
 Room type {0} belongs to another property.,El tipo de habitación {0} es de otra propiedad.
 Rate plan {0} belongs to another property.,El plan tarifario {0} es de otra propiedad.
 Restriction {0} belongs to another property.,La restricción {0} es de otra propiedad.
 Expected a list.,Se esperaba una lista.
-These dates break a stay restriction: {0} Saved anyway.,Estas fechas no cumplen una restricción de estadía: {0} Se guardó igual.
+These dates break a stay restriction: {0} Saved anyway.,Estas fechas no cumplen una restricción de estadía: {0} Se guardó de todos modos.
 Stay restrictions,Restricciones de estadía
 minimum stay of {0} nights,estadía mínima de {0} noches
 closed to arrival,cerrado a la llegada
 closed to departure,cerrado a la salida
 stop sell,cierre de venta
 maximum stay of {0} nights,estadía máxima de {0} noches
-Booked by {0} outside the stay rules: {1},Reservada por {0} fuera de las reglas de estadía: {1}
+maximum stay of 1 night,estadía máxima de 1 noche
+Booked by {0} outside the stay rules: {1},Reservada por {0} fuera de las restricciones de estadía: {1}
 These dates are closed to new bookings.,Estas fechas no están disponibles para reservar.
 Arrivals are not possible on {0}.,No se puede llegar el {0}.
 Departures are not possible on {0}.,No se puede terminar la estadía el {0}.
 These dates need a stay of at least {0} nights ({1}).,"Para estas fechas, la estadía mínima es de {0} noches ({1})."
 These dates need a stay of at least {0} nights.,"Para estas fechas, la estadía mínima es de {0} noches."
 These dates allow a stay of at most {0} nights.,"Para estas fechas, la estadía máxima es de {0} noches."
+These dates allow a stay of at most 1 night.,"Para estas fechas, la estadía máxima es de 1 noche."
 Provider rate plan {0} is already mapped on this connection.,El plan de tarifa {0} del proveedor ya está asociado en esta conexión.
 "Rate plan {0} belongs to {1}, not to this connection's property {2}.","El plan de tarifa {0} pertenece a {1}, no a la propiedad {2} de esta conexión."
 This connection is not active.,Esta conexión no está activa.

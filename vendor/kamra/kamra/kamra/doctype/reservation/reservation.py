@@ -381,7 +381,8 @@ class Reservation(Document):
 		if rules.get("stop_sell"):
 			broken.append(_("stop sell"))
 		if rules.get("max_stay") and nights > rules["max_stay"]:
-			broken.append(_("maximum stay of {0} nights").format(rules["max_stay"]))
+			broken.append(_("maximum stay of 1 night") if int(rules["max_stay"]) == 1
+			              else _("maximum stay of {0} nights").format(rules["max_stay"]))
 		if not broken:
 			return
 		line = _("Booked by {0} outside the stay rules: {1}").format(
@@ -1076,5 +1077,7 @@ def _closed_stay_rules(rules: dict, nights: int, check_in, check_out) -> list[st
 	if rules.get("closed_to_departure"):
 		out.append(_("Departures are not possible on {0}.").format(formatdate(check_out)))
 	if rules.get("max_stay") and nights > int(rules["max_stay"]):
-		out.append(_("These dates allow a stay of at most {0} nights.").format(int(rules["max_stay"])))
+		most = int(rules["max_stay"])
+		out.append(_("These dates allow a stay of at most 1 night.") if most == 1
+		           else _("These dates allow a stay of at most {0} nights.").format(most))
 	return out

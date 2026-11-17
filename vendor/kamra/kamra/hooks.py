@@ -279,16 +279,23 @@ _PROPERTY_SCOPED = (
 	"WhatsApp Message", "ZATCA Invoice", "ZATCA Settings",
 )
 
+# These hang from a channel connection and have no property field: they are
+# scoped through their connection's property, with the strict scope off too
+# (kamra.authz.connection_query_conditions).
+_CONNECTION_SCOPED = ("Channel ARI State", "Channel Booking Revision", "Channel Room Mapping")
+
 permission_query_conditions = {
 	"Guest": "kamra.authz.guest_query_conditions",
 	"Itinerary": "kamra.authz.itinerary_query_conditions",
 	**{dt: "kamra.authz.property_query_conditions" for dt in _PROPERTY_SCOPED},
+	**{dt: "kamra.authz.connection_query_conditions" for dt in _CONNECTION_SCOPED},
 }
 
 has_permission = {
 	"Guest": "kamra.authz.guest_has_permission",
 	"Itinerary": "kamra.authz.itinerary_has_permission",
 	**{dt: "kamra.authz.property_has_permission" for dt in _PROPERTY_SCOPED},
+	**{dt: "kamra.authz.connection_has_permission" for dt in _CONNECTION_SCOPED},
 }
 
 # Document Events

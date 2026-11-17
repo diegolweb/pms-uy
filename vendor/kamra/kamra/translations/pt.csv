@@ -199,3 +199,20 @@ Departures are not possible on {0}.,Não é possível encerrar a estadia no dia 
 These dates need a stay of at least {0} nights ({1}).,"Para essas datas, a estadia mínima é de {0} noites ({1})."
 These dates need a stay of at least {0} nights.,"Para essas datas, a estadia mínima é de {0} noites."
 These dates allow a stay of at most {0} nights.,"Para essas datas, a estadia máxima é de {0} noites."
+These dates allow a stay of at most 1 night.,"Para essas datas, a estadia máxima é de 1 noite."
+maximum stay of {0} nights,estadia máxima de {0} noites
+maximum stay of 1 night,estadia máxima de 1 noite
+The maximum stay ({0} nights) cannot be shorter than the minimum stay ({1} nights).,A estadia máxima ({0} noites) não pode ser menor que a mínima ({1} noites).
+The maximum stay (1 night) cannot be shorter than the minimum stay ({0} nights).,A estadia máxima (1 noite) não pode ser menor que a mínima ({0} noites).
+Provider rate plan {0} is already mapped on this connection.,O plano tarifário {0} do provedor já está mapeado nesta conexão.
+"Rate plan {0} belongs to {1}, not to this connection's property {2}.","O plano tarifário {0} pertence a {1}, e não à propriedade {2} desta conexão."
+This connection is not active.,Esta conexão não está ativa.
+{0} does not take ARI changes.,{0} não aceita o envio de disponibilidade e tarifas por mudanças.
+No room mappings yet - map your room types to the provider's room and rate ids first.,Ainda não há mapeamentos de quartos: primeiro mapeie seus tipos de quarto para os ids de quarto e de tarifa do provedor.
+The channel manager sells in {0}; this property is in {1}.,O gerenciador de canais vende em {0}; esta propriedade está em {1}.
+The channel manager's property time zone is {0}; this property's is {1}.,O fuso horário da propriedade no gerenciador de canais é {0}; o desta propriedade é {1}.
+No room type matches it.,Não corresponde a nenhum tipo de quarto.
+Several rate plans of this room match no Kamra rate plan: map them by hand.,Vários planos tarifários deste quarto não correspondem a nenhum plano tarifário do Kamra: mapeie-os manualmente.
+The channel manager has {0} rooms of {1}; Kamra has {2}.,O gerenciador de canais tem {0} quartos de {1}; o Kamra tem {2}.
+Rate plan {0} is priced per person; Kamra sends one price per room.,O plano tarifário {0} tem preço por pessoa; o Kamra envia um preço por quarto.
+"Rate plan {0} adds a fixed amount: on the channels it applies every night, on direct bookings once per stay.","O plano tarifário {0} soma um valor fixo: nos canais, ele se aplica a cada noite; na venda direta, uma vez por estadia."

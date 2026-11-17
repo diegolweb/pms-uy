@@ -4,6 +4,7 @@ import { call } from "../lib/api"
 import { serverError, type Row } from "../lib/resource"
 import { Button } from "./ui/button"
 import { t, useUILanguage } from "../lib/i18n"
+import { momentParts } from "../lib/localDates"
 
 export type OutboxStatus = {
   outbox: boolean
@@ -32,8 +33,13 @@ const heading = "text-xs font-semibold uppercase tracking-wider text-zinc-500"
  *  (preview first, then apply) and the full sync, which asks before a
  *  second one within 24 h (Channex admits one a day). */
 export default function ChannelConnectionActions({ row, reload }: { row: Row; reload: () => void }) {
-  useUILanguage()
+  const lang = useUILanguage()
   const connection = String(row.name)
+  /** A server moment as the reader writes it ("17-11 a las 09:15"); the raw value if it is not a date. */
+  const moment = (value: string) => {
+    const parts = momentParts(value, lang)
+    return parts ? t("{date} at {time}", parts) : value
+  }
   const [status, setStatus] = useState<OutboxStatus | null>(null)
   const [preview, setPreview] = useState<ImportPreview | null>(null)
   const [confirmSince, setConfirmSince] = useState<string | null>(null)
@@ -99,9 +105,9 @@ export default function ChannelConnectionActions({ row, reload }: { row: Row; re
           <dt className="text-zinc-500">{t("Failed changes")}</dt>
           <dd className={status.failed ? "text-rose-600" : ""}>{status.failed}</dd>
           <dt className="text-zinc-500">{t("Last push")}</dt>
-          <dd>{status.last_push ? `${status.last_push} · ${status.last_push_status}` : t("Never")}</dd>
+          <dd>{status.last_push ? `${moment(status.last_push)} · ${status.last_push_status}` : t("Never")}</dd>
           <dt className="text-zinc-500">{t("Last full sync")}</dt>
-          <dd>{status.last_full_sync || t("Never")}</dd>
+          <dd>{status.last_full_sync ? moment(status.last_full_sync) : t("Never")}</dd>
         </dl>
       )}
       {paused.map(([kind, seconds]) => (
@@ -120,8 +126,8 @@ export default function ChannelConnectionActions({ row, reload }: { row: Row; re
 
       {confirmSince !== null && (
         <div role="alertdialog" className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
-          <p>{t("The last full sync went out at {time}. The channel manager admits one a day: send another anyway?",
-            { time: confirmSince })}</p>
+          <p>{t("The last full sync went out on {date} at {time}. The channel manager admits one a day: send another anyway?",
+            momentParts(confirmSince, lang) ?? { date: confirmSince, time: "" })}</p>
           <div className="flex gap-2">
             <Button disabled={busy} onClick={() => { void fullSync(1) }}>{t("Send it")}</Button>
             <Button variant="ghost" disabled={busy} onClick={() => setConfirmSince(null)}>{t("Cancel")}</Button>

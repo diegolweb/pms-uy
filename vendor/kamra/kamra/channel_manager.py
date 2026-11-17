@@ -729,6 +729,43 @@ def _release(doc, reason: str, note: str) -> None:
 		frappe.flags.kamra_cancelling = False
 
 
+_PHONE_TAIL = 7  # a phone is found by its last digits, whatever the prefix or the separators
+_PHONE_SEP = r"[\s\-.()/]*"
+
+
+def _phone_pattern(phone) -> re.Pattern | None:
+	"""Any writing of the number that ends in its last digits: +598 99 123
+	456, +59899123456, 099 123 456..."""
+	digits = re.sub(r"\D", "", str(phone or ""))
+	if len(digits) < 4:
+		return None
+	tail = _PHONE_SEP.join(digits[-_PHONE_TAIL:])
+	return re.compile(r"\+?(?:\d" + _PHONE_SEP + r")*?" + tail + r"(?!\d)")
+
+
+def _scrub_guest(text: str, events: list[dict]) -> str:
+	"""An error text with the booking's guest taken out: the name (whole and
+	each word), the email (whole and its local part), the phone in any
+	writing and the guest's notes. For the Error Log of a delivery."""
+	secrets: set[str] = set()
+	patterns = []
+	for e in events or []:
+		name = str(e.get("guest_name") or "")
+		if name != "OTA Guest":  # the parser's placeholder, nobody's name
+			secrets.add(name)
+			secrets.update(name.split())
+		email = str(e.get("email") or "")
+		secrets.update((email, email.split("@")[0]))
+		secrets.add(str(e.get("notes") or ""))
+		if pattern := _phone_pattern(e.get("phone")):
+			patterns.append(pattern)
+	for pattern in patterns:
+		text = pattern.sub("[redacted]", text)
+	for secret in sorted((s.strip() for s in secrets if len(s.strip()) > 2), key=len, reverse=True):
+		text = re.sub(re.escape(secret), "[redacted]", text, flags=re.IGNORECASE)
+	return text
+
+
 def process_webhook_events(connection: str, payload: dict) -> None:
 	"""Enqueued worker for an inbound OTA webhook (one delivery = one booking).
 
@@ -747,8 +784,12 @@ def process_webhook_events(connection: str, payload: dict) -> None:
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- background webhook worker persists the completed booking before returning; reviewed as intentional
 	except Exception:
 		frappe.db.rollback()
+		# an explicit message: without one Frappe stores the traceback with
+		# its local variables (the payload) on a developer-mode site, and the
+		# error itself may quote the guest
 		frappe.log_error(
-			title=f"OTA webhook apply failed: {conn.name} / {booking_id}")
+			title=f"OTA webhook apply failed: {conn.name} / {booking_id}",
+			message=_scrub_guest(frappe.get_traceback(with_context=False), events))
 
 
 def _apply_booking_events(conn, events: list[dict]) -> list[dict]:
@@ -787,6 +828,7 @@ def _apply_booking_events(conn, events: list[dict]) -> list[dict]:
 FEED_JOB = "channex-feed::{connection}"
 _FEED_PAUSE = "channex_pause::{connection}"
 _FEED_ERROR = "channex_feed_error::{connection}"
+_REVISION_ERROR = "channex_revision_error::{connection}::{revision}"
 
 
 def enqueue_feed_pull(connection: str) -> None:
@@ -862,11 +904,18 @@ def _apply_revision(conn, row, rev: dict) -> None:
 
 
 def _fail_revision(conn, row, rev: dict, exc: Exception) -> None:
+	"""The row keeps the last error and its attempts; the Error Log gets one
+	entry an hour per revision (the cron retries it every minute)."""
 	frappe.db.rollback()
 	row.reload()
 	row.status = "Failed"
 	row.last_error = _scrub(f"{type(exc).__name__}: {exc}", rev)[:500]
 	row.save(ignore_permissions=True)
+	key = _REVISION_ERROR.format(connection=conn.name, revision=rev["id"])
+	if frappe.cache.get_value(key):
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- feed worker: the failure is recorded; the revision stays unacked in the feed
+		return
+	frappe.cache.set_value(key, 1, expires_in_sec=3600)
 	frappe.log_error(title=f"Channex revision {rev['id']} failed: {conn.name}",
 	                 message=_scrub(frappe.get_traceback(with_context=False), rev),
 	                 reference_doctype="Channel Booking Revision", reference_name=row.name)
@@ -901,6 +950,12 @@ def pull_feed(connection: str) -> dict:
 	until = frappe.cache.get_value(_FEED_PAUSE.format(connection=conn.name))
 	if until and float(until) > time.time():
 		return {"paused": max(1, math.ceil(float(until) - time.time()))}
+	if not conn.external_property_id:
+		# without filter[property_id] the feed is the whole account's, and an
+		# ack wipes another property's guest in Channex
+		_feed_error(conn, ValueError("No external_property_id: the Channex property id of this "
+		                             "connection is missing, so its feed is not read."))
+		return counts
 
 	try:
 		revisions = channex.fetch_feed(conn)
@@ -912,6 +967,13 @@ def pull_feed(connection: str) -> dict:
 
 	held_back = set()  # bookings whose earlier revision failed this pass
 	for rev in revisions:
+		if str(rev.get("property_id") or "") != str(conn.external_property_id):
+			# another property's revision (or nobody's): neither stored, applied nor acked
+			counts["skipped"] += 1
+			_feed_error(conn, ValueError(f"Revision {rev.get('id')} is for Channex property "
+			                             f"{rev.get('property_id')!r}, not {conn.external_property_id!r}: "
+			                             "skipped, not acked."))
+			continue
 		booking = rev.get("booking_id") or rev.get("ota_reservation_code") or rev["id"]
 		if booking in held_back:
 			counts["skipped"] += 1

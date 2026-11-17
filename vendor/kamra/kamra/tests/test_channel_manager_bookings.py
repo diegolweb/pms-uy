@@ -71,6 +71,39 @@ class ChannelManagerBookingTestCase(IntegrationTestCase):
 		self.assertEqual(cm._sellable(self.property, self.room_type, nowdate(), add_days(nowdate(), 1)), 0)
 		self.assertEqual(frappe.db.get_value("Reservation", original.name, "status"), "Confirmed")
 
+	def test_a_failed_apply_logs_without_the_guests_data(self):
+		"""The Error Log of a failed delivery keeps the booking id and the
+		error, not the guest: no local variables (the payload) and nothing of
+		the guest an error message may quote, in any of its writings."""
+		payload = self.payload()
+		payload["guest"] = {"firstName": "Lucía", "lastName": "Fernández",
+			"phone": "+598 99 123 456", "email": "lucia.fernandez@example.test"}
+		payload["specialRequests"] = "Cuna para el bebé"
+		quoted = ("Lucía Fernández (lucia.fernandez@example.test, +59899123456, 099 123 456)"
+		          " asked: Cuna para el bebé")
+		title = f"OTA webhook apply failed: {self.conn.name} / {self.ref}"
+		for developer_mode in (0, 1):
+			with self.subTest(developer_mode=developer_mode), \
+			     patch.dict(frappe.conf, {"developer_mode": developer_mode}), \
+			     patch.object(cm, "_apply_event", side_effect=frappe.ValidationError(quoted)):
+				before = frappe.db.count("Error Log", {"method": title})
+				self.deliver(payload)
+				logs = frappe.get_all("Error Log", filters={"method": title}, fields=["error"],
+				                      order_by="creation desc", limit=1)
+				self.assertEqual(frappe.db.count("Error Log", {"method": title}), before + 1)
+				error = logs[0].error
+				self.assertIn("ValidationError", error)
+				self.assertIn("_apply_event", error)
+				for secret in ("Lucía", "Fernández", "lucia.fernandez", "example.test", "123 456",
+				               "99123456", "099 123", "Cuna para el bebé"):
+					self.assertNotIn(secret, error)
+		self.assertFalse(frappe.db.exists("Reservation", {"property": self.property, "ota_ref": self.ref}))
+		# the same delivery, applied: AioSell's behaviour is unchanged
+		self.deliver(payload)
+		doc = self.received()
+		self.assertEqual(doc.status, "Confirmed")
+		self.assertIn("Cuna para el bebé", doc.special_requests)
+
 	def test_multi_room_refusal_keeps_all_lines_requested(self):
 		self.deliver(self.payload(rooms=2))
 		for i in range(2):

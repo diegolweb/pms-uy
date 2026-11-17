@@ -10,6 +10,7 @@ import { Badge } from "../components/ui/badge"
 import { Button } from "../components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { useT, t as translate, uiDateLocale } from "../lib/i18n"
+import { listDate } from "../lib/localDates"
 
 interface Restriction {
   name?: string
@@ -73,7 +74,7 @@ const dayLabel = (i: number) =>
   new Date(2024, 0, 1 + i).toLocaleDateString(uiDateLocale(undefined), { weekday: "short" })
 
 export default function ChannelRestrictions() {
-  const { t } = useT()
+  const { t, tn, lang } = useT()
   const property = getCurrentProperty()
   const [rows, setRows] = useState<Restriction[] | null>(null)
   const [roomTypes, setRoomTypes] = useState<Option[]>([])
@@ -147,7 +148,7 @@ export default function ChannelRestrictions() {
     if (r.closed_to_departure) out.push({ text: t("Closed to departure"), tone: "amber" })
     if (r.min_stay_arrival > 1) out.push({ text: t("Min. stay on arrival: {n} nights", { n: r.min_stay_arrival }), tone: "sky" })
     if (r.min_stay_through > 1) out.push({ text: t("Min. stay through: {n} nights", { n: r.min_stay_through }), tone: "sky" })
-    if (r.max_stay > 0) out.push({ text: t("Max. stay: {n} nights", { n: r.max_stay }), tone: "indigo" })
+    if (r.max_stay > 0) out.push({ text: tn(r.max_stay, "Max. stay: {n} night", "Max. stay: {n} nights"), tone: "indigo" })
     return out
   }
 
@@ -321,7 +322,7 @@ export default function ChannelRestrictions() {
               <div key={r.name} className={r.disabled ? "flex flex-wrap items-center gap-3 px-3 py-2.5 opacity-60" : "flex flex-wrap items-center gap-3 px-3 py-2.5"}>
                 <div className="min-w-48 text-sm">
                   <div className="font-medium tabular-nums text-zinc-900">
-                    {r.date_from === r.date_to ? r.date_from : `${r.date_from} → ${r.date_to}`}
+                    {r.date_from === r.date_to ? listDate(r.date_from, lang) : `${listDate(r.date_from, lang)} → ${listDate(r.date_to, lang)}`}
                   </div>
                   <div className="text-xs text-zinc-500">
                     {r.room_type ? labelOf(r.room_type) : t("All room types")} · {r.rate_plan ? labelOf(r.rate_plan) : t("All rate plans")} · {days(r)}

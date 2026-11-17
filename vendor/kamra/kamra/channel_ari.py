@@ -299,6 +299,22 @@ def _insert_row(values: dict) -> str:
 	return frappe.get_doc(dict(values, doctype="Channel ARI Outbox")).insert(ignore_permissions=True).name
 
 
+def _queued_here() -> set:
+	"""The outbox rows this transaction inserted (emptied on commit or
+	rollback). Only these can be joined: a Pending row another transaction
+	committed may be the one a worker is claiming right now, and this
+	transaction's snapshot would still show it Pending."""
+	rows = getattr(frappe.local, "kamra_ari_queued", None)
+	if rows is None:
+		rows = frappe.local.kamra_ari_queued = set()
+
+		def forget():
+			frappe.local.kamra_ari_queued = None
+		frappe.db.after_commit.add(forget)
+		frappe.db.after_rollback.add(forget)
+	return rows
+
+
 def _queue(connection: str, property: str, date_from, date_to, kinds: str, reason: str,
            full: bool) -> str | None:
 	window = _clip(date_from, date_to)
@@ -306,12 +322,16 @@ def _queue(connection: str, property: str, date_from, date_to, kinds: str, reaso
 		return None
 	values = {"connection": connection, "status": "Pending", "kinds": kinds, "full": int(bool(full)),
 	          "date_from": window[0], "date_to": window[1], "attempts": 0}
-	# the same change twice before the worker runs is one row (an insert
-	# fires both after_insert and on_update, a form saves twice...)
-	name = frappe.db.get_value("Channel ARI Outbox", values, "name")
+	# the same change twice in one transaction is one row (an insert fires
+	# both after_insert and on_update...). Never a row a worker claimed
+	# (Sending): what it sends was computed before this change.
+	queued = _queued_here()
+	name = frappe.db.get_value("Channel ARI Outbox", dict(values, name=("in", sorted(queued))),
+	                           "name") if queued else None
 	if not name:
 		name = _insert_row(dict(values, property=property, reason=(reason or "")[:140],
 		                        queued_at=_dt(_now())))
+		queued.add(name)
 	enqueue_flush(connection)
 	return name
 
@@ -430,8 +450,9 @@ def _backoff(rows: list, bumped: set, now: float) -> None:
 		bumped.add(r.name)
 		r.attempts = int(r.attempts or 0) + 1
 		wait = min(30 * 2 ** (r.attempts - 1), 1800)
+		r.next_attempt_at = _dt(now + wait)
 		frappe.db.set_value("Channel ARI Outbox", r.name, {
-			"attempts": r.attempts, "next_attempt_at": _dt(now + wait)}, update_modified=True)
+			"attempts": r.attempts, "next_attempt_at": r.next_attempt_at}, update_modified=True)
 
 
 def _fail(rows: list, detail: str) -> None:
@@ -450,26 +471,78 @@ def _rejected_detail(rejected: list[dict]) -> str:
 	return "Rejected: " + " | ".join(parts) if parts else ""
 
 
+_CLAIM_SECONDS = 600  # a worker that dies mid-call: its rows are taken again after this
+_ROW_FIELDS = ["name", "status", "date_from", "date_to", "kinds", "full", "queued_at", "next_attempt_at",
+               "attempts", "task_ids"]
+
+
+def _claim(connection: str, now: float) -> list:
+	"""Take the connection's due rows - Pending with their wait over, or
+	Sending whose worker died (its claim lapsed) - and mark them Sending
+	until the pass ends, committed BEFORE the cells are computed: a change
+	saved from here on gets a row of its own (_queue never joins a Sending
+	row) and goes out on the next pass. The locking read keeps a second
+	worker off the same rows."""
+	rows = frappe.db.get_values("Channel ARI Outbox",
+	                            {"connection": connection, "status": ("in", ("Pending", "Sending"))},
+	                            _ROW_FIELDS, as_dict=True, order_by="creation asc", for_update=True)
+	due = [r for r in rows if not r.next_attempt_at or _ts(r.next_attempt_at) <= now]
+	for r in due:
+		# a lapsed claim's wait was the claim itself: none left
+		r.next_attempt_at = r.next_attempt_at if r.status == "Pending" else None
+		r.status = "Sending"
+		frappe.db.set_value("Channel ARI Outbox", r.name, {
+			"status": "Sending", "next_attempt_at": _dt(now + _CLAIM_SECONDS)}, update_modified=True)
+	if due:
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- ari worker: the claim is seen before any cell is computed
+	return due
+
+
+def _release(rows: list, reread: bool = False) -> None:
+	"""The claimed rows this pass did not finish go back to Pending with
+	their own wait (the retry's, or the one they had). After a rollback the
+	row's status is read again: what the pass had not committed is undone."""
+	for r in rows:
+		if reread:
+			r.status = frappe.db.get_value("Channel ARI Outbox", r.name, "status")
+		if r.status != "Sending":
+			continue
+		r.status = "Pending"
+		frappe.db.set_value("Channel ARI Outbox", r.name, {
+			"status": "Pending", "next_attempt_at": r.next_attempt_at}, update_modified=True)
+
+
 def flush_outbox(connection: str) -> dict:
-	"""Worker (short queue). Joins the connection's Pending rows that are due,
+	"""Worker (short queue). Claims the connection's rows that are due,
 	merges their windows and, per kind: computes the cells, keeps what
 	differs from Channel ARI State (everything if a row asks for a full
-	sync), joins it into ranges and makes ONE call. Returns {kind: {"sent":
-	n} | {"paused": s} | {"waiting": s} | {"retry": s} | {"failed": detail}
-	| {"nothing": True}}."""
+	sync), joins it into ranges and makes ONE call. What it did not finish
+	goes back to Pending. Returns {kind: {"sent": n} | {"paused": s} |
+	{"waiting": s} | {"retry": s} | {"failed": detail} | {"nothing": True}}."""
 	conn = frappe.get_doc("Channel Manager Connection", connection)
 	result = {kind: {"nothing": True} for kind in KINDS}
 	if not conn.active or not _supports_outbox(conn.provider):
 		return result
+	now = _now()
+	rows = _claim(connection, now)
+	if not rows:
+		return result
+	try:
+		_flush(conn, rows, now, result)
+	except BaseException:
+		frappe.db.rollback()
+		_release(rows, reread=True)
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- ari worker: an unexpected error gives the claimed rows back
+		raise
+	_release(rows)
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- ari worker: the rows left for a later pass
+	return result
+
+
+def _flush(conn, rows: list, now: float, result: dict) -> None:
 	from kamra.channels import provider_for
 	provider = provider_for(conn.provider)
-	now = _now()
-	rows = [r for r in frappe.get_all("Channel ARI Outbox",
-	                                  filters={"connection": connection, "status": "Pending"},
-	                                  fields=["name", "date_from", "date_to", "kinds", "full", "queued_at",
-	                                          "next_attempt_at", "attempts", "task_ids"],
-	                                  order_by="creation asc")
-	        if not r.next_attempt_at or _ts(r.next_attempt_at) <= now]
+	connection = conn.name
 	bumped: set = set()
 	sent, failed = {}, []
 	for kind in KINDS:
@@ -524,7 +597,6 @@ def flush_outbox(connection: str) -> dict:
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- ari worker: what the provider accepted is recorded before the next call
 	if sent or failed:
 		_report(conn, sent, failed)
-	return result
 
 
 def _report(conn, sent: dict, failed: list) -> None:
@@ -543,8 +615,10 @@ def _report(conn, sent: dict, failed: list) -> None:
 
 def enqueue_ari_flushes() -> None:
 	"""Every minute: a flush for each connection with Pending rows (what was
-	waiting for its batch window, its pause or its retry)."""
-	for name in sorted(set(frappe.get_all("Channel ARI Outbox", filters={"status": "Pending"},
+	waiting for its batch window, its pause or its retry) or Sending ones (a
+	worker that died mid-call: the flush takes them once the claim lapses)."""
+	for name in sorted(set(frappe.get_all("Channel ARI Outbox",
+	                                      filters={"status": ("in", ("Pending", "Sending"))},
 	                                      pluck="connection"))):
 		enqueue_flush(name)
 
@@ -697,7 +771,7 @@ def outbox_status(connection: str) -> dict:
 			paused[kind] = math.ceil(float(until) - now)
 	count = lambda status: frappe.db.count("Channel ARI Outbox", {"connection": connection, "status": status})  # noqa: E731
 	return {"outbox": _supports_outbox(conn.provider),
-	        "pending": count("Pending"), "failed": count("Failed"), "paused": paused,
+	        "pending": count("Pending") + count("Sending"), "failed": count("Failed"), "paused": paused,
 	        "last_push": str(conn.last_push or ""), "last_push_status": conn.last_push_status or "",
 	        "last_full_sync": str(conn.last_full_sync or "")}
 

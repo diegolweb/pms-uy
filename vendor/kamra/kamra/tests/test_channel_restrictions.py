@@ -273,6 +273,74 @@ class DirectSaleRespectsRestrictionsTestCase(RestrictionFixture):
 				r.delete(ignore_permissions=True)
 				self.assertTrue(self.row(ci, add_days(ci, nights))["available"])
 
+	# HR-128: a maximum stay of one night is said in the singular, in every language; two or more, in the plural.
+	MAX_STAY_SAYS = {
+		"en": ("These dates allow a stay of at most 1 night.", "These dates allow a stay of at most 2 nights."),
+		"es": ("Para estas fechas, la estadía máxima es de 1 noche.",
+		       "Para estas fechas, la estadía máxima es de 2 noches."),
+		"pt": ("Para essas datas, a estadia máxima é de 1 noite.", "Para essas datas, a estadia máxima é de 2 noites."),
+	}
+
+	def speak(self, lang: str):
+		from frappe.translate import clear_cache
+		clear_cache()
+		frappe.local.lang = lang
+
+	def test_the_booking_page_says_one_night_in_the_singular(self):
+		for lang, sentences in self.MAX_STAY_SAYS.items():
+			for max_stay, sentence in zip((1, 2), sentences):
+				with self.subTest(lang=lang, max_stay=max_stay):
+					self.speak(lang)
+					r = self.restriction(max_stay=max_stay)
+					try:
+						self.assertEqual(self.row(self.day, add_days(self.day, max_stay + 1))["reason"], sentence)
+					finally:
+						r.delete(ignore_permissions=True)
+
+	def test_a_website_booking_over_the_maximum_says_one_night_in_the_singular(self):
+		for lang, sentences in self.MAX_STAY_SAYS.items():
+			for max_stay, sentence in zip((1, 2), sentences):
+				with self.subTest(lang=lang, max_stay=max_stay):
+					self.speak(lang)
+					r = self.restriction(max_stay=max_stay)
+					try:
+						with self.assertRaises(frappe.ValidationError) as refused:
+							self.reservation("Website", nights=max_stay + 1)
+						self.assertEqual(str(refused.exception), sentence)
+					finally:
+						r.delete(ignore_permissions=True)
+
+	def test_a_platform_booking_over_the_maximum_notes_one_night_in_the_singular(self):
+		says = {"en": ("maximum stay of 1 night", "maximum stay of 2 nights"),
+		        "es": ("estadía máxima de 1 noche", "estadía máxima de 2 noches"),
+		        "pt": ("estadia máxima de 1 noite", "estadia máxima de 2 noites")}
+		# each booking on its own dates: the twin has one room, and a platform booking stays booked
+		arrivals = iter(range(0, 60, 5))
+		for lang, notes in says.items():
+			for max_stay, note in zip((1, 2), notes):
+				with self.subTest(lang=lang, max_stay=max_stay):
+					self.speak(lang)
+					day = add_days(self.day, next(arrivals))
+					self.restriction(date_from=day, date_to=day, max_stay=max_stay)
+					res = self.reservation("OTA", nights=max_stay + 1, channel="Booking.com",
+						check_in_date=day, check_out_date=add_days(day, max_stay + 1))
+					self.assertTrue((res.special_requests or "").endswith(note), res.special_requests)
+
+	def test_a_maximum_of_one_night_under_the_minimum_is_refused_in_the_singular(self):
+		says = {"en": ("The maximum stay (1 night) cannot be shorter than the minimum stay (3 nights).",
+		               "The maximum stay (2 nights) cannot be shorter than the minimum stay (3 nights)."),
+		        "es": ("La estadía máxima (1 noche) no puede ser menor que la mínima (3 noches).",
+		               "La estadía máxima (2 noches) no puede ser menor que la mínima (3 noches)."),
+		        "pt": ("A estadia máxima (1 noite) não pode ser menor que a mínima (3 noites).",
+		               "A estadia máxima (2 noites) não pode ser menor que a mínima (3 noites).")}
+		for lang, sentences in says.items():
+			for max_stay, sentence in zip((1, 2), sentences):
+				with self.subTest(lang=lang, max_stay=max_stay):
+					self.speak(lang)
+					with self.assertRaises(frappe.ValidationError) as refused:
+						self.restriction(min_stay_through=3, max_stay=max_stay)
+					self.assertEqual(str(refused.exception), sentence)
+
 	def test_a_restriction_of_another_plan_leaves_the_direct_sale_open(self):
 		self.restriction(rate_plan=self.bb, stop_sell=1)
 		self.assertTrue(self.row(self.day, add_days(self.day, 2))["available"])

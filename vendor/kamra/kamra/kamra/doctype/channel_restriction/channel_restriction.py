@@ -26,6 +26,9 @@ class ChannelRestriction(Document):
 			frappe.throw(_("Set at least one restriction: stop sell, closed to arrival, "
 			               "closed to departure, a minimum stay of two nights or more, "
 			               "or a maximum stay."))
+		if cint(self.max_stay) == 1 and mins > 1:
+			frappe.throw(_("The maximum stay (1 night) cannot be shorter than the "
+			               "minimum stay ({0} nights).").format(mins))
 		if cint(self.max_stay) and cint(self.max_stay) < mins:
 			frappe.throw(_("The maximum stay ({0} nights) cannot be shorter than the "
 			               "minimum stay ({1} nights).").format(cint(self.max_stay), mins))
