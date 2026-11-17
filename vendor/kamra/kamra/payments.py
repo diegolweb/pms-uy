@@ -72,12 +72,19 @@ def create_payment_link(folio_name: str, amount: float | None = None,
 	        "currency": currency, "test_mode": bool(settings.test_mode)}
 
 
-def settle_payment_link(folio_name: str, link_id: str, amount: float) -> bool:
+def settle_payment_link(folio_name: str, link_id: str, amount: float,
+                        mode: str = "Payment Link",
+                        reference: str | None = None) -> bool:
 	"""Post money received through a link, once per link payment. Money that
 	arrives before the guest does is an Advance on the booking: it counts
-	toward the deposit and confirms a held booking."""
+	toward the deposit and confirms a held booking.
+
+	A gateway may report how the guest paid (mode) and which payment this
+	is (reference): a link can be paid more than once, so the payment's own
+	reference, when there is one, is what makes a retried event a no-op."""
+	key = reference or link_id
 	folio = frappe.get_doc("Folio", folio_name)
-	if amount <= 0 or any(p.reference == link_id for p in folio.payments):
+	if amount <= 0 or any(p.reference == key for p in folio.payments):
 		return False
 	res = frappe.get_doc("Reservation", folio.reservation) \
 		if folio.reservation else None
@@ -86,9 +93,9 @@ def settle_payment_link(folio_name: str, link_id: str, amount: float) -> bool:
 	folio.append("payments", {
 		"posting_date": nowdate(),
 		"payment_kind": "Advance" if pre_arrival else "Payment",
-		"mode": "Payment Link",
+		"mode": mode or "Payment Link",
 		"amount": amount,
-		"reference": link_id,
+		"reference": key,
 	})
 	from kamra.folio import _recalculate
 	_recalculate(folio)
@@ -103,6 +110,9 @@ def settle_payment_link(folio_name: str, link_id: str, amount: float) -> bool:
 		                    float(res.advance_paid or 0) + amount)
 		if res.status in ("Pending Payment", "Held"):
 			from kamra.api import _confirm_status
+			# set_value moved the booking on: saving the copy loaded above
+			# would fail its timestamp check and undo advance_paid.
+			res.reload()
 			_confirm_status(res)
 	from kamra.savings import log_action
 	log_action("payment_received", "Folio", folio.name, folio.property,
@@ -115,14 +125,134 @@ def settle_payment_link(folio_name: str, link_id: str, amount: float) -> bool:
 
 def handle_webhook(gateway: str, payload: bytes, headers: dict) -> dict:
 	"""Settle a gateway's "link paid" event. Idempotent: a retried event
-	never posts the same payment twice. A bad signature raises."""
+	never posts the same payment twice. A bad signature raises. The
+	provider may add mode and reference to what it parses (see
+	settle_payment_link)."""
 	from kamra import localization as loc
 
 	paid = loc.parse_payment_webhook(gateway, payload, headers, _settings)
 	if not paid:
 		return {"ignored": True}
-	posted = settle_payment_link(paid["folio"], paid["link_id"], paid["amount"])
+	posted = settle_payment_link(paid["folio"], paid["link_id"], paid["amount"],
+	                             mode=paid.get("mode") or "Payment Link",
+	                             reference=paid.get("reference"))
 	return {"ok": True, "folio": paid["folio"], "posted": posted}
+
+
+def gateway_refund_reference(kind: str, payment_reference: str,
+                             refund_id: str | None = None) -> str:
+	"""The reference of money a gateway gave back: it names the payment it
+	returns - "refund:<payment>:<refund id>" or "chargeback:<payment>" - so
+	refunded_for_payment can tell how much of each payment is left."""
+	return ":".join(x for x in (kind, payment_reference, refund_id) if x)
+
+
+def refunded_for_payment(folio, payment_reference: str) -> float:
+	"""How much of one gateway payment has already come back (refunds and
+	chargebacks posted by record_gateway_refund)."""
+	total = 0.0
+	for p in folio.payments:
+		if p.payment_kind != "Refund" or not p.reference:
+			continue
+		rest = p.reference.partition(":")[2]
+		if rest == payment_reference or rest.startswith(payment_reference + ":"):
+			total += -float(p.amount or 0)
+	return total
+
+
+def record_gateway_refund(folio_name: str, reference: str, amount: float,
+                          mode: str, reason: str) -> dict:
+	"""Post money that already went back through the gateway - a refund or a
+	chargeback - once per reference (see gateway_refund_reference).
+
+	Unlike a desk refund there is no till (nothing left the drawer), no PIN
+	and no guest-credit check: the money is gone, the folio has to say so.
+	A pre-arrival deposit is released from Deposit and advance_paid drops,
+	as with a desk refund. A closed folio is left alone."""
+	if float(amount) <= 0:
+		frappe.throw("Refund amount must be positive.")
+	doc = frappe.get_doc("Folio", folio_name)
+	if doc.status == "Closed":
+		return {"posted": False, "reason": "folio_closed"}
+	if any(p.reference == reference for p in doc.payments):
+		return {"posted": False, "reason": "duplicate"}
+	from kamra.api import _prearrival_advance_refund_ledger
+	from kamra.business_date import get_business_date
+	from kamra.localization import default_currency, money_text, pack_for
+	ledger = _prearrival_advance_refund_ledger(doc)
+	currency = (frappe.get_cached_value("Property", doc.property, "currency")
+	            or default_currency(pack_for(doc.property)))
+	doc.append("payments", {
+		"posting_date": get_business_date(doc.property),
+		"payment_kind": "Refund",
+		"mode": mode or "Payment Link",
+		"amount": -float(amount),
+		"reference": reference,
+		"currency": currency,
+	})
+	from kamra.folio import _recalculate
+	_recalculate(doc)
+	doc.save(ignore_permissions=True)
+	try:
+		from kamra.ledger import record_payment_ledger
+		record_payment_ledger(doc, doc.payments[-1].as_dict(), ledger=ledger)
+	except Exception:
+		frappe.log_error(title="ledger gateway-refund write failed")
+	if ledger == "Deposit" and doc.reservation:
+		paid = float(frappe.db.get_value(
+			"Reservation", doc.reservation, "advance_paid") or 0)
+		frappe.db.set_value("Reservation", doc.reservation, "advance_paid",
+		                    max(0.0, round(paid - float(amount), 2)))
+	from kamra.savings import log_action
+	log_action("folio_refund", "Folio", doc.name, doc.property,
+	           rationale=f"{money_text(doc.property, amount)} returned at the "
+	                     f"gateway ({reference}): {str(reason or '')[:100]}",
+	           agent_name="Payments", channel="API")
+	return {"posted": True, "balance": float(doc.balance or 0)}
+
+
+@frappe.whitelist(methods=["POST"])
+@require_roles("Finance", "Front Desk")
+def refund_via_gateway(folio: str, reference: str, amount: float,
+                       reason: str) -> dict:
+	"""Ask the property's gateway to give back (part of) one payment.
+
+	Posts nothing: the gateway reports the refund and record_gateway_refund
+	posts it, so the folio has a single writer for gateway money. Returns the
+	provider's {"status": "approved" | "pending" | "rejected", "message"?}."""
+	from kamra import localization as loc
+
+	amount = float(amount)
+	if amount <= 0:
+		frappe.throw("Refund amount must be positive.")
+	if not (reason or "").strip():
+		frappe.throw("A refund reason is required.")
+	doc = frappe.get_doc("Folio", folio)
+	if doc.status == "Closed":
+		frappe.throw("This folio is closed.")
+	paid = next((p for p in doc.payments
+	             if p.reference == reference and p.payment_kind != "Refund"
+	             and float(p.amount or 0) > 0), None)
+	if not paid:
+		frappe.throw(f"No gateway payment {reference} on this folio.")
+	left = float(paid.amount) - refunded_for_payment(doc, reference)
+	if amount > left + 0.005:
+		frappe.throw(f"Only {loc.money_text(doc.property, left)} of this payment "
+		             "is left to refund.")
+	settings = _settings(doc.property)
+	provider = loc._provider(loc.pack_for(doc.property), settings.gateway)
+	refund = getattr(provider, "refund", None)
+	if not callable(refund):
+		loc._not_offered(frappe._("Refunds through {0}").format(settings.gateway))
+	out = refund(settings, reference=reference, amount=amount,
+	             reason=reason.strip())
+	from kamra.savings import log_action
+	log_action("gateway_refund_requested", "Folio", doc.name, doc.property,
+	           rationale=f"{loc.money_text(doc.property, amount)} of {reference} "
+	                     f"asked back at {settings.gateway}: "
+	                     f"{(out or {}).get('status')}",
+	           channel="API")
+	return out
 
 
 def _webhook(gateway: str) -> dict:

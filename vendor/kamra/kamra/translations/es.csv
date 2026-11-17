@@ -1137,3 +1137,4 @@ Several rate plans of this room match no Kamra rate plan: map them by hand.,Vari
 The channel manager has {0} rooms of {1}; Kamra has {2}.,El gestor de canales tiene {0} habitaciones de {1}; Kamra tiene {2}.
 Rate plan {0} is priced per person; Kamra sends one price per room.,El plan de tarifa {0} tiene precio por persona; Kamra envía un precio por habitación.
 "Rate plan {0} adds a fixed amount: on the channels it applies every night, on direct bookings once per stay.","El plan de tarifa {0} suma un importe fijo: en las plataformas se aplica cada noche, en la venta directa una vez por estancia."
+Refunds through {0},La devolución por {0}

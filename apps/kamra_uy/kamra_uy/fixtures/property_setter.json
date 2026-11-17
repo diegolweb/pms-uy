@@ -42,5 +42,16 @@
   "property_type": "Text",
   "value": "Cash\nCard\nUPI\nBank Transfer\nCheque\nOther\nTarjeta local\nTarjeta extranjera",
   "module": "Kamra UY"
+ },
+ {
+  "doctype": "Property Setter",
+  "name": "Payment Gateway Settings-gateway-options",
+  "doc_type": "Payment Gateway Settings",
+  "doctype_or_field": "DocField",
+  "field_name": "gateway",
+  "property": "options",
+  "property_type": "Text",
+  "value": "Razorpay\nCashfree\nMercado Pago",
+  "module": "Kamra UY"
  }
 ]

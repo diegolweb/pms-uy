@@ -1,0 +1,88 @@
+{
+  "_source": "Generado con un guion de Python aparte (hmac + hashlib), no con kamra_uy.pure.core_signature.",
+  "secret": "kamra-uy-test-signature-secret-not-real",
+  "now": 1795000000,
+  "cases": [
+    {
+      "name": "buena",
+      "body": "{\"event_id\":\"evt_1\",\"type\":\"payment.approved\",\"property\":\"HR-TEST\",\"folio\":\"FOLIO-0001\",\"amount\":\"125.50\",\"note\":\"señal\"}",
+      "header": "t=1795000000,v1=92a2cd19a0df5181a453de92230646f163b1c3bbe1935d0c63b99e9add638e05",
+      "expect": [
+        true,
+        "ok"
+      ]
+    },
+    {
+      "name": "v1 alterada",
+      "body": "{\"event_id\":\"evt_1\",\"type\":\"payment.approved\",\"property\":\"HR-TEST\",\"folio\":\"FOLIO-0001\",\"amount\":\"125.50\",\"note\":\"señal\"}",
+      "header": "t=1795000000,v1=92a2cd19a0df5181a453de92230646f163b1c3bbe1935d0c63b99e9add638e00",
+      "expect": [
+        false,
+        "mismatch"
+      ]
+    },
+    {
+      "name": "t fuera de tolerancia",
+      "body": "{\"event_id\":\"evt_1\",\"type\":\"payment.approved\",\"property\":\"HR-TEST\",\"folio\":\"FOLIO-0001\",\"amount\":\"125.50\",\"note\":\"señal\"}",
+      "header": "t=1794999699,v1=0cf4972c48a8cf0a27d79808eb737f831af14d437163ec90318f0c01c0b6cdef",
+      "expect": [
+        false,
+        "stale"
+      ]
+    },
+    {
+      "name": "t en el borde de la tolerancia",
+      "body": "{\"event_id\":\"evt_1\",\"type\":\"payment.approved\",\"property\":\"HR-TEST\",\"folio\":\"FOLIO-0001\",\"amount\":\"125.50\",\"note\":\"señal\"}",
+      "header": "t=1795000300,v1=208d3a78ce568d1144fa9e45e910a549b0eb1c503abd03145b980ade2e0697ff",
+      "expect": [
+        true,
+        "ok"
+      ]
+    },
+    {
+      "name": "cabecera mal formada",
+      "body": "{\"event_id\":\"evt_1\",\"type\":\"payment.approved\",\"property\":\"HR-TEST\",\"folio\":\"FOLIO-0001\",\"amount\":\"125.50\",\"note\":\"señal\"}",
+      "header": "v1=92a2cd19a0df5181a453de92230646f163b1c3bbe1935d0c63b99e9add638e05,t=1795000000",
+      "expect": [
+        false,
+        "malformed"
+      ]
+    },
+    {
+      "name": "v1 en mayúsculas",
+      "body": "{\"event_id\":\"evt_1\",\"type\":\"payment.approved\",\"property\":\"HR-TEST\",\"folio\":\"FOLIO-0001\",\"amount\":\"125.50\",\"note\":\"señal\"}",
+      "header": "t=1795000000,v1=92A2CD19A0DF5181A453DE92230646F163B1C3BBE1935D0C63B99E9ADD638E05",
+      "expect": [
+        false,
+        "malformed"
+      ]
+    },
+    {
+      "name": "cabecera con salto de línea al final",
+      "body": "{\"event_id\":\"evt_1\",\"type\":\"payment.approved\",\"property\":\"HR-TEST\",\"folio\":\"FOLIO-0001\",\"amount\":\"125.50\",\"note\":\"señal\"}",
+      "header": "t=1795000000,v1=92a2cd19a0df5181a453de92230646f163b1c3bbe1935d0c63b99e9add638e05\n",
+      "expect": [
+        false,
+        "malformed"
+      ]
+    },
+    {
+      "name": "cuerpo con un byte cambiado",
+      "body": "{\"event_id\":\"evt_1\",\"type\":\"payment.approved\",\"property\":\"HR-TEST\",\"folio\":\"FOLIO-0001\",\"amount\":\"125.51\",\"note\":\"señal\"}",
+      "header": "t=1795000000,v1=92a2cd19a0df5181a453de92230646f163b1c3bbe1935d0c63b99e9add638e05",
+      "expect": [
+        false,
+        "mismatch"
+      ]
+    },
+    {
+      "name": "otro secreto",
+      "body": "{\"event_id\":\"evt_1\",\"type\":\"payment.approved\",\"property\":\"HR-TEST\",\"folio\":\"FOLIO-0001\",\"amount\":\"125.50\",\"note\":\"señal\"}",
+      "header": "t=1795000000,v1=362a9fde84d1a51c820315926dc39883eaae1974987fff64aa5f3a1445c08b47",
+      "expect": [
+        false,
+        "mismatch"
+      ]
+    }
+  ]
+}

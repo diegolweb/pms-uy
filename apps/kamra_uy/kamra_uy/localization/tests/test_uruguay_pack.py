@@ -114,6 +114,14 @@ class TestUruguayPack(AuditTestCase):
 		self.assertEqual(uruguay.calculate_room_tax(PROP_UY, None, 1000), Decimal("10"))
 		self.assertEqual(uruguay.fnb_tax_rate(PROP_UY), 22.0)
 
+	def test_mercado_pago_is_the_online_gateway(self):
+		self.assertEqual(localization.payment_gateways(localization.pack_for(PROP_UY)), ["Mercado Pago"])
+		from kamra_uy.payments import mercadopago
+
+		self.assertIs(uruguay.payment_provider("Mercado Pago"), mercadopago)
+		with self.assertRaises(frappe.ValidationError):
+			uruguay.payment_provider("Razorpay")
+
 	def test_front_desk_vocabulary(self):
 		self.assertEqual(localization.payment_modes(uruguay), UY_MODES)
 		self.assertEqual(localization.instant_payment_modes(uruguay), ["Tarjeta local", "Tarjeta extranjera"])

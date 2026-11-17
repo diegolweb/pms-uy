@@ -17,7 +17,8 @@ Qué cubre:
   `site_config.json`, clave `kamra_uy_bcu` = {"codes": {...}, "side": "TCC", "day_offset": 1}, sin tocar código.
 
 Qué NO cubre (otras fichas): el IVA 0 a no residentes, que decide el motor de IVA al facturar con el país de residencia
-del huésped (`Guest.residence_country`) y el modo de pago; el CFE y su envío a DGI; Mercado Pago.
+del huésped (`Guest.residence_country`) y el modo de pago; el CFE y su envío a DGI. Mercado Pago es la pasarela
+de `PAYMENT_GATEWAYS` (kamra_uy/payments, HR-30).
 
 Tasas y cotización pendientes del contador (HR-7).
 """
@@ -42,6 +43,18 @@ ID_TYPES = ["National ID", "DNI", "RG", "Passport", "Other"]
 PAYMENT_MODES = ["Cash", "Tarjeta local", "Tarjeta extranjera", "Bank Transfer"]
 # el origen de la tarjeta lo lee el motor de IVA al facturar; la caja las suma en su cajón de instantáneos
 INSTANT_PAYMENT_MODES = ["Tarjeta local", "Tarjeta extranjera"]
+
+# la pasarela de cobro en línea: Kamra pide el enlace y recibe los avisos a través del servicio de cobros (HR-30)
+PAYMENT_GATEWAYS = ["Mercado Pago"]
+
+
+def payment_provider(gateway: str):
+	"""El módulo de la pasarela (lo importa aquí dentro: el paquete se carga también donde no hace falta)."""
+	if gateway == "Mercado Pago":
+		from kamra_uy.payments import mercadopago
+
+		return mercadopago
+	frappe.throw(f"La pasarela {gateway} no se ofrece en Uruguay.")
 NOTICE_LANGUAGES = ["es", "pt", "en"]
 # borrador para el OK del fundador: hasta el CFE, este papel no debe parecer una factura fiscal
 INVOICE_TITLE = "Detalle de cuenta"
