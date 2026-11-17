@@ -18,6 +18,7 @@ def get_context(context):
 	asset hashes never need to be hard-coded — and inject window.csrf_token so
 	the SPA can POST to whitelisted endpoints once the user is logged in.
 	"""
+	_send_the_home_page_to_the_app()
 	index_path = frappe.get_app_path("kamra", "public", "frontend", "index.html")
 	if not os.path.exists(index_path):
 		frappe.throw(
@@ -44,6 +45,24 @@ def get_context(context):
 	context.spa_html = html
 	context.no_cache = 1
 	return context
+
+
+def _send_the_home_page_to_the_app():
+	"""With Website Settings.home_page = "kamra" (what install.py and
+	scripts/first_boot.py leave), Frappe serves this page in place at "/" and
+	"/index", where the SPA's router (basename /kamra) draws nothing. Send
+	those requests on to /kamra, query and all. The redirect is temporary
+	(302): browsers keep a 301 for good, and a hotel may set its own home
+	page later - then this page is no longer served at "/" at all."""
+	request = getattr(frappe.local, "request", None)
+	if not request:
+		return
+	path = request.path or "/"
+	if path == "/kamra" or path.startswith("/kamra/"):
+		return
+	query = frappe.safe_decode(request.query_string or b"")
+	frappe.flags.redirect_location = "/kamra" + (f"?{query}" if query else "")
+	raise frappe.Redirect(302)
 
 
 # Link previews and most crawlers never run the SPA, so the guest pages get

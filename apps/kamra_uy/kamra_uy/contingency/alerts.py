@@ -25,6 +25,7 @@ from kamra_uy.pure.contingency import (
 	alert_text,
 	changes,
 	group_ranges,
+	horizon_text,
 	instruction_text,
 	is_daily_report_hour,
 	notice_hash,
@@ -196,7 +197,7 @@ def _send_daily(property: str) -> int:
 	if alerts:
 		lines.append("Pocas habitaciones:")
 		lines += alerts
-	lines.append(f"Lo que debe tener cada extranet, del {result['start']} a {result['days']} días:")
+	lines.append(horizon_text(getdate(result["start"]), result["days"]))
 	lines += [range_text(*rng) for rng in group_ranges(
 		[(r["room_type_name"], getdate(r["date"]), tuple(r["instructions"])) for r in result["rows"]])]
 	_send(property, recipients, f"Contingencia: informe del día ({property})",

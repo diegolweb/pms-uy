@@ -403,3 +403,97 @@ class RestrictionScreenApiTestCase(RestrictionFixture):
 				save_restrictions(self.property, self.rows(1))
 		finally:
 			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test fixture
+
+
+class RestrictionPropertyScopeTestCase(RestrictionFixture):
+	"""HR-110: with kamra_strict_property_scope on, a Revenue Manager of another
+	hotel of the chain can neither read, save nor delete this hotel's
+	restrictions - through the screen API or Frappe's own REST reads."""
+
+	def setUp(self):
+		super().setUp()
+		from kamra.tests.audit_fixtures import ensure_user
+		self.mine = self.restriction(stop_sell=1).name
+		self.other = frappe.get_doc({"doctype": "Property",
+			"property_name": "TEST RESTR B " + frappe.generate_hash(length=8),
+			"country": "Uruguay", "currency": "USD"}).insert(ignore_permissions=True).name
+		self.theirs = frappe.get_doc({"doctype": "Channel Restriction", "property": self.other,
+			"date_from": self.day, "date_to": self.day, "stop_sell": 1}).insert(
+			ignore_permissions=True).name
+		self.manager = ensure_user("ut.restr.rm.other@example.test", ["Revenue Manager"])
+		self.only_hotel(self.other)
+		strict = patch.dict(frappe.conf, {"kamra_strict_property_scope": 1})
+		strict.start()
+		self.addCleanup(strict.stop)
+		self.addCleanup(frappe.set_user, "Administrator")  # nosemgrep: frappe-setuser -- test fixture
+
+	def only_hotel(self, prop: str | None):
+		frappe.db.delete("User Permission", {"user": self.manager, "allow": "Property"})
+		if prop:
+			frappe.get_doc({"doctype": "User Permission", "user": self.manager,
+				"allow": "Property", "for_value": prop}).insert(ignore_permissions=True)
+		frappe.clear_cache(user=self.manager)
+
+	def as_manager(self):
+		frappe.set_user(self.manager)  # nosemgrep: frappe-setuser -- the restricted persona
+
+	def calls_on(self, prop: str):
+		from kamra.channel_restrictions import delete_restrictions, list_restrictions, save_restrictions
+		row = {"date_from": self.day, "date_to": self.day, "closed_to_arrival": 1}
+		return {
+			"list": lambda: list_restrictions(prop),
+			"save": lambda: save_restrictions(prop, [row]),
+			"delete": lambda: delete_restrictions(prop, [self.mine]),
+		}
+
+	def rest_names(self) -> set[str]:
+		return set(frappe.get_list("Channel Restriction", pluck="name", limit_page_length=0,
+			filters={"property": ["in", [self.property, self.other]]}))
+
+	def assert_this_hotel_untouched(self):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test fixture
+		self.assertEqual(frappe.get_all("Channel Restriction", pluck="name",
+			filters={"property": self.property}), [self.mine])
+		self.assertEqual(frappe.db.get_value("Channel Restriction", self.mine,
+			["stop_sell", "closed_to_arrival"]), (1, 0))
+
+	def test_the_manager_works_on_their_own_hotel(self):
+		from kamra.channel_restrictions import delete_restrictions, list_restrictions, save_restrictions
+		self.as_manager()
+		self.assertEqual({r["name"] for r in list_restrictions(self.other)}, {self.theirs})
+		saved = save_restrictions(self.other, [{"date_from": self.day, "date_to": self.day,
+			"closed_to_arrival": 1}])["saved"]
+		self.assertEqual(delete_restrictions(self.other, saved), {"deleted": 1})
+
+	def test_list_save_and_delete_on_another_hotel_are_refused(self):
+		self.as_manager()
+		for what, call in self.calls_on(self.property).items():
+			with self.subTest(what), self.assertRaises(frappe.PermissionError):
+				call()
+		self.assert_this_hotel_untouched()
+
+	def test_their_own_hotel_with_this_hotels_row_touches_nothing(self):
+		from kamra.channel_restrictions import delete_restrictions, save_restrictions
+		self.as_manager()
+		self.assertEqual(delete_restrictions(self.other, [self.mine]), {"deleted": 0})
+		with self.assertRaises(frappe.ValidationError):
+			save_restrictions(self.other, [{"name": self.mine, "date_from": self.day,
+				"date_to": self.day, "stop_sell": 0, "closed_to_arrival": 1}])
+		self.assert_this_hotel_untouched()
+
+	def test_rest_does_not_list_or_read_another_hotels_restrictions(self):
+		self.as_manager()
+		self.assertEqual(self.rest_names(), {self.theirs})
+		self.assertFalse(frappe.has_permission("Channel Restriction", "read", self.mine))
+		with self.assertRaises(frappe.PermissionError):
+			frappe.client.get("Channel Restriction", self.mine)
+
+	def test_strict_scope_without_any_hotel_refuses_everything(self):
+		self.only_hotel(None)
+		self.as_manager()
+		for prop in (self.property, self.other):
+			for what, call in self.calls_on(prop).items():
+				with self.subTest(prop=prop, call=what), self.assertRaises(frappe.PermissionError):
+					call()
+		self.assertEqual(self.rest_names(), set())
+		self.assert_this_hotel_untouched()

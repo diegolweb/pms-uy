@@ -319,6 +319,11 @@ class TestContingencyAlerts(ContingencyCase):
 		self.assertEqual(self.mails(), before + 1)
 		self.assertIn("/contingencia?property=", self.last_mail())
 		self.assertIn("Booking.com, abrir con 4", self.last_mail())
+		# El punto 24 (D-HR-30): «en los próximos N días, desde el dd-mm», sin la fecha en ISO.
+		start = getdate(nowdate())
+		self.assertIn(f"en los próximos {self.settings.horizon_days or report.DEFAULT_HORIZON} días, desde el {start.strftime('%d-%m')}:",
+		              self.last_mail())
+		self.assertNotIn(f"del {start.isoformat()}", self.last_mail())
 
 	def test_the_daily_report_skips_a_property_with_the_mode_off(self):
 		self.settings.db_set("enabled", 0)

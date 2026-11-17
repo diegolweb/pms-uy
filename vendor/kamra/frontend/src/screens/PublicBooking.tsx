@@ -1568,7 +1568,10 @@ export default function PublicBooking() {
                       {locations.length > 1 ? t("Our Locations") : t("Location & Directions")}
                     </h2>
                     <div className="mt-4 space-y-4">
-                      {locations.map((loc, i) => (
+                      {locations.map((loc, i) => {
+                        // Without a street address, the city and the region that exist: never «City, null».
+                        const where = loc.address || [p.city, p.state].filter(Boolean).join(", ")
+                        return (
                         <div key={loc.name + i} className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-5">
                           {locations.length > 1 && (
                             <p className="text-sm font-semibold text-zinc-800">{loc.name}</p>
@@ -1583,10 +1586,12 @@ export default function PublicBooking() {
                               className="rounded-lg border border-zinc-200"
                             />
                           ) : null}
-                          <p className="flex items-start gap-2 text-sm font-medium text-zinc-800">
-                            <MapPin className="mt-0.5 size-4 shrink-0 text-brand-600" aria-hidden />
-                            {loc.address || `${p.city}, ${p.state}`}
-                          </p>
+                          {where && (
+                            <p className="flex items-start gap-2 text-sm font-medium text-zinc-800">
+                              <MapPin className="mt-0.5 size-4 shrink-0 text-brand-600" aria-hidden />
+                              {where}
+                            </p>
+                          )}
                           {loc.google_maps_url && (
                             <a href={loc.google_maps_url} target="_blank" rel="noreferrer"
                               className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline">
@@ -1608,7 +1613,8 @@ export default function PublicBooking() {
                             </div>
                           )}
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 </section>

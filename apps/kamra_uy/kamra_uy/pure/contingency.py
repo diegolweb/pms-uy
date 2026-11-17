@@ -142,6 +142,11 @@ def instruction_text(instruction: Instruction, day: date, room_type: str, free: 
 	return f"{verb} el {_day(day)} en {room_type}: {_left(free)}"
 
 
+def horizon_text(start: date, days: int) -> str:
+	"""El título de la lista del informe diario: «… en los próximos 120 días, desde el 26-12:» (D-HR-30, punto 24)."""
+	return f"Lo que debe tener cada extranet en los próximos {days} días, desde el {_day(start)}:"
+
+
 def alert_text(day: date, room_type: str, free: int) -> str:
 	"""La línea de «quedan pocas habitaciones»."""
 	if free <= 0:

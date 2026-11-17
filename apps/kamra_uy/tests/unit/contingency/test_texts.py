@@ -9,6 +9,7 @@ from kamra_uy.pure.contingency import (
 	Instruction,
 	action_label,
 	alert_text,
+	horizon_text,
 	instruction_text,
 	match_platform,
 	nights,
@@ -166,3 +167,10 @@ def test_consecutive_days_with_the_same_plan_become_one_range() -> None:
     ]
     assert range_text(*ranges[0]) == "Doble, del 26-12 al 27-12: Booking.com, abrir con 4 · Expedia, cerrar"
     assert range_text(*ranges[1]) == "Doble, el 28-12: Booking.com, cerrar · Expedia, cerrar"
+
+
+def test_the_daily_report_heading_says_the_next_days_from_a_dd_mm_date() -> None:
+	# El cambio del punto 24 (D-HR-30): la fecha en dd-mm como el resto del informe, nunca en ISO.
+	text = horizon_text(date(2026, 12, 26), 120)
+	assert text == "Lo que debe tener cada extranet en los próximos 120 días, desde el 26-12:"
+	assert "2026" not in text
