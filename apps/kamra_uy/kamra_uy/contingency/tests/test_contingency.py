@@ -368,3 +368,133 @@ class TestContingencyPageRenders(ContingencyCase):
 		self.assertEqual(status, 200)
 		self.assertIn("La sincronización con las plataformas está activa: el modo contingencia está apagado.", html)
 		self.assertNotIn("<table>", html)
+
+
+# --- HR-82: el Error Log sin variables locales, y la página y el botón limitados a la propiedad del usuario
+
+OTHER = "UT UY Contingencia Otra"
+THIRD = "UT UY Contingencia Tercera"
+SCOPED = "recepcion-otra-contingencia@roosevelt.test"
+GUEST_DATA = {"first_name": "Mariela", "last_name": "Quintana Ferreyra",
+              "email": "mariela.quintana@roosevelt.test", "phone": "+598 99 123 456"}
+
+
+class TestContingencyErrorLog(ContingencyCase):
+	"""Un aviso que falla deja su Error Log 'Contingencia' con la traza SOLA: con `log_error` sin `message`, Frappe
+	vuelca las variables locales de cada marco (en developer_mode; `frappe.get_traceback(with_context=True)`)."""
+
+	def new_logs(self, before: int) -> list[str]:
+		count = frappe.db.count("Error Log", {"method": alerts.LOG_TITLE}) - before
+		self.assertGreater(count, 0, "el fallo forzado no dejó ningún Error Log 'Contingencia'")
+		return frappe.get_all("Error Log", filters={"method": alerts.LOG_TITLE}, pluck="error",
+		                      order_by="creation desc", limit=count)
+
+	def before(self) -> int:
+		return frappe.db.count("Error Log", {"method": alerts.LOG_TITLE})
+
+	def test_a_failing_reservation_change_logs_no_guest_and_no_locals(self):
+		guest = frappe.get_doc({"doctype": "Guest", **GUEST_DATA}).insert(ignore_permissions=True)
+		before = self.before()
+		with patch.dict(frappe.conf, {"developer_mode": 1}), \
+		     patch.object(alerts, "_stays", side_effect=RuntimeError("caído")):
+			booked = make_reservation(PROP, self.room_type, str(self.night), str(add_days(self.night, 1)),
+			                          guest=guest.name)
+		self.assertTrue(frappe.db.exists("Reservation", booked.name))
+		for error in self.new_logs(before):
+			self.assertIn("RuntimeError: caído", error)
+			for secret in (*GUEST_DATA.values(), "99 123 456", guest.name, booked.name, "<Reservation"):
+				self.assertNotIn(secret, error)
+
+	def test_a_failing_recompute_logs_no_locals(self):
+		before = self.before()
+		with patch.dict(frappe.conf, {"developer_mode": 1}), \
+		     patch.object(report, "settings_for", side_effect=RuntimeError("caído")):
+			self.assertEqual(alerts.recompute(PROP, str(self.night), str(add_days(self.night, 1))), 0)
+		for error in self.new_logs(before):
+			self.assertIn("RuntimeError: caído", error)
+			self.assertNotIn(f"'{PROP}'", error)
+			self.assertNotIn(f"'{self.night}'", error)
+
+	def test_a_failing_daily_report_logs_no_locals(self):
+		before = self.before()
+		with patch.dict(frappe.conf, {"developer_mode": 1}), \
+		     patch.object(alerts, "is_daily_report_hour", side_effect=RuntimeError("caído")):
+			self.assertEqual(alerts.daily_report(), 0)
+		for error in self.new_logs(before):
+			self.assertIn("RuntimeError: caído", error)
+			self.assertNotIn(f"'{PROP}'", error)
+
+
+class TestContingencyPropertyScope(ContingencyCase):
+	"""Recepción limitada por User Permission a otra propiedad: ni la página ni el botón le sirven la de otro hotel, y
+	la lista para elegir solo trae las suyas."""
+
+	properties = (PROP, OTHER, THIRD)
+
+	def setUp(self):
+		super().setUp()
+		make_property(OTHER)
+		make_property(THIRD)
+		frappe.get_doc({"doctype": report.SETTINGS, "property": OTHER, "enabled": 1}).insert(ignore_permissions=True)
+		ensure_user(SCOPED, ["Front Desk"])
+
+	def tearDown(self):
+		super().tearDown()
+		frappe.clear_cache(user=SCOPED)  # la caché de User Permission vive fuera de la transacción deshecha
+
+	def limit_to(self, *properties: str):
+		for p in properties:
+			frappe.get_doc({"doctype": "User Permission", "user": SCOPED, "allow": "Property",
+			                "for_value": p}).insert(ignore_permissions=True)
+		frappe.clear_cache(user=SCOPED)
+		frappe.set_user(SCOPED)  # nosemgrep: frappe-setuser -- the restricted persona
+
+	def test_the_page_of_another_property_is_refused(self):
+		self.limit_to(OTHER)
+		with patch.dict(frappe.form_dict, {"property": PROP}, clear=True), self.assertRaises(frappe.PermissionError):
+			page.get_context(frappe._dict())
+
+	def test_mark_applied_on_another_property_is_refused(self):
+		self.limit_to(OTHER)
+		with self.assertRaises(frappe.PermissionError):
+			api.mark_applied(PROP)
+		self.assertFalse(frappe.db.exists("UY Contingency Snapshot", {"property": PROP}))
+
+	def test_without_a_property_the_page_opens_the_users_own(self):
+		self.limit_to(OTHER)
+		with patch.dict(frappe.form_dict, {}, clear=True):
+			context = frappe._dict()
+			page.get_context(context)
+		self.assertEqual(context.property, OTHER)
+
+	def test_the_choices_list_only_the_users_properties(self):
+		self.limit_to(OTHER, THIRD)
+		with patch.dict(frappe.form_dict, {}, clear=True):
+			context = frappe._dict()
+			page.get_context(context)
+		self.assertIsNone(context.property)
+		self.assertEqual(context.choices, [OTHER])
+
+	def test_strict_scope_without_permissions_lists_nothing(self):
+		frappe.set_user(SCOPED)  # nosemgrep: frappe-setuser -- the unscoped persona under strict scope
+		with patch.dict(frappe.conf, {"kamra_strict_property_scope": 1}), \
+		     patch.dict(frappe.form_dict, {}, clear=True):
+			context = frappe._dict()
+			page.get_context(context)
+		self.assertIsNone(context.property)
+		self.assertEqual(context.choices, [])
+
+	def test_the_rendered_page_of_another_property_is_403(self):
+		from frappe.utils import set_request
+		from frappe.website.serve import get_response
+
+		self.limit_to(OTHER)
+		saved = getattr(frappe.local, "request", None)
+		try:
+			set_request(method="GET", path="/contingencia", query_string=f"property={PROP}")
+			with patch.dict(frappe.form_dict, {"property": PROP}, clear=True):
+				response = get_response("contingencia")
+		finally:
+			frappe.local.request = saved
+		self.assertEqual(response.status_code, 403)
+		self.assertNotIn("Ya lo hice en las extranets", response.get_data(as_text=True))

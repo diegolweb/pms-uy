@@ -1,5 +1,6 @@
 """/contingencia (HR-34): qué abrir y qué cerrar en cada extranet mientras no haya sincronización. Solo personal del
-hotel (Front Desk, Hotel Admin o un administrador); un invitado o un usuario sin rol recibe 403."""
+hotel (Front Desk, Hotel Admin o un administrador); un invitado o un usuario sin rol recibe 403, y uno limitado a
+otras propiedades, también (`report.property_for_user`; la lista para elegir solo trae las suyas)."""
 
 from __future__ import annotations
 
@@ -39,6 +40,16 @@ def _view(row: dict, platforms: list[str]) -> dict:
 	return {**row, "day": f"{WEEKDAYS[day.weekday()]} {day.strftime('%d-%m-%Y')}", "cells": cells}
 
 
+def _choices() -> list[str]:
+	"""Las propiedades con modo contingencia entre las que el usuario puede ver (HR-82): las de sus User Permission,
+	o todas si no está limitado (`restricted_properties` da None)."""
+	from kamra.authz import restricted_properties
+
+	allowed = restricted_properties()
+	names = frappe.get_all(report.SETTINGS, pluck="property", order_by="property")
+	return names if allowed is None else [p for p in names if p in allowed]
+
+
 def get_context(context):
 	if frappe.session.user == "Guest" or not report.staff_roles_ok():
 		raise frappe.PermissionError("Solo el personal del hotel puede ver el modo contingencia.")
@@ -47,7 +58,7 @@ def get_context(context):
 	context.csrf_token = frappe.sessions.get_csrf_token()
 	property = report.property_for_user(frappe.form_dict.get("property"))
 	context.property = property
-	context.choices = [] if property else frappe.get_all(report.SETTINGS, pluck="property", order_by="property")
+	context.choices = [] if property else _choices()
 	context.off_message = ""
 	context.rows = []
 	context.platforms = []

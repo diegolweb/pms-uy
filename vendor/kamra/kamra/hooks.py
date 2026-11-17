@@ -78,7 +78,13 @@ scheduler_events = {
 		# every minute - outbound webhook retries that are due (backoff), and
 		# a Channex booking-revisions pull per connection (catches a missed webhook)
 		"* * * * *": ["kamra.webhooks.retry_due",
-		              "kamra.channel_manager.enqueue_channex_pulls"],
+		              "kamra.channel_manager.enqueue_channex_pulls",
+		              # the ARI outbox: what waited for its batch window, pause or retry
+		              "kamra.channel_ari.enqueue_ari_flushes"],
+		# 06:20 (03:20 in Montevideo on a UTC scheduler) - the ARI outbox's
+		# nightly sweep: only differences (the day entering the 500-day
+		# horizon, what a trigger missed); never a full sync on a timer
+		"20 6 * * *": ["kamra.channel_ari.nightly_sweep"],
 	},
 }
 
@@ -254,7 +260,7 @@ _PROPERTY_SCOPED = (
 	"Agent Action Log", "AI Assistant Settings", "Allowance Request", "Banquet Checklist Template",
 	"Banquet Dish", "Banquet Function Task", "Banquet Menu",
 	"Banquet Service Item", "Cancelled Invoice", "Cash Transfer", "Cashier", "Cashier Session", "Cashier Terminal",
-	"Cashier Transaction", "Channel Manager Connection", "Channel Restriction",
+	"Cashier Transaction", "Channel ARI Outbox", "Channel Manager Connection", "Channel Restriction",
 	"Channel Provider Connection", "City Ledger Account", "City Ledger Entry",
 	"Copilot Conversation", "Credit Note", "Discount Voucher", "Exchange Rate",
 	"Exchange Transaction", "Experience", "External POS Charge", "Folio", "Folio Ledger Entry",
@@ -315,6 +321,18 @@ doc_events["Reservation"] = {
 	              "kamra.webhooks.on_reservation_update"],
 	"on_trash": "kamra.realtime.notify",
 }
+
+# What moves availability or price queues an ARI change for the connections
+# with an outbox (kamra.channel_ari: only changes, in ranges, under the
+# provider's rate limit). Reservations go through on_reservation_change.
+for _doctype in ("Season", "Rate Plan", "Room Type", "Hurdle Rate", "Rate Guardrail",
+                 "Room", "Room Block", "Channel Room Mapping"):
+	_events = doc_events.setdefault(_doctype, {})
+	for _event in ("on_update", "after_insert", "on_trash"):
+		_current = _events.get(_event) or []
+		_events[_event] = ([_current] if isinstance(_current, str) else list(_current)) + [
+			"kamra.channel_ari.on_ari_source_change"]
+del _doctype, _events, _event, _current
 
 # Scheduled Tasks
 # ---------------

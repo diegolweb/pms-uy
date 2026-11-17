@@ -8,7 +8,8 @@
 - `recompute`: si alguna instrucción de esas fechas difiere de lo último que recepción marcó como hecho, o alguna fecha
   está en alerta, un correo SOLO con eso. No repite: guarda en caché la huella de lo avisado por fecha.
 
-Un aviso nunca hace fallar una reserva: todo va en `try` con `frappe.log_error(title="Contingencia")`.
+Un aviso nunca hace fallar una reserva: todo va en `try` y el fallo queda en un Error Log «Contingencia» con la
+traza SOLA (`_log_failure`, HR-82): sin `message`, Frappe guarda las variables locales de cada marco.
 """
 
 from __future__ import annotations
@@ -34,6 +35,13 @@ from kamra_uy.pure.contingency import (
 LOG_TITLE = "Contingencia"
 WATCHED = ("property", "room_type", "room", "status", "check_in_date", "check_out_date", "channel")
 NOTICE_TTL = 400 * 24 * 3600  # más que el horizonte máximo: una huella vive lo que su fecha
+
+
+def _log_failure() -> None:
+	"""El Error Log de un aviso que falló, sin variables locales (HR-82). `frappe.log_error` sin `message` usa
+	`get_traceback(with_context=True)`, que en developer_mode vuelca cada variable de cada marco: la reserva, la
+	propiedad y sus fechas. Aquí basta la traza."""
+	frappe.log_error(title=LOG_TITLE, message=frappe.get_traceback(with_context=False))
 
 
 def _notified_key(property: str) -> str:
@@ -89,7 +97,7 @@ def on_reservation_change(doc, method=None):
 				enqueue_after_commit=True, now=frappe.in_test,
 			)
 	except Exception:
-		frappe.log_error(title=LOG_TITLE)
+		_log_failure()
 
 
 def _notice_items(rows: list[dict], applied: dict) -> dict[str, tuple[list, list[str]]]:
@@ -115,7 +123,7 @@ def recompute(property: str, check_in: str, check_out: str) -> int:
 	try:
 		return _recompute(property, check_in, check_out)
 	except Exception:
-		frappe.log_error(title=LOG_TITLE)
+		_log_failure()
 		return 0
 
 
@@ -166,7 +174,7 @@ def daily_report() -> int:
 				continue
 			sent += _send_daily(name)
 		except Exception:
-			frappe.log_error(title=LOG_TITLE)
+			_log_failure()
 	return sent
 
 
