@@ -87,6 +87,11 @@ class PublicBookingTestCase(IntegrationTestCase):
 		def brand(name):
 			frappe.db.set_single_value("Website Settings", "app_name", name)
 			frappe.clear_document_cache("Website Settings", "Website Settings")
+			# get_website_settings reads client_cache, which clear_document_cache only
+			# invalidates through Redis: the local copy is dropped later, by a
+			# background thread, and a read before that still sees the old name.
+			frappe.client_cache.delete_value(
+				frappe.get_document_cache_key("Website Settings", "Website Settings"))
 			if hasattr(frappe.local, "website_settings"):
 				del frappe.local.website_settings
 			return site_info()["brand_name"]

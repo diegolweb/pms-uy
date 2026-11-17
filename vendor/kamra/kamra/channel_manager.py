@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import hmac
 import json
+import math
 import re
+import time
 from decimal import Decimal
 
 import frappe
@@ -299,12 +301,24 @@ def webhook(connection: str | None = None, **kwargs):
 	conn = frappe.get_doc("Channel Manager Connection", connection)
 	if not conn.active:
 		return {"ok": False, "reason": "connection_inactive"}
-	secret = conn.get_password("webhook_secret", raise_exception=False)
-	sent = (frappe.get_request_header("X-Webhook-Secret")
-	        if frappe.request else None) or kwargs.get("secret") or ""
-	# no secret configured = nothing to authenticate against: refuse
-	if not secret or not hmac.compare_digest(str(sent), secret):
-		frappe.throw("Webhook secret mismatch.", frappe.PermissionError)
+	signing = conn.get_password("webhook_signing_secret", raise_exception=False) \
+		if conn.provider == "Channex" else None
+	if signing:
+		# Channex's HMAC over the raw body; with a signing key set, the
+		# shared secret alone is not enough
+		from kamra.channels import channex
+		if not (frappe.request and channex.verify_signature(
+				signing, frappe.get_request_header("x-hmac-timestamp"),
+				frappe.get_request_header("x-hmac-signature-256"),
+				frappe.request.get_data())):
+			frappe.throw("Webhook signature mismatch.", frappe.PermissionError)
+	else:
+		secret = conn.get_password("webhook_secret", raise_exception=False)
+		sent = (frappe.get_request_header("X-Webhook-Secret")
+		        if frappe.request else None) or kwargs.get("secret") or ""
+		# no secret configured = nothing to authenticate against: refuse
+		if not secret or not hmac.compare_digest(str(sent), secret):
+			frappe.throw("Webhook secret mismatch.", frappe.PermissionError)
 
 	try:
 		payload = json.loads(frappe.request.data or b"{}") \
@@ -312,9 +326,37 @@ def webhook(connection: str | None = None, **kwargs):
 	except Exception:
 		payload = dict(kwargs)
 
+	if conn.provider == "Channex":
+		return _channex_signal(conn, payload)
 	events = provider_for(conn.provider).parse_webhook(conn, payload)
 	results = [_apply_event(conn, e) for e in events]
 	return {"ok": True, "results": results}
+
+
+_CHANNEX_BOOKING_EVENTS = ("booking", "booking_new", "booking_modification",
+                           "booking_cancellation", "non_acked_booking")
+_CHANNEX_UNMAPPED_EVENTS = ("booking_unmapped_room", "booking_unmapped_rate")
+
+
+def _channex_signal(conn, payload: dict) -> dict:
+	"""Channex's webhook only says the feed has something: queue the pull and
+	answer at once (Channex retries a 5xx, never a slow 200)."""
+	payload = payload if isinstance(payload, dict) else {}
+	event = str(payload.get("event") or "")
+	body = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+	property_id = payload.get("property_id") or body.get("property_id")
+	if property_id and property_id != conn.external_property_id:
+		return {"ok": True, "ignored": "other_property"}
+	if event in _CHANNEX_UNMAPPED_EVENTS:
+		# ids only: the payload may carry the guest
+		ids = {k: body.get(k) for k in ("booking_id", "booking_revision_id", "revision_id",
+		                                "room_type_id", "rate_plan_id") if body.get(k)}
+		frappe.log_error(title=f"Channex unmapped {conn.name}",
+		                 message=f"{event}: {json.dumps(ids, sort_keys=True)}")
+	if event in _CHANNEX_BOOKING_EVENTS or event in _CHANNEX_UNMAPPED_EVENTS:
+		enqueue_feed_pull(conn.name)
+		return {"ok": True, "queued": True}
+	return {"ok": True, "ignored": event}
 
 
 def _room_type_for(connection: str, external_id: str) -> str | None:
@@ -400,12 +442,58 @@ def _reservations_for_booking(property: str, booking_id: str) -> list[dict]:
 		as_dict=True)
 
 
+_CONTACT_LINE_EN = ("Contact from {0} could not be saved on the guest profile "
+                    "and is kept here: {1}")
+
+
+def _contact_line(channel: str | None, items: list[str]) -> str:
+	"""The notes line that keeps an OTA contact the guest profile can't
+	hold (#468 follow-up)."""
+	return _("Contact from {0} could not be saved on the guest profile and is kept here: {1}"
+	         ).format(channel, ", ".join(items))
+
+
+def _kept_contact_line(notes: str | None) -> str | None:
+	"""The contact line a reservation's notes already carry (#468 follow-up),
+	in English or translated, so a modify without contact keeps it."""
+	shapes = set()
+	for template in (_CONTACT_LINE_EN.format("\0", "\1"), _contact_line("\0", ["\1"])):
+		prefix, _sep, rest = template.partition("\0")
+		shapes.add((prefix, rest.partition("\1")[0]))
+	for line in (notes or "").splitlines():
+		if any(line.startswith(prefix) and middle in line for prefix, middle in shapes):
+			return line
+	return None
+
+
+def _sibling_reservation(property: str, e: dict):
+	"""A modify that turns a one-room booking into several (X -> X-0, X-1),
+	or several into one (X-0, X-1 -> X), renames its lines: the reservation
+	under the other name is the same stay, with its folio and payments."""
+	ref = e.get("ota_ref") or ""
+	booking_id = e.get("booking_id") or ""
+	if booking_id and ref == f"{booking_id}-0":
+		sibling = booking_id
+	elif booking_id and ref == booking_id:
+		sibling = f"{booking_id}-0"
+	else:
+		return None
+	return frappe.db.get_value(
+		"Reservation", {"property": property, "ota_ref": sibling,
+		                "status": ("in", ("Confirmed", "Requested"))},
+		["name", "status"], as_dict=True)
+
+
 def _apply_event(conn, e: dict, requested_reason: str | None = None) -> dict:
 	"""One normalized OTA event -> the same paths a human would take."""
 	e["channel"] = canonical_channel(e.get("channel")) or "OTA"
 	existing = frappe.db.get_value(
 		"Reservation", {"property": conn.property, "ota_ref": e["ota_ref"]},
 		["name", "status"], as_dict=True) if e.get("ota_ref") else None
+	if e["event"] == "modify" and not existing and e.get("ota_ref"):
+		# one room to two (X -> X-0, X-1) or back: the line under its sibling
+		# name is the same stay - keep it, with its folio and payments
+		existing = _sibling_reservation(conn.property, e)
 
 	if e["event"] == "cancel":
 		# A cancel frees the room(s) and - per the property's cancellation
@@ -459,7 +547,14 @@ def _apply_event(conn, e: dict, requested_reason: str | None = None) -> dict:
 		doc.check_out_date = e["check_out"]
 		doc.adults = e.get("adults") or 2
 		doc.children = e.get("children") or 0
-		doc.special_requests = e.get("notes") or None
+		doc.ota_ref = e["ota_ref"]
+		# #468 follow-up: keep this line on any rewrite of _apply_event - a
+		# modify carries the contact line too: the new one when the channel
+		# sends a contact the profile can't hold, else the one it already had.
+		unstorable = _unstorable_contact(e.get("phone"), e.get("email"), conn.property)
+		contact = (_contact_line(e.get("channel"), unstorable) if unstorable
+		           else _kept_contact_line(doc.special_requests))
+		doc.special_requests = "\n".join(s for s in (e.get("notes"), contact) if s) or None
 		doc.auto_price = 0 if requested_reason or e.get("total") else 1
 		if e.get("total") or requested_reason:
 			doc.amount_after_tax = e.get("total") or 0
@@ -485,10 +580,8 @@ def _apply_event(conn, e: dict, requested_reason: str | None = None) -> dict:
 	notes = e.get("notes") or ""
 	unstorable = _unstorable_contact(e.get("phone"), e.get("email"), conn.property)
 	if unstorable:
-		# #468 follow-up: keep this when the feed rewrites _apply_event (HR-15).
-		notes = "\n".join(s for s in (notes, _(
-			"Contact from {0} could not be saved on the guest profile and is kept here: {1}"
-		).format(e.get("channel"), ", ".join(unstorable))) if s)
+		# #468 follow-up: keep this line on any rewrite of _apply_event.
+		notes = "\n".join(s for s in (notes, _contact_line(e.get("channel"), unstorable)) if s)
 	doc = frappe.get_doc({
 		"doctype": "Reservation",
 		"property": conn.property,
@@ -603,26 +696,204 @@ def process_webhook_events(connection: str, payload: dict) -> None:
 	events = provider_for(conn.provider).parse_webhook(conn, payload)
 	if not events:
 		return
+	booking_id = events[0].get("booking_id") or events[0].get("ota_ref")
+	try:
+		_apply_booking_events(conn, events)
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- background webhook worker persists the completed booking before returning; reviewed as intentional
+	except Exception:
+		frappe.db.rollback()
+		frappe.log_error(
+			title=f"OTA webhook apply failed: {conn.name} / {booking_id}")
+
+
+def _apply_booking_events(conn, events: list[dict]) -> list[dict]:
+	"""One booking's events, all or nothing: apply each line, release the
+	lines a modify dropped, and on a capacity refusal roll back every line and
+	retain them all as Requested for staff to resolve. Returns _apply_event's
+	results; commits nothing - the caller does. Any other error propagates."""
+	if not events:
+		return []
 	action = events[0].get("event")
 	booking_id = events[0].get("booking_id") or events[0].get("ota_ref")
 	try:
-		for e in events:
-			_apply_event(conn, e)
+		results = [_apply_event(conn, e) for e in events]
 		if action == "modify":
 			_reconcile_booking_rooms(
 				conn, booking_id, keep={e.get("ota_ref") for e in events})
-		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- background webhook worker persists the completed booking before returning; reviewed as intentional
+		return results
 	except Exception as exc:
 		from kamra.kamra.doctype.reservation.reservation import InventoryRefused
-		capacity_refused = isinstance(exc, InventoryRefused)
+		if not (isinstance(exc, InventoryRefused) and action in ("book", "modify")):
+			raise
 		frappe.db.rollback()
-		if capacity_refused and action in ("book", "modify"):
-			for e in events:
-				_apply_event(conn, e, requested_reason="OTA overbooking — resolve")
-			frappe.db.commit()  # nosemgrep: frappe-manual-commit -- background worker persists the non-inventory booking for resolution
-			return
-		frappe.log_error(
-			title=f"OTA webhook apply failed: {conn.name} / {booking_id}")
+		return [_apply_event(conn, e, requested_reason="OTA overbooking — resolve")
+		        for e in events]
+
+
+# ---------------------------------------------------------------------------
+# Channex: the booking revisions feed
+# ---------------------------------------------------------------------------
+# Channex's webhook is a signal; the bookings are the unacked revisions of
+# its feed. One worker per connection reads them oldest first and, one
+# transaction per revision, applies it, commits and only then acks it:
+# Channex wipes the guest's contact data from an acked revision, and an
+# unacked one comes back in the feed, so a failure is retried from there.
+
+FEED_JOB = "channex-feed::{connection}"
+_FEED_PAUSE = "channex_pause::{connection}"
+_FEED_ERROR = "channex_feed_error::{connection}"
+
+
+def enqueue_feed_pull(connection: str) -> None:
+	"""One pull per connection at a time: the webhook and the cron share it."""
+	frappe.enqueue("kamra.channel_manager.pull_feed", queue="short",
+	               connection=connection, job_id=FEED_JOB.format(connection=connection),
+	               deduplicate=True)
+
+
+def enqueue_channex_pulls() -> None:
+	"""Every minute: a pull for each active Channex connection. The webhook
+	makes it instant; this catches whatever a webhook missed."""
+	for name in frappe.get_all("Channel Manager Connection",
+	                           filters={"provider": "Channex", "active": 1}, pluck="name"):
+		enqueue_feed_pull(name)
+
+
+def _scrub(text: str, revision: dict) -> str:
+	"""An error text with the revision's guest and card data taken out."""
+	customer = revision.get("customer") or {}
+	secrets = [str(v) for v in customer.values() if isinstance(v, str | int) and len(str(v)) > 2]
+	secrets += [str(v) for v in (revision.get("guarantee") or {}).values()
+	            if isinstance(v, str | int) and len(str(v)) > 2]
+	for key in ("notes", "raw_message"):
+		if isinstance(revision.get(key), str) and len(revision[key]) > 2:
+			secrets.append(revision[key])
+	for secret in sorted(set(secrets), key=len, reverse=True):
+		text = text.replace(secret, "[redacted]")
+	return text
+
+
+def _revision_row(conn, rev: dict):
+	"""The revision's row, created on first sight; attempts += 1, committed."""
+	rid = rev["id"]
+	if frappe.db.exists("Channel Booking Revision", rid):
+		row = frappe.get_doc("Channel Booking Revision", rid)
+	else:
+		row = frappe.get_doc({"doctype": "Channel Booking Revision", "revision_id": rid,
+			"connection": conn.name})
+	row.booking_id = rev.get("booking_id") or rev.get("ota_reservation_code") or ""
+	row.ota_name = rev.get("ota_name") or ""
+	row.revision_status = rev.get("status") if rev.get("status") in (
+		"new", "modified", "cancelled") else None
+	row.inserted_at = rev.get("inserted_at") or ""
+	row.attempts = (row.attempts or 0) + 1
+	if row.is_new():
+		row.insert(ignore_permissions=True)
+	else:
+		row.save(ignore_permissions=True)
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- feed worker: the attempt is recorded before the revision is applied
+	return row
+
+
+class _UnappliedRevision(Exception):
+	"""A revision the PMS cannot take as it stands (a room nobody mapped)."""
+
+
+def _apply_revision(conn, row, rev: dict) -> None:
+	"""Apply one revision and mark its row Applied in the same transaction."""
+	from kamra.channels import channex
+	results = _apply_booking_events(conn, channex.revision_events(rev))
+	unmapped = [r.get("external_room_id") for r in results if r.get("result") == "unmapped_room"]
+	if unmapped:
+		raise _UnappliedRevision(
+			f"Unmapped Channex room type(s): {', '.join(str(u) for u in unmapped)}")
+	row.status = "Applied"
+	row.applied_at = frappe.utils.now_datetime()
+	row.last_error = None
+	row.results = json.dumps([{"result": r.get("result"),
+		"reservation": r.get("reservation") or r.get("reservations")} for r in results])[:2000]
+	row.save(ignore_permissions=True)
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- feed worker: the booking and its row commit together, before the ack
+
+
+def _fail_revision(conn, row, rev: dict, exc: Exception) -> None:
+	frappe.db.rollback()
+	row.reload()
+	row.status = "Failed"
+	row.last_error = _scrub(f"{type(exc).__name__}: {exc}", rev)[:500]
+	row.save(ignore_permissions=True)
+	frappe.log_error(title=f"Channex revision {rev['id']} failed: {conn.name}",
+	                 message=_scrub(frappe.get_traceback(with_context=False), rev),
+	                 reference_doctype="Channel Booking Revision", reference_name=row.name)
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- feed worker: the failure is recorded; the revision stays unacked in the feed
+
+
+def _feed_error(conn, exc: Exception) -> None:
+	"""A feed that cannot be read (401, 5xx, timeout): one Error Log an hour."""
+	key = _FEED_ERROR.format(connection=conn.name)
+	if frappe.cache.get_value(key):
+		return
+	frappe.cache.set_value(key, 1, expires_in_sec=3600)
+	frappe.log_error(title=f"Channex feed {conn.name}", message=f"{type(exc).__name__}: {exc}"[:1000])
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- feed worker: keep the error log of a failed pass
+
+
+def _pause(conn, seconds: int) -> dict:
+	until = time.time() + seconds
+	frappe.cache.set_value(_FEED_PAUSE.format(connection=conn.name), until, expires_in_sec=seconds)
+	return {"paused": seconds}
+
+
+def pull_feed(connection: str) -> dict:
+	"""Worker (short queue): apply and ack the connection's unacked Channex
+	revisions, oldest first, at most one page a pass. Returns {"acked",
+	"failed", "skipped"}, or {"paused": seconds} while Channex rate-limits."""
+	from kamra.channels import channex
+	conn = frappe.get_doc("Channel Manager Connection", connection)
+	counts = {"acked": 0, "failed": 0, "skipped": 0}
+	if not conn.active or conn.provider != "Channex":
+		return counts
+	until = frappe.cache.get_value(_FEED_PAUSE.format(connection=conn.name))
+	if until and float(until) > time.time():
+		return {"paused": max(1, math.ceil(float(until) - time.time()))}
+
+	try:
+		revisions = channex.fetch_feed(conn)
+	except channex.ChannexRateLimited as exc:
+		return _pause(conn, exc.retry_after)
+	except Exception as exc:
+		_feed_error(conn, exc)
+		return counts
+
+	held_back = set()  # bookings whose earlier revision failed this pass
+	for rev in revisions:
+		booking = rev.get("booking_id") or rev.get("ota_reservation_code") or rev["id"]
+		if booking in held_back:
+			counts["skipped"] += 1
+			continue
+		row = _revision_row(conn, rev)
+		if row.status not in ("Applied", "Acked"):
+			try:
+				_apply_revision(conn, row, rev)
+			except Exception as exc:
+				_fail_revision(conn, row, rev, exc)
+				counts["failed"] += 1
+				held_back.add(booking)
+				continue
+		try:
+			channex.ack_revision(conn, rev["id"])
+		except channex.ChannexRateLimited as exc:
+			return _pause(conn, exc.retry_after)
+		except Exception as exc:
+			# applied and committed: the next pass only acks it
+			_feed_error(conn, exc)
+			continue
+		row.status = "Acked"
+		row.acked_at = frappe.utils.now_datetime()
+		row.save(ignore_permissions=True)
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- feed worker: record the ack
+		counts["acked"] += 1
+	return counts
 
 
 def _norm(s: str) -> str:

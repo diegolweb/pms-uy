@@ -375,8 +375,106 @@ def rates_include_tax(property: str) -> bool:
 	return bool(frappe.get_cached_doc("Property", property).get("rates_include_tax"))
 
 
+_RULE_DEFAULTS = {"min_stay_arrival": 1, "min_stay_through": 1, "max_stay": 0,
+                  "closed_to_arrival": False, "closed_to_departure": False,
+                  "stop_sell": False, "rule": None}
+
+
+def _stay_rule_sources(property: str, room_type: str | None, rate_plan: str | None,
+                       date_from, date_to, property_floor: bool):
+	"""(property floor, seasons, restrictions) for a date range, in at most
+	three queries: the property's floor and default rate plan together, then
+	the seasons, then the restrictions of this room type (or all) and plan."""
+	floor, default_plan = 0, None
+	if property_floor or not rate_plan:
+		row = frappe.db.sql(
+			"""SELECT p.minimum_nights,
+			          (SELECT rp.name FROM `tabRate Plan` rp
+			            WHERE rp.property = p.name AND rp.is_default = 1 AND rp.disabled = 0
+			            ORDER BY rp.creation LIMIT 1) AS default_plan
+			   FROM `tabProperty` p WHERE p.name = %(p)s""", {"p": property}, as_dict=True)
+		if row:
+			floor = int(row[0].minimum_nights or 0) if property_floor else 0
+			default_plan = row[0].default_plan
+	types = ("", room_type) if room_type else ("",)
+	seasons = frappe.db.sql(
+		"""SELECT season_name, start_date, end_date, days_of_week, minimum_nights,
+		          non_refundable, full_payment, no_small_group, is_holiday, advance_percent
+		   FROM `tabSeason`
+		   WHERE property = %(p)s AND disabled = 0 AND start_date <= %(to)s
+		     AND end_date >= %(from)s AND COALESCE(room_type, '') IN %(types)s""",
+		{"p": property, "from": date_from, "to": date_to, "types": types}, as_dict=True)
+	plan = rate_plan or default_plan
+	restrictions = frappe.db.sql(
+		"""SELECT name, date_from, date_to, days_of_week, stop_sell, closed_to_arrival,
+		          closed_to_departure, min_stay_arrival, min_stay_through, max_stay
+		   FROM `tabChannel Restriction`
+		   WHERE property = %(p)s AND disabled = 0 AND date_from <= %(to)s
+		     AND date_to >= %(from)s AND COALESCE(room_type, '') IN %(types)s
+		     AND COALESCE(rate_plan, '') IN %(plans)s
+		   ORDER BY creation""",
+		{"p": property, "from": date_from, "to": date_to, "types": types,
+		 "plans": ("", plan) if plan else ("",)}, as_dict=True)
+	return floor, seasons, restrictions
+
+
+def _rules_by_day(floor: int, seasons, restrictions, date_from, date_to) -> dict[str, dict]:
+	"""Per day: the stay_rules_by_day keys, plus the rule behind the arrival
+	minimum and the one behind the through minimum, kept apart so a stay
+	names the rule that actually binds it."""
+	start, end = getdate(date_from), getdate(date_to)
+	out = {}
+	for offset in range((end - start).days + 1):
+		day = type(start).fromordinal(start.toordinal() + offset)
+		abbr = day.strftime("%a").lower()
+		r = dict(_RULE_DEFAULTS, min_stay_through=max(1, floor),
+		         arrival_rule=None, through_rule=None)
+		for s in seasons:
+			if getdate(s.start_date) <= day <= getdate(s.end_date) and days_cover(s.days_of_week, abbr):
+				if int(s.minimum_nights or 0) > r["min_stay_through"]:
+					r["min_stay_through"], r["through_rule"] = int(s.minimum_nights), s.season_name
+		for x in restrictions:
+			if not (getdate(x.date_from) <= day <= getdate(x.date_to) and days_cover(x.days_of_week, abbr)):
+				continue
+			label = f"Restriction {x.name}"
+			if int(x.min_stay_arrival or 0) > r["min_stay_arrival"]:
+				r["min_stay_arrival"], r["arrival_rule"] = int(x.min_stay_arrival), label
+			if int(x.min_stay_through or 0) > r["min_stay_through"]:
+				r["min_stay_through"], r["through_rule"] = int(x.min_stay_through), label
+			if int(x.max_stay or 0) and (not r["max_stay"] or int(x.max_stay) < r["max_stay"]):
+				r["max_stay"] = int(x.max_stay)
+			for flag in ("closed_to_arrival", "closed_to_departure", "stop_sell"):
+				r[flag] = r[flag] or bool(x.get(flag))
+		r["rule"] = (r["arrival_rule"] if r["min_stay_arrival"] > r["min_stay_through"]
+		             else r["through_rule"])
+		out[str(day)] = r
+	return out
+
+
+def stay_rules_by_day(property: str, room_type: str | None, rate_plan: str | None, date_from, date_to,
+                      property_floor: bool = True) -> dict[str, dict]:
+	"""The stay rules of each day in [date_from, date_to], both included:
+	{"min_stay_arrival": int, "min_stay_through": int, "max_stay": int,
+	"closed_to_arrival": bool, "closed_to_departure": bool, "stop_sell": bool,
+	"rule": str | None}, keyed by ISO date.
+
+	Sources: Property.minimum_nights as a through minimum (when
+	property_floor), each active Season (its minimum_nights as a through
+	minimum, with its room type and days of week) and each active Channel
+	Restriction (blank or this room type; blank or this rate plan - with no
+	rate plan, blank or the property's default plan; its days of week).
+	Minimums take the highest, max_stay the lowest that is not 0, the flags
+	are OR-ed. Defaults: 1, 1, 0, False, False, False. `rule` is the season
+	name, or "Restriction <name>", that sets the highest minimum. At most
+	three queries, however many days."""
+	floor, seasons, restrictions = _stay_rule_sources(
+		property, room_type, rate_plan, date_from, date_to, property_floor)
+	return {day: {k: r[k] for k in _RULE_DEFAULTS}
+	        for day, r in _rules_by_day(floor, seasons, restrictions, date_from, date_to).items()}
+
+
 def stay_season_rules(property: str, check_in, check_out,
-                      room_type: str | None = None) -> dict:
+                      room_type: str | None = None, rate_plan: str | None = None) -> dict:
 	"""The strictest season rules a stay runs into.
 
 	Peak dates carry more than a price: New Year wants a two-night minimum,
@@ -387,17 +485,18 @@ def stay_season_rules(property: str, check_in, check_out,
 	Returns the longest minimum stay any covered night asks for, whether any
 	of them is non-refundable or wants full payment on booking, whether one
 	switches the small-group rate off, and the holiday the stay touches.
+
+	The stay restrictions join in (stay_rules_by_day, without the property's
+	floor): `minimum_nights` also takes each night's through minimum and the
+	arrival day's arrival minimum, and names its rule in `minimum_rule`;
+	`max_stay` and `closed_to_arrival` are the arrival day's,
+	`closed_to_departure` the check-out day's and `stop_sell` any night's.
+	`season` keeps its meaning: the season with the longest minimum.
 	"""
 	nights = max(1, int(date_diff(check_out, check_in) or 0))
-	seasons = frappe.get_all(
-		"Season",
-		filters={"property": property, "disabled": 0,
-		         "start_date": ("<=", add_days(check_in, nights - 1)),
-		         "end_date": (">=", check_in),
-		         "room_type": ("in", [room_type, "", None])},
-		fields=["season_name", "start_date", "end_date", "days_of_week",
-		        "minimum_nights", "non_refundable", "full_payment",
-		        "no_small_group", "is_holiday", "advance_percent"])
+	departure = check_out if getdate(check_out) > getdate(check_in) else add_days(check_in, nights)
+	_floor, seasons, restrictions = _stay_rule_sources(
+		property, room_type, rate_plan, check_in, departure, property_floor=False)
 	min_nights, non_refundable, named = 0, False, None
 	advance_pct, advance_season = 0.0, None
 	full_payment = no_small_group = False
@@ -421,11 +520,25 @@ def stay_season_rules(property: str, check_in, check_out,
 			no_small_group = no_small_group or bool(s.no_small_group)
 			if s.is_holiday and not holiday:
 				holiday = s.season_name
-	return {"minimum_nights": min_nights, "non_refundable": non_refundable,
+	days = _rules_by_day(0, seasons, restrictions, check_in, departure)
+	arrival = days[str(getdate(check_in))]
+	minimum, minimum_rule = min_nights, named
+	if arrival["min_stay_arrival"] > max(minimum, 1):
+		minimum, minimum_rule = arrival["min_stay_arrival"], arrival["arrival_rule"]
+	for i in range(nights):
+		night = days[str(getdate(add_days(check_in, i)))]
+		if night["min_stay_through"] > max(minimum, 1):
+			minimum, minimum_rule = night["min_stay_through"], night["through_rule"]
+	return {"minimum_nights": minimum, "non_refundable": non_refundable,
 	        "season": named, "nights": nights, "full_payment": full_payment,
 	        "no_small_group": no_small_group, "is_holiday": bool(holiday),
 	        "holiday": holiday, "advance_percent": advance_pct,
-	        "advance_season": advance_season}
+	        "advance_season": advance_season, "minimum_rule": minimum_rule,
+	        "max_stay": arrival["max_stay"],
+	        "closed_to_arrival": arrival["closed_to_arrival"],
+	        "closed_to_departure": days[str(getdate(departure))]["closed_to_departure"],
+	        "stop_sell": any(days[str(getdate(add_days(check_in, i)))]["stop_sell"]
+	                         for i in range(nights))}
 
 
 def advance_percent(property: str, stay_rules: dict) -> tuple[float, str | None]:
@@ -569,7 +682,7 @@ def quote(
 	small_ok = small_group_allows_stay(rt, check_in_date, check_out_date)
 	# holiday dates can charge a small party the house rate, as a weekend does
 	stay_rules = stay_season_rules(property, check_in_date, check_out_date,
-	                               room_type)
+	                               room_type, rate_plan)
 	if stay_rules["no_small_group"]:
 		small_ok = False
 
@@ -863,7 +976,9 @@ def quote(
 		# can say why a stay needs two nights or full payment
 		"stay_rules": {k: stay_rules[k] for k in (
 			"minimum_nights", "season", "non_refundable", "full_payment",
-			"is_holiday", "holiday", "advance_percent", "advance_season")},
+			"is_holiday", "holiday", "advance_percent", "advance_season",
+			"minimum_rule", "max_stay", "closed_to_arrival",
+			"closed_to_departure", "stop_sell")},
 		"is_holiday": stay_rules["is_holiday"],
 		"quoted_at": str(now_datetime()),
 	}

@@ -6349,3 +6349,34 @@ ZATCA: still needed for valid e-invoices - {fields}.,ZATCA: still needed for val
 Zero-rate and complimentary rooms,Zero-rate and complimentary rooms,غرف بسعر صفر ومجانية,Habitaciones con tarifa cero y de cortesía,screens/AuditPack.tsx,,translated
 Zero-rated on purpose,Zero-rated on purpose,خاضع لنسبة صفرية عمدًا,Tasa cero aplicada intencionalmente,screens/BanquetFunction.tsx,,translated
 Source code,Source code,,Código fuente,components/SourceCodeLink.tsx,,translated
+Stay Restrictions,Stay Restrictions,,Restricciones,screens/ChannelRestrictions.tsx,,translated
+Stay restrictions,Stay restrictions,,Restricciones de estadía,screens/ChannelRestrictions.tsx,,translated
+"Stop sell, closed arrival or departure, and minimum and maximum stay, by date. The booking page, front desk and channels all follow them.","Stop sell, closed arrival or departure, and minimum and maximum stay, by date. The booking page, front desk and channels all follow them.",,"Cierre de venta, llegada o salida cerrada y estadía mínima y máxima, por fecha. Las cumplen la web, la recepción y los canales.",screens/ChannelRestrictions.tsx,,translated
+New batch,New batch,,Nueva tanda,screens/ChannelRestrictions.tsx,,translated
+Edit restriction,Edit restriction,,Editar restricción,screens/ChannelRestrictions.tsx,,translated
+New batch of restrictions,New batch of restrictions,,Nueva tanda de restricciones,screens/ChannelRestrictions.tsx,,translated
+"Each row is one restriction. All rows are saved together: if one is wrong, none is saved.","Each row is one restriction. All rows are saved together: if one is wrong, none is saved.",,"Cada fila es una restricción. Todas se guardan juntas: si una está mal, no se guarda ninguna.",screens/ChannelRestrictions.tsx,,translated
+All rate plans,All rate plans,,Todos los planes tarifarios,screens/ChannelRestrictions.tsx,,translated
+Remove row,Remove row,,Quitar fila,screens/ChannelRestrictions.tsx,,translated
+None selected: every day.,None selected: every day.,,Ninguno marcado: todos los días.,screens/ChannelRestrictions.tsx,,translated
+Stop sell,Stop sell,,Cierre de venta,screens/ChannelRestrictions.tsx,,translated
+Closed to arrival,Closed to arrival,,Cerrado a la llegada,screens/ChannelRestrictions.tsx,,translated
+Closed to departure,Closed to departure,,Cerrado a la salida,screens/ChannelRestrictions.tsx,,translated
+Min. stay on arrival,Min. stay on arrival,,Estadía mín. al llegar,screens/ChannelRestrictions.tsx,,translated
+Min. stay through,Min. stay through,,Estadía mín. durante,screens/ChannelRestrictions.tsx,,translated
+Max. stay,Max. stay,,Estadía máx.,screens/ChannelRestrictions.tsx,,translated
+Min. stay on arrival: {n} nights,Min. stay on arrival: {n} nights,,Estadía mín. al llegar: {n} noches,screens/ChannelRestrictions.tsx,n,translated
+Min. stay through: {n} nights,Min. stay through: {n} nights,,Estadía mín. durante: {n} noches,screens/ChannelRestrictions.tsx,n,translated
+Max. stay: {n} nights,Max. stay: {n} nights,,Estadía máx.: {n} noches,screens/ChannelRestrictions.tsx,n,translated
+Add row,Add row,,Agregar fila,screens/ChannelRestrictions.tsx,,translated
+Save all,Save all,,Guardar todo,screens/ChannelRestrictions.tsx,,translated
+{n} restriction(s) saved.,{n} restriction(s) saved.,,Restricciones guardadas: {n}.,screens/ChannelRestrictions.tsx,n,translated
+Restriction turned on.,Restriction turned on.,,Restricción activada.,screens/ChannelRestrictions.tsx,,translated
+Restriction turned off.,Restriction turned off.,,Restricción desactivada.,screens/ChannelRestrictions.tsx,,translated
+Restriction deleted.,Restriction deleted.,,Restricción borrada.,screens/ChannelRestrictions.tsx,,translated
+No restrictions on these dates. Every day is open to sale with no minimum stay beyond the seasons'.,No restrictions on these dates. Every day is open to sale with no minimum stay beyond the seasons'.,,"No hay restricciones en estas fechas. Todos los días están a la venta, sin más estadía mínima que la de las temporadas.",screens/ChannelRestrictions.tsx,,translated
+Every day,Every day,,Todos los días,screens/ChannelRestrictions.tsx,,translated
+Turn on,Turn on,,Activar,screens/ChannelRestrictions.tsx,,translated
+Turn off,Turn off,,Desactivar,screens/ChannelRestrictions.tsx,,translated
+Delete for good,Delete for good,,Borrar definitivamente,screens/ChannelRestrictions.tsx,,translated
+default,default,,predeterminado,screens/ChannelRestrictions.tsx,,translated

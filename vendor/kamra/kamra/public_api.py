@@ -484,10 +484,28 @@ def search_stay(property: str, check_in_date: str, check_out_date: str,
 				row["plans"] = plans
 				need = max(int(rules.get("minimum_nights") or 0),
 				           int(prop.get("minimum_nights") or 1))
-				if nights < need:
+				# the stay rules of the dates (seasons and stay restrictions),
+				# the same ones a channel manager is sent
+				season = rules.get("season") if rules.get("minimum_rule") == rules.get("season") else None
+				from frappe.utils import formatdate
+				ci_date, co_date = formatdate(check_in_date), formatdate(check_out_date)
+				if rules.get("stop_sell"):
+					row.update(available=False, reason=frappe._(
+						"These dates are closed to new bookings."))
+				elif rules.get("closed_to_arrival"):
+					row.update(available=False, reason=frappe._(
+						"Arrivals are not possible on {0}.").format(ci_date))
+				elif rules.get("closed_to_departure"):
+					row.update(available=False, reason=frappe._(
+						"Departures are not possible on {0}.").format(co_date))
+				elif nights < need:
 					row.update(available=False, reason=(
-						f"These dates need a stay of at least {need} nights"
-						+ (f" ({rules['season']})." if rules.get("season") else ".")))
+						frappe._("These dates need a stay of at least {0} nights ({1}).").format(need, season)
+						if season else
+						frappe._("These dates need a stay of at least {0} nights.").format(need)))
+				elif rules.get("max_stay") and nights > int(rules["max_stay"]):
+					row.update(available=False, reason=frappe._(
+						"These dates allow a stay of at most {0} nights.").format(int(rules["max_stay"])))
 			except Exception:
 				pass  # still list the room type even if this date range cannot be quoted
 		results.append(row)

@@ -18,3 +18,21 @@ fixtures = [
 	{"dt": "Custom Field", "filters": [["module", "=", "Kamra UY"]]},
 	{"dt": "Property Setter", "filters": [["module", "=", "Kamra UY"]]},
 ]
+
+# Modo contingencia sin sincronización (HR-34). El informe diario sale a las 07:00 de la propiedad: Frappe evalúa los
+# cron en la zona del SISTEMA, así que el trabajo corre cada hora y kamra_uy.pure.contingency.is_daily_report_hour
+# decide. Cada cambio de reserva recalcula sus fechas y avisa solo de lo nuevo (kamra_uy/contingency/alerts.py).
+scheduler_events = {
+	"cron": {
+		"0 * * * *": ["kamra_uy.contingency.alerts.daily_report"],
+	},
+}
+
+doc_events = {
+	"Reservation": {
+		"after_insert": "kamra_uy.contingency.alerts.on_reservation_change",
+		"on_update": "kamra_uy.contingency.alerts.on_reservation_change",
+		"on_cancel": "kamra_uy.contingency.alerts.on_reservation_change",
+		"on_trash": "kamra_uy.contingency.alerts.on_reservation_change",
+	},
+}

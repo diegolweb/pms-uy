@@ -54,6 +54,7 @@ const Reports = lazy(() => import("./screens/Reports"))
 const ReportsHub = lazy(() => import("./screens/ReportsHub"))
 const InHouse = lazy(() => import("./screens/InHouse"))
 const RateCalendar = lazy(() => import("./screens/RateCalendar"))
+const ChannelRestrictions = lazy(() => import("./screens/ChannelRestrictions"))
 const RevenueReports = lazy(() => import("./screens/RevenueReports"))
 const OpsSLA = lazy(() => import("./screens/OpsSLA"))
 const Dashboard = lazy(() => import("./screens/Dashboard"))
@@ -319,6 +320,7 @@ export default function App() {
           <Route path="allowances" element={<AllowanceApprovals />} />
           <Route path="allowance-voucher/:name" element={<AllowanceVoucher />} />
           <Route path="rate-calendar" element={<RateCalendar />} />
+          <Route path="channel-restrictions" element={<ChannelRestrictions />} />
           <Route path="revenue-reports" element={<RevenueReports />} />
           <Route path="ops-sla" element={<OpsSLA />} />
           <Route path="whatsapp" element={<WhatsAppChat />} />

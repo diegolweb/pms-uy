@@ -288,8 +288,82 @@ class ChannelContactNeverDropsBookingTestCase(IntegrationTestCase):
 			"customer": {"name": "Prueba", "surname": "Webhook", "phone": "abc-123",
 			             "mail": "uy-wh@example.test"},
 			"rooms": [{"room_type_id": "uy-std", "occupancy": {"adults": 2}}]}
-		out = self.post_webhook({"event": "booking", "payload": payload}, "ut-secret")
-		self.assertEqual(out["results"][0]["result"], "booked", out)
+		# The webhook only queues the worker (Channex's own path is the revisions
+		# feed, test_channex_feed); the worker applies a payload that carries it.
+		with patch("frappe.enqueue") as enqueue:
+			out = self.post_webhook({"event": "booking", "payload": payload}, "ut-secret")
+		self.assertEqual(out, {"ok": True, "queued": True})
+		self.assertEqual(enqueue.call_count, 1)
+		with patch.object(frappe.db, "commit", return_value=None):
+			cm.process_webhook_events(self.conn.name, {"event": "booking", "payload": payload})
 		res = frappe.get_doc("Reservation", {"property": self.property, "ota_ref": ref})
 		self.assertEqual(frappe.db.get_value("Guest", res.guest, "phone") or "", "")
 		self.assertIn("abc-123", res.special_requests)
+
+	# ----------------------------------------------------------- HR-70
+	def test_hr70_a_modify_keeps_the_contact_line_with_the_new_notes(self):
+		e = self.ev(phone="abc-123", notes="Late arrival")
+		res = self.booked(e)
+		out = cm._apply_event(self.conn, dict(e, event="modify", notes="Early check-in"))
+		self.assertEqual(out["result"], "modified", out)
+		notes = frappe.db.get_value("Reservation", res.name, "special_requests")
+		self.assertIn("Early check-in", notes)
+		self.assertNotIn("Late arrival", notes)
+		self.assertIn("abc-123", notes)
+		self.assertLess(notes.index("Early check-in"), notes.index("abc-123"))
+		self.assertEqual(notes.count("could not be saved on the guest profile"), 1)
+
+	def test_hr70_a_modify_without_contact_keeps_the_line_it_had(self):
+		e = self.ev(phone="abc-123", notes="Late arrival")
+		res = self.booked(e)
+		cm._apply_event(self.conn, dict(e, event="modify", phone="", notes="Baby cot"))
+		notes = frappe.db.get_value("Reservation", res.name, "special_requests")
+		self.assertIn("Baby cot", notes)
+		self.assertIn("abc-123", notes)
+		self.assertEqual(notes.count("could not be saved on the guest profile"), 1)
+		cm._apply_event(self.conn, dict(e, event="modify", phone="", notes=""))
+		self.assertIn("abc-123", frappe.db.get_value("Reservation", res.name, "special_requests"))
+
+	# ----------------------------------------------------------- HR-71
+	def line(self, base: str, ref: str, event: str) -> dict:
+		return self.ev(event=event, ota_ref=ref, booking_id=base,
+			email=f"{base.lower()}@example.test")
+
+	def test_hr71_one_room_to_two_keeps_the_reservation_its_folio_and_payment(self):
+		from kamra import folio as folio_mod
+		frappe.get_doc({"doctype": "Room", "property": self.property,
+			"room_type": self.room_type, "room_number": "102"}).insert(ignore_permissions=True)
+		base = "TEST-UY-71-" + frappe.generate_hash(length=8)
+		res = self.booked(self.line(base, base, "book"))
+		folio = frappe.get_doc("Folio", folio_mod.open_folio(res))
+		folio.append("charges", {"posting_date": nowdate(), "charge_type": "Minibar",
+			"description": "Water", "qty": 1, "rate": 50, "amount": 50, "gst_rate": 0,
+			"auto_posted": 0})
+		folio.append("payments", {"amount": 300, "mode": "Cash", "posting_date": nowdate()})
+		folio.save(ignore_permissions=True)
+		cm._apply_booking_events(self.conn, [self.line(base, f"{base}-0", "modify"),
+			self.line(base, f"{base}-1", "modify")])
+		res.reload()
+		self.assertEqual((res.ota_ref, res.status), (f"{base}-0", "Confirmed"))
+		folio.reload()
+		self.assertEqual(folio.reservation, res.name)
+		self.assertEqual([c.description for c in folio.charges if c.charge_type == "Minibar"], ["Water"])
+		self.assertEqual([p.amount for p in folio.payments], [300])
+		second = frappe.db.get_value("Reservation",
+			{"property": self.property, "ota_ref": f"{base}-1"}, ["name", "status"], as_dict=True)
+		self.assertEqual(second.status, "Confirmed")
+		self.assertFalse(frappe.db.exists("Reservation", {"property": self.property, "ota_ref": base}))
+		self.assertFalse(frappe.db.exists("Reservation", {"property": self.property,
+			"ota_ref": ("like", base + "%"), "status": "Cancelled"}))
+
+	def test_hr71_two_rooms_to_one_keeps_the_first_and_releases_the_second(self):
+		frappe.get_doc({"doctype": "Room", "property": self.property,
+			"room_type": self.room_type, "room_number": "102"}).insert(ignore_permissions=True)
+		base = "TEST-UY-71-" + frappe.generate_hash(length=8)
+		booked = cm._apply_booking_events(self.conn, [self.line(base, f"{base}-0", "book"),
+			self.line(base, f"{base}-1", "book")])
+		first, second = (b["reservation"] for b in booked)
+		cm._apply_booking_events(self.conn, [self.line(base, base, "modify")])
+		self.assertEqual(frappe.db.get_value("Reservation", first, ["ota_ref", "status"]),
+			(base, "Confirmed"))
+		self.assertEqual(frappe.db.get_value("Reservation", second, "status"), "Cancelled")

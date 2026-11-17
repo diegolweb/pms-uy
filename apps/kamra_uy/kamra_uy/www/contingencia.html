@@ -1,0 +1,78 @@
+{% extends "templates/web.html" %}
+{% block title %}Modo contingencia{% endblock %}
+{% block page_content %}
+<style>
+  .cg { font-variant-numeric: tabular-nums; }
+  .cg table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+  .cg th, .cg td { padding: 0.35rem 0.5rem; border-bottom: 1px solid #e5e5e5; text-align: left; white-space: nowrap; }
+  .cg tr.changed td { background: #fff4d6; font-weight: 600; }
+  .cg tr.alert td.free { color: #b42318; font-weight: 700; }
+  .cg .open { color: #067647; }
+  .cg .sold { color: #667085; font-weight: 400; font-size: 0.85em; }
+  .cg .summary { margin: 1rem 0; }
+  .cg .error { color: #b42318; }
+  .cg .wrap { overflow-x: auto; }
+</style>
+<div class="cg">
+  <h1>Modo contingencia{% if property %}: {{ property }}{% endif %}</h1>
+  {% if not property %}
+    <p>Elija la propiedad:</p>
+    <ul>{% for p in choices %}<li><a href="/contingencia?property={{ p | urlencode }}">{{ p }}</a></li>{% endfor %}</ul>
+  {% elif off_message %}
+    <p>{{ off_message }}</p>
+  {% else %}
+    {% if missing_quotas %}<p class="error">{{ missing_quotas }}</p>{% endif %}
+    <div class="summary">
+      {% if report.pending_changes %}
+        <p><strong>Hay {{ report.pending_changes }} {{ "cambio" if report.pending_changes == 1 else "cambios" }} para poner en las extranets</strong> (resaltados arriba).</p>
+        <button id="cg-done" type="button" class="btn btn-primary">Ya lo hice en las extranets</button>
+        <span id="cg-msg" role="status"></span>
+      {% else %}
+        <p>Las extranets están al día con lo que marcó recepción.</p>
+      {% endif %}
+    </div>
+    {% if rows %}
+    <div class="wrap">
+    <table>
+      <thead><tr><th>Fecha</th><th>Tipo</th><th>Libres</th>{% for p in platforms %}<th>{{ p }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr class="{{ 'changed' if r.changed }} {{ 'alert' if r.alert }}">
+          <td>{{ r.day }}</td><td>{{ r.room_type_name }}</td><td class="free">{{ r.free }}</td>
+          {% for c in r.cells %}
+            <td class="{{ 'open' if c.open }}">{{ c.label }}{% if c.sold is not none %} <span class="sold">· vendidas {{ c.sold }}</span>{% endif %}</td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% endif %}
+  {% endif %}
+</div>
+{% if property and not off_message and report.pending_changes %}
+<script>
+(function () {
+  var button = document.getElementById("cg-done");
+  var msg = document.getElementById("cg-msg");
+  button.addEventListener("click", function () {
+    button.disabled = true;
+    msg.textContent = " Guardando…";
+    var body = new URLSearchParams({ property: {{ property | tojson }}, plan_hash: {{ report.plan_hash | tojson }} });
+    fetch("/api/method/kamra_uy.contingency.api.mark_applied", {
+      method: "POST", credentials: "same-origin", body: body,
+      headers: { "X-Frappe-CSRF-Token": {{ csrf_token | tojson }}, "Accept": "application/json" }
+    }).then(function (r) {
+      return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+    }).then(function (res) {
+      if (res.ok) { window.location.reload(); return; }
+      var text = "No se pudo guardar.";
+      try { text = JSON.parse(JSON.parse(res.data._server_messages)[0]).message; } catch (e) {}
+      msg.textContent = " " + text.replace(/<[^>]*>/g, " ");
+      button.disabled = false;
+    }).catch(function () { msg.textContent = " No se pudo guardar: revise la conexión."; button.disabled = false; });
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

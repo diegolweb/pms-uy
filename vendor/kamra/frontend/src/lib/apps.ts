@@ -8,6 +8,7 @@
 
 import {
   BadgePercent,
+  Ban,
   Share2,
   Network,
   MessageCircle,
@@ -255,6 +256,8 @@ export const APPS: AppDef[] = [
         keywords: ["bar", "best available rate", "base rate", "rack rate", "tariff", "pricing", "price by date"] },
       { to: "/rate-plans", label: "Rate Plans", icon: Tags },
       { to: "/seasons", label: "Seasons", icon: CalendarDays },
+      { to: "/channel-restrictions", label: "Stay Restrictions", icon: Ban,
+        keywords: ["stop sell", "CTA", "CTD", "min stay", "max stay"] },
       { to: "/guardrails", label: "Guardrails", icon: ShieldCheck },
       { to: "/vouchers", label: "Vouchers", icon: BadgePercent },
       { to: "/long-stay", label: "Long-stay Discounts", icon: BadgePercent,

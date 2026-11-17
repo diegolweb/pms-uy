@@ -9,7 +9,12 @@ from kamra import reports, tickets
 from kamra.tests.audit_fixtures import PROP_A, TODAY, AuditTestCase, ensure_user, make_property
 
 
-REAL_TODAY = str(now_datetime().date())  # tickets are stamped with the real clock
+def stamped_day(ticket: str) -> str:
+	"""The site-clock day the ticket was stamped on (`creation`), the day sla_report filters by.
+
+	Taken from the row, never at import: a date computed when the module loads can be a different day
+	by the time the test creates the ticket (a suite that crosses the site's midnight)."""
+	return str(frappe.db.get_value("Service Ticket", ticket, "creation").date())
 
 
 class TicketTrackingTestCase(AuditTestCase):
@@ -69,7 +74,8 @@ class TicketTrackingTestCase(AuditTestCase):
 		self.assertEqual(d["resolution_note"], "Delivered two towels")
 		self.assertIsNotNone(d["resolve_minutes"])
 		self.as_user("Administrator")
-		rep = reports.sla_report(PROP_A, REAL_TODAY, REAL_TODAY)
+		day = stamped_day(t)
+		rep = reports.sla_report(PROP_A, day, day)
 		self.assertIn(self.HK, [r["user"] for r in rep["by_resolver"]])
 
 	def test_reopen_needs_a_reason_and_is_counted(self):
@@ -122,7 +128,8 @@ class TicketTrackingTestCase(AuditTestCase):
 		self.assertIn(t, [r["name"] for r in old])
 		self.assertGreaterEqual(old[0]["age_hours"], 24 * 19)
 		self.as_user("Administrator")
-		rep = reports.sla_report(PROP_A, REAL_TODAY, REAL_TODAY)
+		today = str(now_datetime().date())  # after the ticket exists, on the site clock
+		rep = reports.sla_report(PROP_A, today, today)
 		self.assertIn(t, [r["name"] for r in rep["oldest_open"]])
 		self.assertGreaterEqual(dict((a["label"], a["count"]) for a in rep["aging"])["Over 7 days"], 1)
 

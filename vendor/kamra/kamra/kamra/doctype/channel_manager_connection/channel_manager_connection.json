@@ -19,6 +19,7 @@
   "pms_slug",
   "endpoint",
   "webhook_secret",
+  "webhook_signing_secret",
   "sb_sync",
   "sync_days",
   "last_push",
@@ -98,6 +99,12 @@
    "fieldtype": "Password",
    "label": "Webhook Secret",
    "description": "Shared secret the provider sends back on booking webhooks"
+  },
+  {
+   "fieldname": "webhook_signing_secret",
+   "fieldtype": "Password",
+   "label": "Webhook signing secret (HMAC)",
+   "description": "Channex signing key secret. When set, every webhook must carry a valid x-hmac-signature-256."
   },
   {
    "fieldname": "sb_sync",

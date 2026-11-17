@@ -309,7 +309,12 @@ class Reservation(Document):
 			self.rate_plan = plan
 
 	def validate_minimum_nights(self):
-		"""Property.minimum_nights is a hard floor for overnight stays."""
+		"""Property.minimum_nights is a hard floor for overnight stays, and the
+		stay rules of the dates (seasons and Channel Restrictions) apply on
+		top. A platform booking is never refused: the platform already sold
+		it, so a new one that breaks a rule says so in its notes. The booking
+		page is refused on any rule; the front desk on the minimum stay, and
+		only warned on the others (it can book over them)."""
 		if self.status in ("Cancelled", "No Show", "Checked Out", "Inquiry", "Quoted"):
 			return
 		# day-use is nights == 0; min nights applies to overnight only
@@ -318,6 +323,17 @@ class Reservation(Document):
 			return
 		min_n = cint(frappe.db.get_value(
 			"Property", self.property, "minimum_nights") or 1)
+		from kamra.pricing import stay_season_rules
+
+		def stay_rules():
+			return stay_season_rules(self.property, self.check_in_date,
+			                         self.check_out_date, self.room_type,
+			                         self.get("rate_plan"))
+
+		if self.source == "OTA":
+			if self.is_new():
+				self._note_platform_outside_stay_rules(stay_rules(), nights, min_n)
+			return
 		if min_n > 1 and nights < min_n:
 			frappe.throw(
 				_("This property requires a stay of at least {0} nights.").format(
@@ -325,20 +341,53 @@ class Reservation(Document):
 				title=_("Minimum stay"),
 			)
 
+		# A date rule set after the booking was made does not refuse a later,
+		# unrelated save (a check-in, a note): only a new stay or new dates.
+		if not (self.is_new() or any(self.has_value_changed(f) for f in (
+				"check_in_date", "check_out_date", "room_type", "rate_plan"))):
+			return
+		rules = stay_rules()
 		# Peak dates can ask for longer than the property's own floor - a
 		# two-night minimum over New Year, say - and the rule lives on the
 		# Season that already prices those nights.
-		from kamra.pricing import stay_season_rules
-
-		rules = stay_season_rules(self.property, self.check_in_date,
-		                          self.check_out_date, self.room_type)
 		if rules["minimum_nights"] > nights:
+			named = rules.get("minimum_rule") == rules["season"] and rules["season"]
 			frappe.throw(
 				_("{0} needs a stay of at least {1} nights.").format(
-					rules["season"] or _("These dates"),
+					named or _("These dates"),
 					rules["minimum_nights"]),
 				title=_("Minimum stay"),
 			)
+		broken = _closed_stay_rules(rules, nights, self.check_in_date, self.check_out_date)
+		if not broken:
+			return
+		if self.source == "Website":
+			frappe.throw(" ".join(broken), title=_("Stay restrictions"))
+		frappe.msgprint(
+			_("These dates break a stay restriction: {0} Saved anyway.").format(" ".join(broken)),
+			title=_("Stay restrictions"), indicator="orange")
+
+	def _note_platform_outside_stay_rules(self, rules: dict, nights: int, floor: int):
+		"""One line in a new platform booking's notes naming the stay rules it
+		breaks - the platform already sold it, so it is never refused."""
+		broken = []
+		minimum = max(rules["minimum_nights"], floor if floor > 1 else 0)
+		if nights < minimum:
+			broken.append(_("minimum stay of {0} nights").format(minimum))
+		if rules.get("closed_to_arrival"):
+			broken.append(_("closed to arrival"))
+		if rules.get("closed_to_departure"):
+			broken.append(_("closed to departure"))
+		if rules.get("stop_sell"):
+			broken.append(_("stop sell"))
+		if rules.get("max_stay") and nights > rules["max_stay"]:
+			broken.append(_("maximum stay of {0} nights").format(rules["max_stay"]))
+		if not broken:
+			return
+		line = _("Booked by {0} outside the stay rules: {1}").format(
+			self.channel or "OTA", ", ".join(broken))
+		if line not in (self.special_requests or ""):
+			self.special_requests = "\n".join(s for s in (self.special_requests, line) if s)
 
 	def validate_status_transition(self):
 		if self.is_new():
@@ -1012,3 +1061,20 @@ class Reservation(Document):
 			minutes_saved=minutes_saved if self.source == "AI Agent" else 0,
 			rationale=f"Reservation {self.name} moved to {self.status}",
 		)
+
+
+def _closed_stay_rules(rules: dict, nights: int, check_in, check_out) -> list[str]:
+	"""What the stay restrictions of these dates refuse, besides the minimum
+	stay: stop sell, closed to arrival or departure, the maximum stay. The
+	same wording search_stay gives the booking page."""
+	from frappe.utils import formatdate
+	out = []
+	if rules.get("stop_sell"):
+		out.append(_("These dates are closed to new bookings."))
+	if rules.get("closed_to_arrival"):
+		out.append(_("Arrivals are not possible on {0}.").format(formatdate(check_in)))
+	if rules.get("closed_to_departure"):
+		out.append(_("Departures are not possible on {0}.").format(formatdate(check_out)))
+	if rules.get("max_stay") and nights > int(rules["max_stay"]):
+		out.append(_("These dates allow a stay of at most {0} nights.").format(int(rules["max_stay"])))
+	return out

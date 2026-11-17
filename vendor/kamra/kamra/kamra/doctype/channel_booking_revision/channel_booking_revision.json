@@ -1,0 +1,158 @@
+{
+ "doctype": "DocType",
+ "name": "Channel Booking Revision",
+ "module": "Kamra",
+ "engine": "InnoDB",
+ "naming_rule": "By fieldname",
+ "autoname": "field:revision_id",
+ "in_create": 1,
+ "track_changes": 0,
+ "description": "Channex booking revisions the feed worker has applied and acknowledged. Ids only: no guest data.",
+ "field_order": [
+  "connection",
+  "revision_id",
+  "booking_id",
+  "ota_name",
+  "column_break_a",
+  "revision_status",
+  "inserted_at",
+  "status",
+  "attempts",
+  "section_break_b",
+  "applied_at",
+  "acked_at",
+  "results",
+  "last_error"
+ ],
+ "fields": [
+  {
+   "fieldname": "connection",
+   "fieldtype": "Link",
+   "label": "Connection",
+   "options": "Channel Manager Connection",
+   "reqd": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "revision_id",
+   "fieldtype": "Data",
+   "label": "Revision ID",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "booking_id",
+   "fieldtype": "Data",
+   "label": "Booking ID",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "ota_name",
+   "fieldtype": "Data",
+   "label": "OTA",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_a",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "revision_status",
+   "fieldtype": "Select",
+   "label": "Revision Status",
+   "options": "new\nmodified\ncancelled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "inserted_at",
+   "fieldtype": "Data",
+   "label": "Inserted At (Channex)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Received\nApplied\nAcked\nFailed",
+   "default": "Received",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "attempts",
+   "fieldtype": "Int",
+   "label": "Attempts",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_b",
+   "fieldtype": "Section Break",
+   "label": "Outcome"
+  },
+  {
+   "fieldname": "applied_at",
+   "fieldtype": "Datetime",
+   "label": "Applied At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "acked_at",
+   "fieldtype": "Datetime",
+   "label": "Acked At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "results",
+   "fieldtype": "Small Text",
+   "label": "Results",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Last Error",
+   "read_only": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "Revenue Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1,
+   "export": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "title_field": "booking_id",
+ "links": [],
+ "actions": [],
+ "states": [],
+ "allow_rename": 0,
+ "modified": "2026-11-16 12:00:00.000000"
+}

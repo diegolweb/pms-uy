@@ -39,8 +39,8 @@ Discount {0}%,Desconto {0}%
 Discount {0} per night,Desconto {0} por diária
 A discount needs a reason - it goes on the record.,Um desconto precisa de um motivo; ele fica no registro.
 Invoice,Fatura
-No property configured for this site.,Nenhuma propriedade configurada para este site.
-Online booking is not enabled for this property.,As reservas online não estão ativadas para esta propriedade.
+No property configured for this site.,Nenhuma acomodação configurada para este site.
+Online booking is not enabled for this property.,As reservas online não estão ativadas para esta acomodação.
 Check-out must be after check-in.,O check-out deve ser depois do check-in.
 Stays longer than 30 nights: please contact the hotel.,Estadias de mais de 30 noites: entre em contato com o hotel.
 Invalid link.,Link inválido.
@@ -51,19 +51,19 @@ The ID photo is too large - please retake it.,A foto do documento é grande dema
 ID type and number are required.,O tipo e o número do documento são obrigatórios.
 Check-in details were already verified by the desk.,A recepção já verificou os dados do check-in.
 Please accept the registration declaration to sign.,Aceite a declaração de registro para assinar.
-The desk has already verified your check-in details.,A recepção já verificou os seus dados de check-in.
+The desk has already verified your check-in details.,A recepção já verificou seus dados de check-in.
 Laundry pickup is available once you're checked in.,A coleta da lavanderia fica disponível depois do check-in.
 At least one adult is required.,É necessário pelo menos um adulto.
 Name and phone are required.,Nome e telefone são obrigatórios.
 Name and email are required.,Nome e e-mail são obrigatórios.
-Property not found.,Propriedade não encontrada.
+Property not found.,Acomodação não encontrada.
 Child ages must be between 0 and 17.,As idades das crianças devem estar entre 0 e 17.
 Kamra front-end is not built. Run <code>cd apps/kamra/frontend && yarn install && yarn build</code> (Frappe Cloud runs this automatically on deploy).,O front-end do Kamra não está compilado. Execute <code>cd apps/kamra/frontend && yarn install && yarn build</code> (o Frappe Cloud faz isso automaticamente no deploy).
 Set access instructions on the Property first.,Primeiro configure as instruções de acesso na propriedade.
 Cannot release access yet. Failed gates: {0},Ainda não é possível liberar o acesso. Verificações pendentes: {0}
 Enter the deposit amount.,Informe o valor do sinal.
 No deposit is due - enter the amount to request.,Não há sinal pendente: informe o valor a solicitar.
-"Hello {guest}, please pay the deposit of {cur} {amount} to secure your booking {ref} at {property} ({checkin} → {checkout}): {url}","Olá, {guest}! Para garantir a sua reserva {ref} em {property} ({checkin} → {checkout}), pague o sinal de {cur} {amount} aqui: {url}"
+"Hello {guest}, please pay the deposit of {cur} {amount} to secure your booking {ref} at {property} ({checkin} → {checkout}): {url}","Olá, {guest}! Para garantir sua reserva {ref} em {property} ({checkin} → {checkout}), pague o sinal de {cur} {amount} aqui: {url}"
 Only available while the payment gateway is in test mode.,Disponível só enquanto o gateway de pagamento está em modo de teste.
 No payment link has been sent for this booking.,Nenhum link de pagamento foi enviado para esta reserva.
 Only a housekeeping supervisor can pass an inspection or verify a clean.,Só um supervisor de governança pode aprovar uma inspeção ou verificar uma limpeza.
@@ -193,3 +193,9 @@ A {0} bag can't move to {1}.,Uma sacola {0} não pode passar para {1}.
 {0}: returned count must be between 0 and {1}.,{0}: a quantidade devolvida deve estar entre 0 e {1}.
 Invalid status change,Mudança de status inválida
 Cannot move reservation from {0} to {1}.,Não é possível passar a reserva de {0} para {1}.
+These dates are closed to new bookings.,Essas datas não estão disponíveis para reserva.
+Arrivals are not possible on {0}.,Não é possível chegar no dia {0}.
+Departures are not possible on {0}.,Não é possível encerrar a estadia no dia {0}.
+These dates need a stay of at least {0} nights ({1}).,"Para essas datas, a estadia mínima é de {0} noites ({1})."
+These dates need a stay of at least {0} nights.,"Para essas datas, a estadia mínima é de {0} noites."
+These dates allow a stay of at most {0} nights.,"Para essas datas, a estadia máxima é de {0} noites."

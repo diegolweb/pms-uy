@@ -75,8 +75,10 @@ scheduler_events = {
 		"45 4 * * *": ["kamra.hosting_enquiry_retention.purge_expired_hosting_enquiries"],
 		# 06:00 and 18:00 - warm the GitHub latest-release cache for the update nag
 		"0 6,18 * * *": ["kamra.health.poll_github_releases"],
-		# every minute - outbound webhook retries that are due (backoff)
-		"* * * * *": ["kamra.webhooks.retry_due"],
+		# every minute - outbound webhook retries that are due (backoff), and
+		# a Channex booking-revisions pull per connection (catches a missed webhook)
+		"* * * * *": ["kamra.webhooks.retry_due",
+		              "kamra.channel_manager.enqueue_channex_pulls"],
 	},
 }
 
@@ -252,7 +254,7 @@ _PROPERTY_SCOPED = (
 	"Agent Action Log", "AI Assistant Settings", "Allowance Request", "Banquet Checklist Template",
 	"Banquet Dish", "Banquet Function Task", "Banquet Menu",
 	"Banquet Service Item", "Cancelled Invoice", "Cash Transfer", "Cashier", "Cashier Session", "Cashier Terminal",
-	"Cashier Transaction", "Channel Manager Connection",
+	"Cashier Transaction", "Channel Manager Connection", "Channel Restriction",
 	"Channel Provider Connection", "City Ledger Account", "City Ledger Entry",
 	"Copilot Conversation", "Credit Note", "Discount Voucher", "Exchange Rate",
 	"Exchange Transaction", "Experience", "External POS Charge", "Folio", "Folio Ledger Entry",
