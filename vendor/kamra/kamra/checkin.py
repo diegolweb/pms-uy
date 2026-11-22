@@ -427,7 +427,9 @@ def _call_adapter(adapter, res, count: int) -> dict:
 		result = adapter.issue_key(req)
 	except Exception:
 		# a connector must not break check-in; the desk sees the message
-		frappe.log_error(title=f"Door lock {adapter.key} issue_key failed")
+		from kamra.privacy import guest_traceback
+		frappe.log_error(title=f"Door lock {adapter.key} issue_key failed",
+		                 message=guest_traceback(res))
 		return {"ok": False, "adapter": adapter.key, "manual": False,
 		        "message": _("The lock system did not answer. Make the keys at the encoder.")}
 	from kamra.savings import log_action

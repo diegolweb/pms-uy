@@ -39,3 +39,19 @@ def test_nonsense_rates_are_refused(bad) -> None:
         uy_tax.standard_rate(bad)
     with pytest.raises(ValueError):
         uy_tax.room_rate(bad, None)
+
+
+# --- el IVA con que se cotiza una noche (HR-239) ------------------------------------------------------------------
+@pytest.mark.parametrize(("room_type_pct", "property_pct"), [(None, None), (None, 10), (12, 11), ("", 0)])
+def test_a_price_without_iva_is_quoted_without_iva_for_everyone(room_type_pct, property_pct) -> None:
+    # D-HR-40 y su aviso A6: la cotización en línea y el enlace de pago van sin IVA para todos; el de cada noche lo
+    # decide core en el check-in (al extranjero, 0; al residente en temporada y al comprador con RUT, 10)
+    assert uy_tax.quoted_room_rate(False, room_type_pct, property_pct) == Decimal("0")
+
+
+@pytest.mark.parametrize(("room_type_pct", "property_pct", "expected"), [(None, None, "10"), (None, 11, "11"),
+                                                                          (12, 11, "12"), (0, 0, "10")])
+def test_a_price_with_iva_included_keeps_backing_it_out(room_type_pct, property_pct, expected) -> None:
+    # con `rates_include_tax` el precio configurado lleva el IVA: se sigue sacando como hoy, así que el neto (y el
+    # precio que Kamra manda al channel manager) no cambia
+    assert uy_tax.quoted_room_rate(True, room_type_pct, property_pct) == Decimal(expected)

@@ -4,10 +4,14 @@ Lo resuelve `kamra.localization.pack_for_country("Uruguay")` porque kamra_uy dec
 (hooks.py) y se instala después de kamra.
 
 Qué cubre:
-- IVA de cotización con la tasa de RESIDENTE: habitación 10 % y comida, bebida y servicios 22 %, configurables por
-  propiedad (`Property.uy_iva_room_pct` y `Property.uy_iva_standard_pct`). Un tipo de habitación con `tax_percent`
-  distinto de 0 manda sobre la tasa de habitación. Las tasas de la India de Kamra (`gst_rate_low`/`gst_rate_high`) no
-  se leen nunca: una propiedad nueva cotizaría al 5 % sin que nadie lo notara.
+- IVA: habitación 10 % y comida, bebida y servicios 22 %, configurables por propiedad (`Property.uy_iva_room_pct` y
+  `Property.uy_iva_standard_pct`). Un tipo de habitación con `tax_percent` distinto de 0 manda sobre la tasa de
+  habitación. Las tasas de la India de Kamra (`gst_rate_low`/`gst_rate_high`) no se leen nunca: una propiedad nueva
+  cotizaría al 5 % sin que nadie lo notara.
+- La noche se cotiza SIN IVA para todos (`calculate_room_tax` = 0; D-HR-40 y su aviso A6, HR-239): la reserva web, la
+  de recepción, su anticipo y el enlace de pago. El IVA de cada noche lo pone el check-in con lo que factura core
+  (`fiscal.connector.adjust_iva`, HR-28). Con `Property.rates_include_tax` se sigue sacando la tasa de habitación del
+  precio configurado, como hasta ahora; así el precio que Kamra manda al channel manager no cambia en ningún caso.
 - Etiquetas de la cuenta («IVA», «RUT»), su título y su pie, y el importe en letras en español.
 - Documentos (cédula como «National ID», DNI argentino, RG brasileño, pasaporte) y modos de pago «Tarjeta local» y
   «Tarjeta extranjera», que van en INSTANT_PAYMENT_MODES porque `localization.payment_modes` solo deja pasar los
@@ -16,8 +20,8 @@ Qué cubre:
   margen, su respaldo manual y su caché de siempre. Qué código, qué lado (TCC/TCV) y qué día usa se configura en
   `site_config.json`, clave `kamra_uy_bcu` = {"codes": {...}, "side": "TCC", "day_offset": 1}, sin tocar código.
 
-Qué NO cubre (otras fichas): el IVA 0 a no residentes, que decide el motor de IVA al facturar con el país de residencia
-del huésped (`Guest.residence_country`) y el modo de pago; el CFE y su envío a DGI. Mercado Pago es la pasarela
+Qué NO cubre (otras fichas): el IVA de cada noche, que decide el motor de IVA de core con el país de residencia del
+huésped (`Guest.residence_country`), las fechas y el comprador; el CFE y su envío a DGI. Mercado Pago es la pasarela
 de `PAYMENT_GATEWAYS` (kamra_uy/payments, HR-30).
 
 Tasas y cotización pendientes del contador (HR-7).
@@ -68,7 +72,8 @@ FX_FALLBACK = "Today's rates are unchanged; type them in on the Currency Desk."
 def _property_rates(property) -> dict:
 	if not property:
 		return {}
-	return frappe.db.get_value("Property", property, ["uy_iva_room_pct", "uy_iva_standard_pct"], as_dict=True) or {}
+	return frappe.db.get_value("Property", property, ["uy_iva_room_pct", "uy_iva_standard_pct", "rates_include_tax"],
+	                           as_dict=True) or {}
 
 
 def _number(value: Decimal):
@@ -76,8 +81,11 @@ def _number(value: Decimal):
 
 
 def calculate_room_tax(property, room_type_doc, nightly_rate) -> Decimal:
+	"""El IVA con que Kamra cotiza una noche (`kamra.pricing.room_gst_rate`): 0, salvo con precios con IVA incluido
+	(`uy_tax.quoted_room_rate`, HR-239)."""
+	rates = _property_rates(property)
 	room_type_pct = room_type_doc.get("tax_percent") if room_type_doc else None
-	return uy_tax.room_rate(room_type_pct, _property_rates(property).get("uy_iva_room_pct"))
+	return uy_tax.quoted_room_rate(bool(rates.get("rates_include_tax")), room_type_pct, rates.get("uy_iva_room_pct"))
 
 
 def fnb_tax_rate(property) -> float:

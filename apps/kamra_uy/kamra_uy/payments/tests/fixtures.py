@@ -44,6 +44,9 @@ class CobrosCase(AuditTestCase):
 
 	def setUp(self):
 		super().setUp()
+		# la cuenta saliente que encontró sendmail se guarda en frappe.local, que dura todo `run-tests`: sin vaciarla, la
+		# «UT Cobros» de un test anterior (ya deshecha) seguiría saliendo y un sitio sin correo (hr-gate) no se probaría
+		frappe.local.outgoing_email_account = {}
 		make_uy_property()
 		make_uy_property(OTHER)
 		self.rt = make_room_type(PROP, "UYC")
@@ -65,6 +68,10 @@ class CobrosCase(AuditTestCase):
 		                "enable_outgoing": 1, "default_outgoing": 1, "smtp_server": "smtp.example.com",
 		                "no_smtp_authentication": 1}).insert(ignore_permissions=True)
 		ensure_user(FINANCE, ["Finance"])
+
+	def tearDown(self):
+		frappe.local.outgoing_email_account = {}
+		super().tearDown()
 
 	def rows(self, folio: str) -> list:
 		return frappe.get_doc("Folio", folio).payments

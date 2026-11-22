@@ -40,7 +40,9 @@ def execute():
 		try:
 			lock(frappe.get_doc("Reservation", name))
 		except Exception:
-			frappe.log_error(title=f"Night-rate backfill failed: {name}")
+			from kamra.privacy import guest_traceback
+			frappe.log_error(title=f"Night-rate backfill failed: {name}",
+			                 message=guest_traceback(("Reservation", name)))
 
 
 def _stay_dates(doc) -> list[str]:

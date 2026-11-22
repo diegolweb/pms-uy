@@ -7,6 +7,7 @@ petición y la lectura de un aviso.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import UTC, datetime, timedelta
@@ -144,3 +145,115 @@ def payment_mode(event: dict) -> str:
     """El modo de pago de Kamra que trae el aviso, o "Payment Link" si no trae ninguno."""
     mode = event.get("mode")
     return mode if isinstance(mode, str) and mode.strip() else DEFAULT_MODE
+
+
+# --- el cobro con tarjeta y el botón del saldo que Kamra abre a la web (HR-222) --------------------------------------
+# Contrato de core: KICKOFF-HR-220 §7 (HR-221). La web nunca manda importe: lo pone el enlace de core.
+
+CARD_CODES = ("hold_expired", "link_not_payable", "card_not_enabled", "too_many_attempts", "unavailable", "invalid")
+CARD_STATUSES = ("approved", "pending", "in_process", "rejected")
+_KEPT_409 = ("link_not_payable", "card_not_enabled", "too_many_attempts")
+_LATER = ("upstream_unavailable", "idempotency_in_progress", "not_ready")
+# Los largos de `CardPaymentRequest` en core: lo que core rechazaría se rechaza aquí, sin preguntarle.
+TOKEN_MAX = 256
+METHOD_MAX = 40
+ISSUER_MAX = 40
+ID_TYPE_MAX = 20
+ID_NUMBER_MAX = 30
+DEVICE_MAX = 200
+
+
+def amount_left(advance_due, advance_paid) -> float:
+    """Lo que falta de lo que se paga al reservar (con «Full online», el total), redondeado al céntimo."""
+    left = Decimal(str(advance_due or 0)) - Decimal(str(advance_paid or 0))
+    return float(left.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def card_idempotency_key(link_id: str, card_token: str) -> str:
+    """La Idempotency-Key de un cobro con tarjeta: sha256 de "<link_id>:<token>". El mismo token, el mismo cobro."""
+    return hashlib.sha256(f"{link_id}:{card_token}".encode()).hexdigest()
+
+
+def wallet_idempotency_key(link_id: str, return_url: str | None) -> str:
+    """La del botón del saldo: sha256 de "wallet:<link_id>:<return_url>", la vuelta que va en el cuerpo ("" sin ella).
+
+    Core compara el cuerpo con el de la clave: la misma clave con otra vuelta (el huésped cambió de idioma) le daría
+    409 `idempotency_conflict` y el botón se moriría para ese enlace (HR-238). Con la vuelta en la clave, otra vuelta
+    es otra clave, y core devuelve igual la preferencia que guardó la primera vez: una por enlace."""
+    return hashlib.sha256(f"wallet:{link_id}:{return_url or ''}".encode()).hexdigest()
+
+
+def _text(value, name: str, maximum: int, required: bool = False) -> str:
+    """Un campo de texto recortado. El mensaje de error nombra el campo, nunca su valor (un token, un documento)."""
+    text = (value or "").strip() if isinstance(value, str) or value is None else str(value).strip()
+    if required and not text:
+        raise ValueError(f"falta {name}")
+    if len(text) > maximum:
+        raise ValueError(f"{name} es demasiado largo")
+    return text
+
+
+def card_payment_request(
+    *,
+    card_token: str,
+    payment_method_id: str,
+    issuer_id: str,
+    payer_email: str,
+    identification_type: str,
+    identification_number: str,
+    device_id: str,
+) -> dict:
+    """El cuerpo de `POST /v1/payments/links/{link_id}/card-payments`, sin importe. ValueError si core lo rechazaría."""
+    body = {"token": _text(card_token, "el token de la tarjeta", TOKEN_MAX, required=True),
+            "payment_method_id": _text(payment_method_id, "el medio de pago", METHOD_MAX, required=True)}
+    issuer = _text(issuer_id, "el emisor", ISSUER_MAX)
+    if issuer:
+        body["issuer_id"] = issuer
+    email = _text(payer_email, "el correo", EMAIL_MAX, required=True)
+    if not _EMAIL.fullmatch(email):
+        raise ValueError("el correo no es válido")
+    payer = {"email": email}
+    kind = _text(identification_type, "el tipo de documento", ID_TYPE_MAX)
+    number = _text(identification_number, "el documento", ID_NUMBER_MAX)
+    if kind and number:
+        payer["identification"] = {"type": kind, "number": number}
+    body["payer"] = payer
+    device = _text(device_id, "la huella del dispositivo", DEVICE_MAX)
+    if device:
+        body["device_id"] = device
+    return body
+
+
+def card_code(status: int | None, code: str) -> str:
+    """El código para la web de un error de core: el de su 409, «unavailable» si puede ir más tarde, si no «invalid».
+
+    `not_configured` (Kamra sin `hr_core_base_url`, o los ajustes sin clave) es una avería, no «sin tarjeta»: da
+    «unavailable», que deja su Error Log. «Esta casa no cobra con tarjeta» es el 409 `card_not_enabled` de core."""
+    if code == "not_configured":
+        return "unavailable"
+    if status == 409 and code in _KEPT_409:
+        return code
+    if status is None or status >= 500 or status == 429 or code in _LATER:
+        return "unavailable"
+    return "invalid"
+
+
+def core_error_is_logged(status: int | None, code: str) -> bool:
+    """Si un error de core deja Error Log: lo que recepción tiene que ver, no lo que la web le dice al huésped.
+
+    Una avería («unavailable») y el 409 `idempotency_conflict`: la misma Idempotency-Key con otro cuerpo es un fallo
+    de Kamra, no del huésped (la web lo da como «invalid», pero si llega hay que verlo; HR-238)."""
+    return card_code(status, code) == "unavailable" or (status == 409 and code == "idempotency_conflict")
+
+
+def card_result(reply: dict) -> dict:
+    """Lo que la web ve de la respuesta de core: estado, detalle, id del pago (el de core y el de Mercado Pago, que el
+    Status Screen Brick pide para el desafío 3DS) y el desafío; nada más."""
+    status = reply.get("status") if isinstance(reply, dict) else None
+    if status not in CARD_STATUSES:
+        return {"status": "error", "status_detail": None, "payment_id": None, "provider_payment_id": None,
+                "three_ds": None, "code": "unavailable"}
+    three_ds = reply.get("three_ds")
+    return {"status": status, "status_detail": reply.get("status_detail"), "payment_id": reply.get("payment_id"),
+            "provider_payment_id": reply.get("provider_payment_id"),
+            "three_ds": three_ds if isinstance(three_ds, dict) else None, "code": None}

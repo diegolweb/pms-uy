@@ -135,12 +135,19 @@ def _report_failure(action_type, row, exc, *, fallback=False) -> None:
 	detail = {k: v for k, v in row.items()
 	          if k not in ("before_snapshot", "after_snapshot")}
 	try:
-		frappe.logger("kamra.savings").error(
-			f"{title}: {type(exc).__name__}: {exc} | {detail}")
+		# the row's rationale and the error often name the guest of the
+		# record it is about: both leave without them
+		from kamra.privacy import scrub_people, withheld_traceback
+		ref = (row.get("reference_doctype"), row.get("reference_name"))
+		ref = ref if all(ref) else None
+		frappe.logger("kamra.savings").error(scrub_people(
+			f"{title}: {type(exc).__name__}: {exc} | {detail}", ref,
+			withheld=f"{title}: {type(exc).__name__}"))
 		frappe.log_error(
 			title=title,
-			message="".join(traceback.format_exception(exc))
-			+ f"\n\nRow: {frappe.as_json(detail)}",
+			message=scrub_people("".join(traceback.format_exception(exc))
+			                     + f"\n\nRow: {frappe.as_json(detail)}", ref,
+			                     withheld=withheld_traceback(exc)),
 			reference_doctype=row.get("reference_doctype") or None,
 			reference_name=row.get("reference_name") or None,
 		)
@@ -162,7 +169,8 @@ def mark_approved(log_name: str, approver: str) -> None:
 			},
 		)
 	except Exception:
-		frappe.log_error(title="Agent Action Log approve failed")
+		frappe.log_error(title="Agent Action Log approve failed",
+		                 message=frappe.get_traceback(with_context=False))
 
 
 def mark_rejected(log_name: str, approver: str, reason: str = "") -> None:
@@ -179,7 +187,8 @@ def mark_rejected(log_name: str, approver: str, reason: str = "") -> None:
 			updates["rationale"] = (existing + "\n\nRejected: " + reason).strip()
 		frappe.db.set_value("Agent Action Log", log_name, updates)
 	except Exception:
-		frappe.log_error(title="Agent Action Log reject failed")
+		frappe.log_error(title="Agent Action Log reject failed",
+		                 message=frappe.get_traceback(with_context=False))
 
 
 def _serialise_snapshot(value) -> str | None:

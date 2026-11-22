@@ -226,3 +226,155 @@ class TestGatewaySettlement(AuditTestCase):
 		self.gateway(object())  # a provider with no refund()
 		with self.assertRaises(frappe.ValidationError):
 			payments.refund_via_gateway(folio, "pay_1", 100, "Guest cancelled")
+
+	# --- the folio's Refund button (HR-124) ---------------------------------
+
+	def desk_payment(self, folio, amount, reference):
+		"""A payment typed at the desk, slip number and all - not the gateway's."""
+		doc = frappe.get_doc("Folio", folio)
+		doc.append("payments", {"posting_date": d(0), "payment_kind": "Payment", "mode": "Card",
+		                        "amount": amount, "reference": reference})
+		doc.save(ignore_permissions=True)
+
+	def key(self):
+		"""A fresh idempotency key: the cache that remembers answers is not
+		rolled back with the test, and a folio name can come round again."""
+		return frappe.generate_hash()
+
+	def refunding(self, *answers):
+		"""The property's gateway gives money back, answering each refund()
+		in turn (the last answer repeats)."""
+		provider = MagicMock()
+		provider.refund.side_effect = lambda *a, **k: dict(
+			answers[min(provider.refund.call_count, len(answers)) - 1])
+		self.gateway(provider)
+		return provider
+
+	def test_settle_marks_a_payment_the_gateway_names_as_its_own(self):
+		_, folio = self.booking()
+		payments.settle_payment_link(folio, "plink_1", 500, reference="pay_1")
+		payments.settle_payment_link(folio, "plink_2", 300)  # the link only: no payment to ask back
+		by_ref = {r.reference: r for r in self.rows(folio)}
+		self.assertEqual(by_ref["pay_1"].idempotency_key, payments.gateway_payment_key("pay_1"))
+		self.assertFalse(by_ref["plink_2"].idempotency_key)
+
+	def test_gateway_refunds_lists_the_gateway_s_payments_with_what_is_left(self):
+		_, folio = self.booking()
+		payments.settle_payment_link(folio, "plink_1", 500, reference="pay_1")
+		payments.settle_payment_link(folio, "plink_2", 300, reference="pay_2")
+		payments.settle_payment_link(folio, "plink_3", 80)
+		payments.record_gateway_refund(folio, "refund:pay_1:r1", 200, "Payment Link", "x")
+		payments.record_gateway_refund(folio, "refund:pay_2:r1", 300, "Payment Link", "x")
+		self.desk_payment(folio, 100, "4321")
+		self.refunding({"status": "approved"})
+		self.assertEqual(payments.gateway_refunds(folio), {
+			"gateway": "Razorpay",
+			"payments": [{"reference": "pay_1", "amount": 500.0, "left": 300.0}],
+		})
+
+	def test_gateway_refunds_is_empty_when_the_gateway_gives_nothing_back(self):
+		_, folio = self.booking()
+		payments.settle_payment_link(folio, "plink_1", 500, reference="pay_1")
+		frappe.local.message_log = []
+		# no gateway configured for the property: nothing to offer, nothing said
+		self.assertEqual(payments.gateway_refunds(folio), {"gateway": None, "payments": []})
+		self.assertEqual(frappe.local.message_log, [])
+		self.gateway(object())  # a provider with no refund()
+		self.assertEqual(payments.gateway_refunds(folio), {"gateway": None, "payments": []})
+
+	def test_gateway_refunds_of_a_closed_folio_is_empty(self):
+		_, folio = self.booking()
+		payments.settle_payment_link(folio, "plink_1", 500, reference="pay_1")
+		frappe.db.set_value("Folio", folio, "status", "Closed")
+		self.refunding({"status": "approved"})
+		self.assertEqual(payments.gateway_refunds(folio), {"gateway": None, "payments": []})
+
+	def test_a_refund_asked_twice_with_one_key_reaches_the_gateway_once(self):
+		_, folio = self.booking()
+		payments.settle_payment_link(folio, "plink_1", 500, reference="pay_1")
+		provider = self.refunding({"status": "pending", "message": "asked"})
+		key = self.key()
+		first = payments.refund_via_gateway(folio, "pay_1", 200, "Guest cancelled", idempotency_key=key)
+		again = payments.refund_via_gateway(folio, "pay_1", 200, "Guest cancelled", idempotency_key=key)
+		self.assertEqual(provider.refund.call_count, 1)
+		self.assertEqual(first, {"status": "pending", "message": "asked"})
+		self.assertEqual(again, {"status": "pending", "message": "asked", "idempotent_replay": 1})
+		# another key is another refund
+		payments.refund_via_gateway(folio, "pay_1", 100, "Second one", idempotency_key=self.key())
+		self.assertEqual(provider.refund.call_count, 2)
+		# no key: every call asks, as before
+		payments.refund_via_gateway(folio, "pay_1", 50, "No key")
+		payments.refund_via_gateway(folio, "pay_1", 50, "No key")
+		self.assertEqual(provider.refund.call_count, 4)
+
+	def test_a_replay_answers_even_once_the_refund_is_on_the_folio(self):
+		_, folio = self.booking()
+		payments.settle_payment_link(folio, "plink_1", 500, reference="pay_1")
+		provider = self.refunding({"status": "approved"})
+		key = self.key()
+		payments.refund_via_gateway(folio, "pay_1", 500, "Guest cancelled", idempotency_key=key)
+		# the gateway reported it: nothing is left of the payment
+		payments.record_gateway_refund(folio, "refund:pay_1:r1", 500, "Payment Link", "x")
+		again = payments.refund_via_gateway(folio, "pay_1", 500, "Guest cancelled", idempotency_key=key)
+		self.assertEqual(again, {"status": "approved", "idempotent_replay": 1})
+		self.assertEqual(provider.refund.call_count, 1)
+
+	def test_a_refused_refund_is_asked_again_with_the_same_key(self):
+		_, folio = self.booking()
+		payments.settle_payment_link(folio, "plink_1", 500, reference="pay_1")
+		provider = self.refunding({"status": "rejected", "message": "no"}, {"status": "approved"})
+		key = self.key()
+		self.assertEqual(payments.refund_via_gateway(
+			folio, "pay_1", 200, "Guest cancelled", idempotency_key=key)["status"], "rejected")
+		self.assertEqual(payments.refund_via_gateway(
+			folio, "pay_1", 200, "Guest cancelled", idempotency_key=key), {"status": "approved"})
+		self.assertEqual(provider.refund.call_count, 2)
+
+	def says_why(self, lang, messages):
+		"""Each refusal of refund_via_gateway reads in the desk's language:
+		messages has its text per refusal, {0} the payment or what is left."""
+		_, folio = self.booking()
+		payments.settle_payment_link(folio, "plink_1", 500, reference="pay_1")
+		payments.record_gateway_refund(folio, "refund:pay_1:r1", 400, "Payment Link", "x")
+		provider = self.refunding({"status": "approved"})
+		from kamra.localization import money_text
+		left = money_text(PROP_A, 100)
+		cases = [
+			((folio, "pay_1", 0, "Guest cancelled"), messages["positive"]),
+			((folio, "pay_1", 50, "  "), messages["reason"]),
+			((folio, "pay_9", 50, "Guest cancelled"), messages["no_payment"].format("pay_9")),
+			((folio, "pay_1", 200, "Guest cancelled"), messages["left"].format(left)),
+			(None, messages["closed"]),
+		]
+		for args, message in cases:
+			if args is None:
+				frappe.db.set_value("Folio", folio, "status", "Closed")
+				args = (folio, "pay_1", 50, "Guest cancelled")
+			with self.subTest(lang=lang, message=message):
+				frappe.local.lang = lang
+				try:
+					with self.assertRaises(frappe.ValidationError) as caught:
+						payments.refund_via_gateway(*args)
+				finally:
+					frappe.local.lang = "en"
+				self.assertEqual(str(caught.exception), message)
+		provider.refund.assert_not_called()
+
+	def test_refund_via_gateway_says_why_in_the_desk_s_language(self):
+		self.says_why("es", {
+			"positive": "El importe de la devolución debe ser positivo.",
+			"reason": "El motivo de la devolución es obligatorio.",
+			"no_payment": "Este folio no tiene ningún pago {0} de la pasarela.",
+			"left": "De este pago solo quedan {0} por devolver.",
+			"closed": "Este folio está cerrado.",
+		})
+
+	def test_refund_via_gateway_says_why_in_brazilian_portuguese(self):
+		# a Brazilian desk (pt-BR) reads Kamra's pt rows
+		self.says_why("pt-BR", {
+			"positive": "O valor do reembolso deve ser positivo.",
+			"reason": "O motivo do reembolso é obrigatório.",
+			"no_payment": "Este fólio não tem nenhum pagamento {0} do gateway de pagamento.",
+			"left": "Só restam {0} deste pagamento para reembolsar.",
+			"closed": "Este fólio está fechado.",
+		})

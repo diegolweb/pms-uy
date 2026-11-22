@@ -15,7 +15,7 @@ export interface FeatureEntry {
 
 export const FEATURES: FeatureEntry[] = [
   { label: "Close the day", to: "/end-of-day", where: "Night Audit", keywords: ["night audit", "eod", "roll date", "business date", "3 am", "audit pack", "blockers"] },
-  { label: "Fix End of Day blockers", to: "/end-of-day", where: "Night Audit", keywords: ["blocker", "acknowledge", "override", "cannot close", "stuck"] },
+  { label: "Fix Night Audit blockers", to: "/end-of-day", where: "Night Audit", keywords: ["blocker", "acknowledge", "override", "cannot close", "stuck"] },
   { label: "Add a till or terminal", to: "/cashier/board", where: "Finance · All tills", keywords: ["cash office", "register", "pos station", "drawer", "terminal"] },
   { label: "Cash drop", to: "/cashier", where: "Finance · My Till", keywords: ["safe", "paid out", "float", "count cash", "close till", "open till"] },
   { label: "Petty cash voucher", to: "/cashier/petty-cash", where: "Finance · Petty Cash", keywords: ["imprest", "expense", "voucher"] },
@@ -24,6 +24,7 @@ export const FEATURES: FeatureEntry[] = [
   { label: "Print an invoice", to: "/billing", where: "Finance · Billing", keywords: ["gst invoice", "tax invoice", "reprint", "bill"] },
   { label: "Change a room rate", to: "/rate-plans", where: "Revenue · Rate Plans", keywords: ["bar", "best available rate", "base price", "rack rate", "tariff", "pricing"] },
   { label: "Seasonal pricing", to: "/seasons", where: "Revenue · Seasons", keywords: ["peak", "weekend rate", "festival", "date range", "bar"] },
+  { label: "Holiday packages", to: "/packages", where: "Revenue · Packages", keywords: ["package", "pacote", "carnaval", "reveillon", "holiday", "feriado", "closed package", "pricing tier"] },
   { label: "Move a guest to another room", to: "/", where: "Front Desk · Today", keywords: ["room change", "upgrade", "downgrade", "swap room"] },
   { label: "Extend a stay", to: "/reservations", where: "Front Desk · Reservations", keywords: ["late checkout", "change dates", "amend"] },
   { label: "Cancel a booking", to: "/reservations", where: "Front Desk · Reservations", keywords: ["no show", "cancellation fee", "waive fee"] },

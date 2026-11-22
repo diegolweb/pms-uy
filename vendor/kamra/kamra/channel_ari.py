@@ -16,6 +16,10 @@ the whole snapshot every hour and after every booking:
    and sends ONE call per kind - under a local cap per endpoint, waiting a
    short batch window for restrictions so a few edits in a row go together,
    pausing on a 429 and backing off on a 5xx.
+3. A provider rate plan priced per person (Channex `sell_mode` per_person)
+   takes a rate per occupancy - the quote for that many adults - instead of
+   one rate; the adapter says which plans those are
+   (`fetch_rate_occupancies`), read at most once an hour.
 
 Adapters opt in by implementing `push_ari_changes(conn, kind, changes)` (see
 kamra.channels); the others keep the hourly whole-snapshot `push_ari`.
@@ -34,6 +38,10 @@ from frappe import _
 from frappe.utils import add_days, date_diff, getdate, nowdate
 
 from kamra.authz import require_roles
+from kamra.kamra.doctype.channel_manager_connection.channel_manager_connection import (
+	missing_property_id,
+	no_property_id_message,
+)
 
 ARI_HORIZON_DAYS = 500  # the full sync and the nightly sweep
 ARI_MAX_DAYS = 730  # a user's change is sent whole up to here
@@ -81,13 +89,14 @@ def availability_cells(conn, date_from, date_to) -> dict[str, dict[str, dict]]:
 	return out
 
 
-def _plan_night_rate(property: str, room_type: str, rate_plan: str | None, d) -> Decimal | None:
+def _plan_night_rate(property: str, room_type: str, rate_plan: str | None, d,
+                     adults: int | None = None) -> Decimal | None:
 	"""The pricing engine's room total for one night from `d`, on `rate_plan`
-	(None: the room type's base price), for the type's base occupancy (or 2
-	adults), to 2 decimals. None when the night cannot be quoted or is not
-	worth more than 0."""
+	(None: the room type's base price), for `adults` - by default the type's
+	base occupancy (or 2) -, to 2 decimals. None when the night cannot be
+	quoted or is not worth more than 0."""
 	from kamra.pricing import quote
-	adults = frappe.db.get_value("Room Type", room_type, "base_occupancy") or 2
+	adults = adults or frappe.db.get_value("Room Type", room_type, "base_occupancy") or 2
 	try:
 		q = quote(property, room_type, str(d), str(add_days(d, 1)), adults=int(adults),
 		          children=0, rate_plan=rate_plan or None)
@@ -97,19 +106,51 @@ def _plan_night_rate(property: str, room_type: str, rate_plan: str | None, d) ->
 	return total if total > 0 else None
 
 
-def _restriction_day(rate: Decimal | None) -> dict:
-	"""The one place a day's restriction values are put together (HR-17 adds
-	its own fields here): the rate, or stop-sell when there is no price."""
-	if rate is None:
-		return {"stop_sell": True}
-	return {"rate": rate, "stop_sell": False}
+# The stay rules each day carries, by their Channex names (never the
+# `min_stay` shortcut: a property with min_stay_type "both" refuses it).
+RULE_FIELDS = ("min_stay_arrival", "min_stay_through", "max_stay",
+               "closed_to_arrival", "closed_to_departure")
 
 
-def restriction_cells(conn, date_from, date_to) -> dict[str, dict[str, dict]]:
-	"""{external_rate_id: {"YYYY-MM-DD": {"rate": Decimal, "stop_sell": False}}}
-	for each mapping with a provider rate plan id, priced by _plan_night_rate;
-	a day without a price is {"stop_sell": True} and carries no rate."""
+def _occupancy_rates(property: str, m, d, occupancies: list[int]) -> list[dict] | None:
+	"""A plan priced per person: [{"occupancy": n, "rate": Decimal}] for each
+	of `occupancies`, the night from `d` quoted for n adults; an occupancy
+	without a price is left out. None when none has one."""
+	rates = []
+	for n in occupancies:
+		rate = _plan_night_rate(property, m.room_type, m.rate_plan, d, adults=int(n))
+		if rate is not None:
+			rates.append({"occupancy": int(n), "rate": rate})
+	return rates or None
+
+
+def _restriction_day(price: Decimal | list | None, rules: dict | None = None) -> dict:
+	"""The one place a day's restriction values are put together: the price
+	- rate, or rates (one per occupancy) for a plan priced per person; none
+	when the day has no price -, the stay rules of `rules` (a
+	pricing.stay_rules_by_day day) and stop_sell - the rule's, or a day
+	without a price."""
+	out = {f: rules[f] for f in RULE_FIELDS} if rules else {}
+	if price is not None:
+		out["rates" if isinstance(price, list) else "rate"] = price
+	out["stop_sell"] = price is None or bool(rules and rules.get("stop_sell"))
+	return out
+
+
+def restriction_cells(conn, date_from, date_to,
+                      occupancies: dict[str, list[int]] | None = None) -> dict[str, dict[str, dict]]:
+	"""{external_rate_id: {"YYYY-MM-DD": {"rate": Decimal, "stop_sell": bool,
+	"min_stay_arrival": int, "min_stay_through": int, "max_stay": int,
+	"closed_to_arrival": bool, "closed_to_departure": bool}}} for each mapping
+	with a provider rate plan id: priced by _plan_night_rate, its stay rules
+	from pricing.stay_rules_by_day for the mapping's room type and rate plan
+	(the property's floor included) - the same rules the booking engine and
+	the front desk obey. A day without a price stops sale and carries no
+	rate. A plan in `occupancies` ({external_rate_id: [occupancy, ...]}, the
+	provider's plans priced per person) carries "rates" instead of "rate":
+	[{"occupancy": n, "rate": Decimal}], the quote for n adults."""
 	from kamra.channel_manager import _mappings
+	from kamra.pricing import stay_rules_by_day
 	window = _clip(date_from, date_to)
 	if not window:
 		return {}
@@ -119,18 +160,27 @@ def restriction_cells(conn, date_from, date_to) -> dict[str, dict[str, dict]]:
 	for m in _mappings(conn.name):
 		if not m.external_rate_id:
 			continue
+		rules = stay_rules_by_day(conn.property, m.room_type, m.rate_plan, start, end)
 		plan = out.setdefault(str(m.external_rate_id), {})
+		per_person = (occupancies or {}).get(str(m.external_rate_id))
 		for i in range(days):
 			d = getdate(add_days(start, i))
-			plan[str(d)] = _restriction_day(_plan_night_rate(conn.property, m.room_type, m.rate_plan, d))
+			price = (_occupancy_rates(conn.property, m, d, per_person) if per_person
+			         else _plan_night_rate(conn.property, m.room_type, m.rate_plan, d))
+			plan[str(d)] = _restriction_day(price, rules.get(str(d)))
 	return out
 
 
 def _canon(value):
 	"""A cell value as stored in Channel ARI State (JSON): rates as 2-decimal
-	strings, so 241 and "241.00" compare equal."""
+	strings, so 241 and "241.00" compare equal - also inside a day's rates
+	per occupancy."""
 	if isinstance(value, Decimal | float) and not isinstance(value, bool):
 		return str(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+	if isinstance(value, list):
+		return [_canon(v) for v in value]
+	if isinstance(value, dict):
+		return {k: _canon(v) for k, v in value.items()}
 	return value
 
 
@@ -199,9 +249,13 @@ def _load_sent(connection: str, kind: str) -> dict:
 	return out
 
 
+_PRICE_FIELDS = ("rate", "rates")  # a day holds one or the other, as the plan is priced
+
+
 def _remember(connection: str, kind: str, cells: dict) -> None:
 	"""Merge accepted cells into Channel ARI State, field by field; days
-	before today are dropped."""
+	before today are dropped. A price accepted as rate (or as rates) takes
+	the place of the other one for that day."""
 	today = nowdate()
 	for ext_id, days in cells.items():
 		if not days:
@@ -215,7 +269,11 @@ def _remember(connection: str, kind: str, cells: dict) -> None:
 			except ValueError:
 				known = {}
 		for d, values in days.items():
-			known.setdefault(d, {}).update({f: _canon(v) for f, v in values.items()})
+			held = known.setdefault(d, {})
+			if any(f in values for f in _PRICE_FIELDS):
+				for f in _PRICE_FIELDS:
+					held.pop(f, None)
+			held.update({f: _canon(v) for f, v in values.items()})
 		payload = json.dumps({d: known[d] for d in sorted(known) if d >= today}, sort_keys=True)
 		if exists:
 			frappe.db.set_value("Channel ARI State", name, "sent_values", payload)
@@ -248,6 +306,9 @@ ARI_JOB = "channex-ari::{connection}"
 _ARI_PAUSE = "channex_ari_pause::{connection}::{kind}"
 _ARI_CALLS = "channex_ari_calls::{connection}::{kind}"  # timestamps of the last minute's calls
 _ARI_ERROR = "channex_ari_error::{connection}"
+# {"at": timestamp, "plans": {external_rate_id: [occupancy, ...]}}: the provider's plans priced per person
+_ARI_OCCUPANCIES = "channex_ari_occupancies::{connection}"
+OCCUPANCIES_SECONDS = 3600  # how long a reading of them stands
 
 
 def _dt(ts: float) -> datetime:
@@ -275,13 +336,15 @@ def _supports_outbox(provider: str | None) -> bool:
 
 
 def outbox_connections(property: str | None = None) -> list[frappe._dict]:
-	"""The active connections whose adapter takes changes (push_ari_changes)."""
+	"""The active connections whose adapter takes changes (push_ari_changes)
+	and that have the provider's property id: without it every value would go
+	out with property_id "" and come back a 4xx (HR-140)."""
 	filters = {"active": 1}
 	if property:
 		filters["property"] = property
 	return [c for c in frappe.get_all("Channel Manager Connection", filters=filters,
-	                                  fields=["name", "property", "provider"])
-	        if _supports_outbox(c.provider)]
+	                                  fields=["name", "property", "provider", "external_property_id"])
+	        if _supports_outbox(c.provider) and not missing_property_id(c)]
 
 
 def uses_outbox(connection: str) -> bool:
@@ -409,11 +472,38 @@ def _windows(rows: list) -> list[tuple[str, str]]:
 	return merged
 
 
-def _cells(conn, kind: str, windows: list[tuple[str, str]]) -> dict:
-	fn = availability_cells if kind == "availability" else restriction_cells
+def _rate_occupancies(conn, provider, now: float, refresh: bool = False) -> dict[str, list[int]]:
+	"""{external_rate_id: [occupancy, ...]} of the provider's plans priced
+	per person (its fetch_rate_occupancies; {} for an adapter without one),
+	read at most once every OCCUPANCIES_SECONDS - and again after a mapping
+	changes (on_ari_source_change drops the reading) or for a full sync.
+	When the provider does not answer, the last reading stands; without one,
+	the error goes up: a per-person plan is not sent a single rate."""
+	fetch = getattr(provider, "fetch_rate_occupancies", None)
+	if fetch is None:
+		return {}
+	key = _ARI_OCCUPANCIES.format(connection=conn.name)
+	known = frappe.cache.get_value(key)
+	if known and not refresh and now - float(known["at"]) < OCCUPANCIES_SECONDS:
+		return known["plans"]
+	try:
+		plans = {str(k): [int(o) for o in v] for k, v in (fetch(conn) or {}).items()}
+	except Exception as exc:
+		if not known:
+			raise
+		_ari_error(conn, exc)
+		return known["plans"]
+	frappe.cache.set_value(key, {"at": now, "plans": plans})
+	return plans
+
+
+def _cells(conn, kind: str, windows: list[tuple[str, str]],
+           occupancies: dict[str, list[int]] | None = None) -> dict:
 	out: dict[str, dict[str, dict]] = {}
 	for start, end in windows:
-		for ext_id, days in fn(conn, start, end).items():
+		cells = (availability_cells(conn, start, end) if kind == "availability"
+		         else restriction_cells(conn, start, end, occupancies))
+		for ext_id, days in cells.items():
 			out.setdefault(ext_id, {}).update(days)
 	return out
 
@@ -518,10 +608,12 @@ def flush_outbox(connection: str) -> dict:
 	differs from Channel ARI State (everything if a row asks for a full
 	sync), joins it into ranges and makes ONE call. What it did not finish
 	goes back to Pending. Returns {kind: {"sent": n} | {"paused": s} |
-	{"waiting": s} | {"retry": s} | {"failed": detail} | {"nothing": True}}."""
+	{"waiting": s} | {"retry": s} | {"failed": detail} | {"nothing": True}}.
+	A connection without the provider's property id sends nothing and leaves
+	its rows Pending, untouched: they go out once the id is entered."""
 	conn = frappe.get_doc("Channel Manager Connection", connection)
 	result = {kind: {"nothing": True} for kind in KINDS}
-	if not conn.active or not _supports_outbox(conn.provider):
+	if not conn.active or not _supports_outbox(conn.provider) or missing_property_id(conn):
 		return result
 	now = _now()
 	rows = _claim(connection, now)
@@ -554,7 +646,13 @@ def _flush(conn, rows: list, now: float, result: dict) -> None:
 			result[kind] = {"waiting": wait}
 			continue
 		full = any(r.full for r in krows)
-		cells = _cells(conn, kind, _windows(krows))
+		try:
+			# which plans are priced per person: they take a rate per occupancy
+			occupancies = _rate_occupancies(conn, provider, now, refresh=full) if kind == "restrictions" else None
+		except Exception as exc:
+			_call_failed(conn, kind, krows, exc, now, bumped, result, failed)
+			continue
+		cells = _cells(conn, kind, _windows(krows), occupancies)
 		changes = compress(cells if full else diff_cells(cells, _load_sent(connection, kind)))
 		if not changes:
 			_done(krows, kind, [], now)
@@ -565,21 +663,7 @@ def _flush(conn, rows: list, now: float, result: dict) -> None:
 		try:
 			out = provider.push_ari_changes(conn, kind, changes)
 		except Exception as exc:
-			status = getattr(exc, "status", None)
-			if getattr(exc, "retry_after", None) is not None:
-				result[kind] = {"paused": _pause(connection, kind, exc.retry_after, now)}
-			elif status is not None and 400 <= int(status) < 500:
-				detail = str(exc)[:280]
-				_fail(krows, detail)
-				failed.append(f"{kind}: {detail}")
-				frappe.log_error(title=f"Channex ARI failed {conn.name}",
-				                 message=f"{kind}: {type(exc).__name__}: {exc}"[:1000])
-				result[kind] = {"failed": detail}
-			else:
-				_backoff(krows, bumped, now)
-				_ari_error(conn, exc)
-				result[kind] = {"retry": min(30 * 2 ** (max(r.attempts for r in krows) - 1), 1800)}
-			frappe.db.commit()  # nosemgrep: frappe-manual-commit -- ari worker: keep the attempt and its error
+			_call_failed(conn, kind, krows, exc, now, bumped, result, failed)
 			continue
 		rejected = out.get("rejected") or []
 		refused = {_key(c) for c in rejected}
@@ -597,6 +681,27 @@ def _flush(conn, rows: list, now: float, result: dict) -> None:
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- ari worker: what the provider accepted is recorded before the next call
 	if sent or failed:
 		_report(conn, sent, failed)
+
+
+def _call_failed(conn, kind: str, krows: list, exc: Exception, now: float, bumped: set, result: dict,
+                 failed: list) -> None:
+	"""A call to the provider for `kind` failed: a 429 pauses that endpoint,
+	a 4xx fails the rows, anything else backs them off and retries."""
+	status = getattr(exc, "status", None)
+	if getattr(exc, "retry_after", None) is not None:
+		result[kind] = {"paused": _pause(conn.name, kind, exc.retry_after, now)}
+	elif status is not None and 400 <= int(status) < 500:
+		detail = str(exc)[:280]
+		_fail(krows, detail)
+		failed.append(f"{kind}: {detail}")
+		frappe.log_error(title=f"Channex ARI failed {conn.name}",
+		                 message=f"{kind}: {type(exc).__name__}: {exc}"[:1000])
+		result[kind] = {"failed": detail}
+	else:
+		_backoff(krows, bumped, now)
+		_ari_error(conn, exc)
+		result[kind] = {"retry": min(30 * 2 ** (max(r.attempts for r in krows) - 1), 1800)}
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- ari worker: keep the attempt and its error
 
 
 def _report(conn, sent: dict, failed: list) -> None:
@@ -670,6 +775,17 @@ def _source(doc, method) -> tuple[str, str | None, str | None, str] | None:
 		w = _window(_dates(doc.start_date, before and before.start_date),
 		            _dates(doc.end_date, before and before.end_date))
 		return (doc.property, *w, "restrictions") if w else None
+	if dt == "Channel Restriction":
+		w = _window(_dates(doc.date_from, before and before.date_from),
+		            _dates(doc.date_to, before and before.date_to))
+		return (doc.property, *w, "restrictions") if w else None
+	if dt == "Property":
+		# its minimum_nights is every day's through minimum; nothing else of it
+		# goes out
+		if method != "on_update" or not before or \
+				int(before.get("minimum_nights") or 0) == int(doc.get("minimum_nights") or 0):
+			return None
+		return doc.name, None, None, "restrictions"
 	if dt in _HORIZON_SOURCES:
 		return doc.property, None, None, "restrictions"
 	if dt == "Room":
@@ -687,7 +803,57 @@ def _source(doc, method) -> tuple[str, str | None, str | None, str] | None:
 		return (doc.property, *w, "availability") if w else None
 	if dt == "Channel Room Mapping":
 		return _mapping_property(doc), None, None, "both"
+	if dt == "Group Booking":
+		w = _group_window(doc, method, before)
+		return (doc.property, *w, "availability") if w else None
 	return None
+
+
+def _sources(doc, method) -> list[tuple[str, str | None, str | None, str]]:
+	"""Every (property, date_from, date_to, kinds) a document's change can
+	move: _source's and, when a Group Booking moved to another property, the
+	same nights on the one it left, where its block stops holding rooms
+	(HR-198)."""
+	spec = _source(doc, method)
+	if not spec:
+		return []
+	before = doc.get_doc_before_save() if method == "on_update" and doc.doctype == "Group Booking" else None
+	if before and before.get("property") and before.property != spec[0]:
+		return [spec, (before.property, *spec[1:])]
+	return [spec]
+
+
+# what a Group Booking's hold depends on (kamra.group_blocks): the group's
+# property, nights and state, and each block row's type and counts
+_GROUP_FIELDS = ("property", "check_in_date", "check_out_date", "status", "cutoff_date", "released_on")
+_GROUP_BLOCK_FIELDS = ("room_type", "rooms_blocked", "rooms_released", "nightly_counts")
+
+
+def _group_holds(doc) -> bool:
+	"""The same test as group_blocks._holding_groups: Confirmed, not released
+	and its cutoff not passed."""
+	if doc.get("status") != "Confirmed" or doc.get("released_on"):
+		return False
+	cutoff = doc.get("cutoff_date")
+	return not cutoff or getdate(cutoff) >= getdate(nowdate())
+
+
+def _group_rows(doc) -> list:
+	return sorted(tuple(str(row.get(f) or "") for f in _GROUP_BLOCK_FIELDS) for row in doc.get("blocks") or [])
+
+
+def _group_window(doc, method, before) -> tuple[str, str] | None:
+	"""A group's nights before and after the change, when it held rooms on
+	either side and the change moved something its hold counts. An Open
+	group is a proposal and holds nothing, so neither do its edits."""
+	if not _group_holds(doc) and not (before and _group_holds(before)):
+		return None
+	if before and all(str(before.get(f) or "") == str(doc.get(f) or "") for f in _GROUP_FIELDS) \
+			and _group_rows(before) == _group_rows(doc):
+		return None
+	ins = _dates(doc.get("check_in_date"), before and before.get("check_in_date"))
+	outs = [add_days(d, -1) for d in _dates(doc.get("check_out_date"), before and before.get("check_out_date"))]
+	return _window(ins, outs)
 
 
 def _forget_mapping(doc, before=None) -> None:
@@ -717,9 +883,11 @@ def on_ari_source_change(doc, method=None) -> None:
 			before = doc.get_doc_before_save() if method == "on_update" else None
 			if method == "on_trash" or before:
 				_forget_mapping(doc, before)
-		spec = _source(doc, method)
-		if spec and spec[0]:
-			enqueue_ari_change(spec[0], spec[1], spec[2], kinds=spec[3], reason=f"{doc.doctype} {doc.name}")
+			# its plan may be priced per person: read the provider's plans again
+			frappe.cache.delete_value(_ARI_OCCUPANCIES.format(connection=doc.connection))
+		for spec in _sources(doc, method):
+			if spec[0]:
+				enqueue_ari_change(spec[0], spec[1], spec[2], kinds=spec[3], reason=f"{doc.doctype} {doc.name}")
 	except Exception as exc:
 		frappe.log_error(title="Channex ARI enqueue",
 		                 message=f"{doc.doctype} {doc.name} · {type(exc).__name__}: {exc}"[:1000])
@@ -731,6 +899,8 @@ def queue_full_sync(conn) -> None:
 		frappe.throw(_("This connection is not active."))
 	if not _supports_outbox(conn.provider):
 		frappe.throw(_("{0} does not take ARI changes.").format(conn.provider))
+	if missing_property_id(conn):
+		frappe.throw(no_property_id_message())
 	if not frappe.db.exists("Channel Room Mapping", {"connection": conn.name}):
 		frappe.throw(_("No room mappings yet - map your room types to the provider's room and rate ids first."))
 	today = nowdate()

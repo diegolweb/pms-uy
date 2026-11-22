@@ -43,6 +43,8 @@ MODULES = [
     ("onboarding", "Setup checklist (finish setting up a property)", ""),
     ("rates", "Rates (rate calendar, what moves a rate)", "These explain a price; they never set one. The quote is the only source of a charge."),
     ("tickets", "Service tickets (assign, resolve, timeline)", ""),
+    ("notifications", "Notification bell (what each department should know)",
+     "Each person sees only the modules their roles open; their own actions are left out."),
     ("id_scan", "ID scanner (passport strip, Aadhaar QR)", "Read only: turns what a scanner or camera read into guest fields. Nothing is saved."),
     ("guest_documents", "Guest documents (photo, ID and address proof images)", "Stored privately and served as data URLs to the desk. A property on Verify & Discard keeps no ID images."),
     ("printing", "Kitchen printers (routing, print stations, print queue)", ""),
@@ -75,6 +77,8 @@ MODULES = [
     ("settings", "Settings hub (module settings)", ""),
     ("rooms", "Rooms (room board, room detail and history, insights)",
      "Read-only. Room changes go through set_housekeeping_status, the room block endpoints, check_in / check_out and move_reservation."),
+    ("floors", "Floors (Admin > Rooms: Add rooms)",
+     "Hotel Admin. add_rooms with preview=1 only reports what it would create."),
     ("today_layout", "Today layout (per-user widgets, hotel default)", ""),
     ("sop", "Desk procedures (check-out, check-in and other SOPs)", ""),
     ("checkin", "Guided check-in (steps, who did each, room-charges permission)",
@@ -84,6 +88,10 @@ MODULES = [
      "Hotel Admin / System Manager. Events are signed with HMAC-SHA256 - see the Integrations page."),
     ("pos_interface", "External POS (room charges from a third-party POS)",
      "For a POS Integrator service user. ticket_id makes every posting idempotent."),
+    ("service_accounts", "Service accounts (scoped keys for connected apps)",
+     "IT only. A key reaches only its scopes and properties; see Connected apps."),
+    ("apps", "Connected apps (connect, pair, disconnect, property profile)",
+     "pair is the one allow_guest endpoint here, rate-limited and logged; see Connected apps."),
     ("public_api", "Public (no auth - booking page, check-in)",
      "These are allow_guest endpoints: no token needed, rate-limited."),
 ]
@@ -236,6 +244,9 @@ Content-Type: application/json
 - **Try it in Postman:** [download the collection](/kamra.postman_collection.json),
   set `base_url`, `api_key` and `api_secret` collection variables, go.
 - Endpoints marked **public** are `allow_guest` (no token; rate-limited).
+- What we promise not to break, and how a name is retired:
+  [API stability](/api-stability) and the machine-readable
+  [contract.json](/contract.json).
 """]
     for m in modules:
         out.append(f"\n## {m['folder']}\n")

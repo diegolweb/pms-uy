@@ -5,7 +5,8 @@
 <h1 align="center">Kamra PMS</h1>
 
 <p align="center">
-  <b>The open-source hotel PMS your staff and your AI can both run.</b><br/>
+  <b>The world's first open-source, agentic AI-ready PMS.</b><br/>
+  The hotel PMS your staff and your AI can both run.<br/>
   Front desk, housekeeping, billing, F&amp;B, banquets and a booking engine for hotels, resorts and villas,<br/>
   with a governed MCP layer so Claude or ChatGPT works as a permission-checked member of staff.
 </p>
@@ -25,7 +26,9 @@
   <a href="#install"><b>Install</b></a>
 </p>
 
-Kamra is a full property management system for hotels, resorts and short-term rentals. It runs on [Frappe](https://frappe.io) (the framework behind ERPNext), it is AGPL-3.0, and every feature is in the open-source app: no editions, no per-room fees. Current release: **v2.7.2** ([changelog](CHANGELOG.md)).
+**Why "first":** [Kamra 1.0](https://github.com/Kamra-PMS/kamra-pms/releases/tag/v1.0.0) shipped on 5 July 2026 as open source, free, and MCP-driven. We know of no open-source PMS that shipped all three earlier. If Kamra is useful to you, [star the repo](https://github.com/Kamra-PMS/kamra-pms/stargazers) so other hoteliers and developers can find it.
+
+Kamra is a full property management system for hotels, resorts and short-term rentals. It runs on [Frappe](https://frappe.io) (the framework behind ERPNext), it is AGPL-3.0, and every feature is in the open-source app: no editions, no per-room fees. Current release: **v2.7.6** ([changelog](CHANGELOG.md)).
 
 On the [demo](https://demo.kamrapms.com), tap any role to sign in. The guest booking page is at [/book](https://demo.kamrapms.com/book) and the housekeeping phone app at [/kamra/hk](https://demo.kamrapms.com/kamra/hk).
 
@@ -49,8 +52,9 @@ On the [demo](https://demo.kamrapms.com), tap any role to sign in. The guest boo
 **Billing and finance**
 - Folios with a tax rate per line, split and routed billing (the company pays the room, the guest pays the bar), payment links and security deposits.
 - Cashier tills, shift reports, petty cash and a currency desk; bills paid and shown in another currency.
-- End of Day (night audit) wizard that checks blockers, posts the nights and saves an audit pack; it also runs by itself at 03:00.
-- Accounts receivable with company accounts, statements and aging, plus accounts payable, P&amp;L and balance sheet.
+- Night audit on one page: only what needs you, one Close button, and an audit pack with every table exportable to CSV; it also runs by itself at 03:00.
+- Accounts receivable as a work queue: overdue and over-limit filters, aging, statements and month-end bills to many companies at once.
+- Books check that says whether folios and ledgers agree, plus accounts payable, P&amp;L and balance sheet.
 
 **F&amp;B and banquets**
 - Restaurant POS with a table map, room charges to the folio, kitchen display and network kitchen printers.
@@ -69,7 +73,7 @@ On the [demo](https://demo.kamrapms.com), tap any role to sign in. The guest boo
 
 **AI and MCP**
 - Kamra Agent, the in-app assistant, with action cards to check in, collect or open a folio.
-- 161 MCP tools for Claude, ChatGPT or any MCP client. See [Run your hotel with AI](#run-your-hotel-with-ai).
+- 170 MCP tools for Claude, ChatGPT or any MCP client. See [Run your hotel with AI](#run-your-hotel-with-ai).
 
 The staff UI is in English, Spanish, Arabic and Portuguese (Brazil). Module by module, with screenshots: [Features](https://kamrapms.com/docs/features).
 

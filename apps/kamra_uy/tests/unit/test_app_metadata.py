@@ -57,7 +57,8 @@ def test_targets_frappe_16() -> None:
 
 
 def test_module_layout() -> None:
-    assert (PACKAGE / "modules.txt").read_text().strip() == "Kamra UY"
+    # «Fiscal» es el módulo del conector fiscal (HR-28): sus doctypes viven en kamra_uy/fiscal/doctype
+    assert [m.strip() for m in (PACKAGE / "modules.txt").read_text().splitlines() if m.strip()] == ["Kamra UY", "Fiscal"]
     patches = (PACKAGE / "patches.txt").read_text()
     assert "[pre_model_sync]" in patches
     assert "[post_model_sync]" in patches

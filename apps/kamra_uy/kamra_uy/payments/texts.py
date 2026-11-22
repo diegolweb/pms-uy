@@ -30,3 +30,7 @@ ACTION_FOLIO_CLOSED = "el folio está cerrado: regístralo con una nota de créd
 ACTION_CHARGEBACK = "revisa el contracargo en el panel de Mercado Pago."
 ACTION_CURRENCY = "la moneda del movimiento no es la de la propiedad: asiéntalo a mano con su tipo de cambio."
 ACTION_NO_FOLIO = "el folio no existe en Kamra: búscalo por la referencia del pago en el panel de Mercado Pago."
+ACTION_LATE_PAYMENT = (
+    "la reserva ya estaba cancelada cuando llegó el pago (por ejemplo, venció la retención): si hay disponibilidad, "
+    "reactívala a mano; si no, devuelve el pago desde el folio."
+)

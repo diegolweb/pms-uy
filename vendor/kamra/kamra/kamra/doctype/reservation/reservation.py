@@ -17,6 +17,31 @@ class InventoryRefused(frappe.ValidationError):
 NON_VILLA_SQL = "(rt.room_category != 'Villa' OR rt.room_category IS NULL)"
 
 
+def lock_property_for_inventory(property: str) -> None:
+	"""One inventory decision at a time for this property.
+
+	Category capacity and the villa/room lockout both re-read after this
+	returns. A plain SELECT would keep the snapshot from before the wait
+	and a second booking would sell a room the first one just took.
+	"""
+	if property:
+		frappe.db.get_value("Property", property, "name", for_update=True)
+
+
+def ota_live_key(property: str, ota_ref: str) -> str:
+	"""Unique key for one live, non-group stay with this OTA reference.
+
+	Group rooming lists share a reference on purpose, so they do not use
+	this key. Longer than the field allows, the key is a hash of the same
+	pair so the unique index still rejects a duplicate delivery.
+	"""
+	raw = f"{property}::{(ota_ref or '').strip()}"
+	if len(raw) <= 140:
+		return raw
+	import hashlib
+	return hashlib.sha256(raw.encode()).hexdigest()
+
+
 def is_entire_place(room_type: str | None) -> bool:
 	"""An entire-place (whole villa) stay: its room type is Villa-category,
 	sold as one unit - the same test validate_villa_lockout uses."""
@@ -72,7 +97,8 @@ _LIVE_SQL = "('Confirmed', 'Checked In', 'Held', 'Pending Payment')"
 
 def villa_lockout_bookings(property: str, room_type: str | None, check_in,
                            check_out, exclude: str | None = None,
-                           limit: int | None = None) -> list[dict]:
+                           limit: int | None = None,
+                           for_update: bool = False) -> list[dict]:
 	"""Live reservations on the OTHER side of the villa <-> room lockout that
 	overlap [check_in, check_out): for a whole-villa type, any booked
 	non-villa (member) room; for any other type, a booked whole villa.
@@ -97,6 +123,7 @@ def villa_lockout_bookings(property: str, room_type: str | None, check_in,
 		  AND GREATEST(r.check_out_date, DATE_ADD(r.check_in_date, INTERVAL 1 DAY)) > %(check_in)s
 		ORDER BY r.check_in_date
 		{"LIMIT %d" % int(limit) if limit else ""}
+		{" FOR UPDATE" if for_update else ""}
 		""",
 		{
 			"property": property,
@@ -109,11 +136,12 @@ def villa_lockout_bookings(property: str, room_type: str | None, check_in,
 
 
 def villa_lockout_conflict(property: str, room_type: str | None, check_in,
-                           check_out, exclude: str | None = None) -> str | None:
+                           check_out, exclude: str | None = None,
+                           for_update: bool = False) -> str | None:
 	"""The reservation that stops `room_type` selling for the stay under the
 	villa <-> room lockout, or None when it is free to sell."""
 	rows = villa_lockout_bookings(property, room_type, check_in, check_out,
-	                              exclude=exclude, limit=1)
+	                              exclude=exclude, limit=1, for_update=for_update)
 	return rows[0].name if rows else None
 
 
@@ -154,6 +182,36 @@ class Reservation(Document):
 			              (prefix, int(top or 0)))
 		self.name = make_autoname(f"{prefix}.#####")
 
+	def insert(self, *args, **kwargs):
+		"""Insert, and report a taken OTA reference as DuplicateEntryError.
+
+		The unique index on ota_live_key is what stops two deliveries of one
+		OTA booking. Frappe turns that collision into UniqueValidationError
+		inside db_insert, before the caller sees it. create_booking and the
+		channel manager catch DuplicateEntryError and hand back the stay that
+		won, so translate just this key."""
+		try:
+			return super().insert(*args, **kwargs)
+		except frappe.UniqueValidationError as exc:
+			if self.ota_live_key and "ota_live_key" in str(exc):
+				raise frappe.DuplicateEntryError(self.ota_live_key) from exc
+			raise
+
+	def _sync_ota_live_key(self):
+		"""Set the unique live-stay key, or clear it when this stay no
+		longer claims the reference. An older duplicate left in place by
+		the patch keeps a blank key so editing it is still possible."""
+		ref = (self.ota_ref or "").strip()
+		desired = None
+		if ref and (self.status or "") != "Cancelled" and not self.group_booking:
+			desired = ota_live_key(self.property, ref)
+		if desired and self.name and not self.is_new():
+			other = frappe.db.get_value("Reservation", {"ota_live_key": desired}, "name")
+			if other and other != self.name:
+				self.ota_live_key = None
+				return
+		self.ota_live_key = desired
+
 	def after_insert(self):
 		# every booking gets a pre-arrival check-in link
 		self.db_set(
@@ -161,12 +219,8 @@ class Reservation(Document):
 			update_modified=False,
 		)
 		if self.voucher:
-			frappe.db.sql(
-				"""UPDATE `tabDiscount Voucher`
-				   SET times_used = COALESCE(times_used, 0) + 1
-				   WHERE name = %s""",
-				self.voucher,
-			)
+			from kamra.pricing import consume_voucher_use
+			consume_voucher_use(self.voucher)
 		# WhatsApp booking confirmation - enqueued so a booking never
 		# waits on Meta; skipped entirely unless the property connected
 		# its own number (Channel Provider Connection, Meta Business)
@@ -182,7 +236,8 @@ class Reservation(Document):
 			from kamra.deposit import ensure_deposit_for_reservation
 			ensure_deposit_for_reservation(self)
 		except Exception:
-			frappe.log_error(title="Security deposit ensure failed")
+			from kamra.privacy import guest_traceback
+			frappe.log_error(title="Security deposit ensure failed", message=guest_traceback(self))
 
 	def validate_type_capacity(self):
 		"""Room-type capacity with a controlled overbooking allowance.
@@ -200,6 +255,9 @@ class Reservation(Document):
 		if self.status in ("Cancelled", "No Show", "Checked Out", "Waitlist"):
 			return
 		# Serialize bookings of a category, even before a room is assigned.
+		# The property lock in validate() is already held; this lock orders
+		# category checks. The count below is a locking read so it sees a
+		# booking that committed while this one waited.
 		frappe.db.get_value("Room Type", self.room_type, "name", for_update=True)
 		total = frappe.db.count("Room", {"room_type": self.room_type})
 		if not total:
@@ -211,7 +269,6 @@ class Reservation(Document):
 			# committed value, not a stale cached doc
 			pct = float(frappe.db.get_value(
 				"Property", self.property, "overbooking_pct") or 0)
-		limit = int(total * (1 + pct / 100))
 		from frappe.utils import add_days, date_diff
 		nights = max(1, date_diff(self.check_out_date, self.check_in_date))
 		dates = [str(add_days(self.check_in_date, i))
@@ -220,34 +277,82 @@ class Reservation(Document):
 		# not for general sale; a pickup books against its own block. Only
 		# a stay taking NEW inventory is held to this - a block made after
 		# a booking never stops that booking being edited.
-		held = {}
+		# Out of order and blocked rooms are not for sale either, on the
+		# nights this stay newly takes; a night it already held is not
+		# re-checked, so shortening or extending a stay still works
+		held, out = {}, {}
 		if self._takes_new_inventory():
 			from kamra.group_blocks import block_hold_by_night
 			held = block_hold_by_night(self.property, self.room_type, dates,
-			                           for_group=self.group_booking)
+			                           for_group=self.group_booking, for_update=True)
+			before = self._nights_held_before()
+			new_nights = [d for d in dates if d not in before]
+			if new_nights:
+				out = self._rooms_out_of_sale(new_nights)
 		for d in dates:
-			cnt = frappe.db.sql(
-				"""SELECT COUNT(*) FROM `tabReservation`
+			cnt = len(frappe.db.sql(
+				"""SELECT name FROM `tabReservation`
 				   WHERE room_type = %(rt)s AND name != %(name)s
 				     AND status IN ('Confirmed', 'Checked In', 'Held', 'Pending Payment')
 				     AND check_in_date <= %(d)s
 				     AND GREATEST(check_out_date,
-				                  DATE_ADD(check_in_date, INTERVAL 1 DAY)) > %(d)s""",
+				                  DATE_ADD(check_in_date, INTERVAL 1 DAY)) > %(d)s
+				   FOR UPDATE""",
 				{"rt": self.room_type, "name": self.name or "new", "d": d},
-			)[0][0]
+			))
 			hold = held.get(d, 0)
+			rooms = total - out.get(d, 0)
+			limit = int(rooms * (1 + pct / 100))
 			if cnt + hold + 1 > limit:
 				if hold:
 					frappe.throw(
 						_("{0} is sold out for {1}: {2} of {3} rooms sold and "
 						  "{4} held for group blocks until their cutoff.").format(
-							self.room_type, d, cnt, total, hold),
+							self.room_type, d, cnt, rooms, hold),
 						title=_("Held for a group"), exc=InventoryRefused)
+				if out.get(d):
+					frappe.throw(
+						_("{0} is sold out for {1}: {2} of {3} sellable rooms sold "
+						  "({4} out of order or blocked).").format(
+							self.room_type, d, cnt, rooms, out[d]),
+						title=_("Overbooking limit"), exc=InventoryRefused)
 				frappe.throw(
 					_("{0} is sold out for {1}: {2} of {3} rooms sold and "
 					  "the overbooking allowance ({4}%) is used up.").format(
-						self.room_type, d, cnt, total, pct),
+						self.room_type, d, cnt, rooms, pct),
 					title=_("Overbooking limit"), exc=InventoryRefused)
+
+	def _nights_held_before(self) -> set[str]:
+		"""Nights this stay already held in this room type before this save.
+		A date change re-checks every night; these are not re-checked
+		against the capacity that out of order or blocked rooms reduce."""
+		from frappe.utils import add_days
+
+		from kamra.reservation_state import holds_inventory
+		old = None if self.is_new() else self.get_doc_before_save()
+		if not old or old.room_type != self.room_type or not holds_inventory(old.status):
+			return set()
+		n = max(1, date_diff(old.check_out_date, old.check_in_date))
+		return {str(add_days(old.check_in_date, i)) for i in range(min(int(n), 366))}
+
+	def _rooms_out_of_sale(self, dates: list[str]) -> dict[str, int]:
+		"""Rooms of this type that can't be sold on each night: Out of Order,
+		or held by an active Room Block. A stay already sitting in one of
+		those rooms is still counted as sold, so this can over-count by one
+		for a guest in house in a room marked Out of Order mid-stay; that
+		errs on refusing a booking, never on overbooking."""
+		rooms = frappe.get_all("Room", filters={"room_type": self.room_type},
+		                       fields=["name", "housekeeping_status"])
+		ooo = {r.name for r in rooms if r.housekeeping_status == "Out of Order"}
+		blocks = frappe.get_all("Room Block", filters={
+			"room": ("in", [r.name for r in rooms]),
+			"block_status": "Active",
+			"from_date": ("<=", dates[-1]), "to_date": (">", dates[0])},
+			fields=["room", "from_date", "to_date"])
+		# a block holds its nights [from_date, to_date)
+		return {d: len(ooo | {b.room for b in blocks
+		                      if str(b.from_date) <= d < str(b.to_date)})
+		        for d in dates}
 
 	def _takes_new_inventory(self) -> bool:
 		"""True when this save starts holding rooms it did not hold before:
@@ -263,12 +368,18 @@ class Reservation(Document):
 			!= (str(self.check_in_date), str(self.check_out_date), self.room_type)
 
 	def validate(self):
+		# Before any other inventory lock, so villa vs room and category
+		# capacity take this row in the same order as booking and accept.
+		if self.property:
+			lock_property_for_inventory(self.property)
+		self._sync_ota_live_key()
 		if self.get("booked_check_out_date") and getdate(self.check_out_date) \
 				>= getdate(self.booked_check_out_date):
 			# extended back to (or past) the booked date: no longer leaving early
 			self.booked_check_out_date = None
 			self.early_departure_reason = None
 		self.validate_dates()
+		self._check_out_only_through_check_out()
 		self.validate_past_check_in()
 		self.nights = date_diff(self.check_out_date, self.check_in_date)
 		self.validate_minimum_nights()
@@ -575,6 +686,16 @@ class Reservation(Document):
 		# same rule: only when set, so existing rate-lock keys stay put
 		if flt(self.get("agreed_rate")) > 0:
 			inputs["agreed_rate"] = flt(self.get("agreed_rate"))
+		# Day-use times only enter the lock key when the stay is same-day:
+		# overnight ETA/ETD is display-only and must not re-price.
+		if cint(self.get("is_day_use")) or (
+				self.check_in_date and self.check_out_date
+				and getdate(self.check_in_date) == getdate(self.check_out_date)):
+			from kamra.day_use import hhmm
+			if self.get("planned_check_in_time"):
+				inputs["check_in_time"] = hhmm(self.planned_check_in_time)
+			if self.get("planned_check_out_time"):
+				inputs["check_out_time"] = hhmm(self.planned_check_out_time)
 		return inputs
 
 	@staticmethod
@@ -915,7 +1036,7 @@ class Reservation(Document):
 
 		conflict = villa_lockout_conflict(
 			self.property, self.room_type, self.check_in_date,
-			self.check_out_date, exclude=self.name)
+			self.check_out_date, exclude=self.name, for_update=True)
 		if not conflict:
 			return
 		if is_entire_place(self.room_type):
@@ -933,6 +1054,16 @@ class Reservation(Document):
 			title=_("Double Booking Blocked"),
 			exc=InventoryRefused,
 		)
+
+	def _check_out_only_through_check_out(self):
+		"""A stay becomes Checked Out only through kamra.api.check_out, which
+		refuses while the bill is unpaid or laundry / a restaurant bill is
+		still open. A status edit (Desk form, REST) would skip all of it."""
+		previous = self.get_doc_before_save()
+		if (previous and previous.status != "Checked Out"
+				and self.status == "Checked Out" and not self.flags.kamra_check_out):
+			frappe.throw(_("Use Check out to check a guest out: it makes sure every "
+			               "bill is cleared first."), title=_("Check out"))
 
 	def on_update(self):
 		lines = self.flags.pop("rate_change_lines", None)

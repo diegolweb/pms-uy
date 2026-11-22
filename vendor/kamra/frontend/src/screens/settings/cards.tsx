@@ -119,11 +119,17 @@ export function SettingsCard(props: {
   doc: Doc
   onSave: (changes: Doc) => Promise<void>
   columns?: number
+  /** Told the unsaved changes whenever they change (empty again after a save). */
+  onDraft?: (draft: Doc) => void
 }) {
   const { t } = useT()
   const [draft, setDraft] = useState<Doc>({})
   const [busy, setBusy] = useState(false)
   const [state, setState] = useState<"idle" | "saved" | string>("idle")
+  const { onDraft } = props
+  useEffect(() => {
+    onDraft?.(draft)
+  }, [draft, onDraft])
 
   const value = (f: string) => (f in draft ? draft[f] : props.doc[f])
 
@@ -294,8 +300,44 @@ export function ZatcaCard({ property }: { property: string }) {
   )
 }
 
+/** The Payment Gateway Settings fields a gateway may describe in its own words. */
+type CredentialField = "key_id" | "key_secret" | "webhook_secret"
+type FieldWords = { label?: string; hint?: string }
+
+/** What kamra.payments.gateway_info answers: the chosen gateway provider's info(). */
+type GatewayInfo = {
+  gateway: string
+  webhook_url: string
+  signup_url: string
+  needs_webhook: boolean
+  /** The provider's own label and hint for each credential field it uses. */
+  fields?: Partial<Record<CredentialField, FieldWords>>
+  /** The provider's own setup help, one paragraph each; {webhook_url} marks where its webhook URL goes. */
+  help?: string[]
+}
+
+/** Razorpay and Cashfree's words, for their providers' info() brings none. */
+const INDIA_FIELDS: Partial<Record<CredentialField, FieldWords>> = {
+  key_id: { hint: "Razorpay: Account & Settings → API Keys. Cashfree: Developers → API Keys (App ID)" },
+  webhook_secret: {
+    hint: "Razorpay only: set the same secret on the Razorpay webhook. Cashfree signs with the secret key",
+  },
+}
+const BUILT_IN_FIELDS: Record<string, Partial<Record<CredentialField, FieldWords>>> = {
+  Razorpay: INDIA_FIELDS,
+  Cashfree: INDIA_FIELDS,
+}
+
+/** The chosen gateway's words: its provider's when info() brings any (all
+ *  of them, never mixed with another gateway's), else the ones Kamra has
+ *  for that gateway, else none. */
+function gatewayFields(gateway: string, info: GatewayInfo | null) {
+  if (info?.fields || info?.help) return info.fields ?? {}
+  return BUILT_IN_FIELDS[gateway] ?? {}
+}
+
 /** The gateways on offer come from the property's country pack. */
-function gatewaySpecs(gateways: string[]): Spec[] {
+function gatewaySpecs(gateways: string[], words: Partial<Record<CredentialField, FieldWords>>): Spec[] {
   return [
     { field: "enabled", label: "Enabled", type: "check" },
     {
@@ -311,42 +353,53 @@ function gatewaySpecs(gateways: string[]): Spec[] {
       options: gateways,
       hint: "money goes straight to this property's own gateway account",
     },
+    { field: "key_id", label: words.key_id?.label || "Key ID / App ID", hint: words.key_id?.hint },
     {
-      field: "key_id",
-      label: "Key ID / App ID",
-      hint: "Razorpay: Account & Settings → API Keys. Cashfree: Developers → API Keys (App ID)",
+      field: "key_secret",
+      label: words.key_secret?.label || "Key secret / Secret key",
+      type: "password",
+      hint: words.key_secret?.hint,
     },
-    { field: "key_secret", label: "Key secret / Secret key", type: "password" },
     {
       field: "webhook_secret",
-      label: "Webhook secret",
+      label: words.webhook_secret?.label || "Webhook secret",
       type: "password",
-      hint: "Razorpay only: set the same secret on the Razorpay webhook. Cashfree signs with the secret key",
+      hint: words.webhook_secret?.hint,
     },
   ]
 }
 
-type GatewayInfo = {
-  gateway: string
-  webhook_url: string
-  signup_url: string
-  needs_webhook: boolean
+const webhookCls = "select-all break-all rounded bg-white px-1 py-0.5 text-xs"
+
+/** A paragraph of the provider's help, its webhook URL where it says {webhook_url}. */
+function withWebhookUrl(text: string, url: string) {
+  return text.split("{webhook_url}").flatMap((part, i) =>
+    i === 0 ? [part] : [<code key={i} className={webhookCls}>{url}</code>, part])
 }
 
 /** Setup help under the Payments card: where the gateway should send
  *  payment events, and a way to open an account if the property has none. */
-function GatewayHelp({ property, gateway, hasKeys }: {
-  property: string
-  gateway: string
-  hasKeys: boolean
-}) {
+function GatewayHelp({ info, hasKeys }: { info: GatewayInfo; hasKeys: boolean }) {
   const { t } = useT()
-  const [info, setInfo] = useState<GatewayInfo | null>(null)
-  useEffect(() => {
-    call<GatewayInfo>("kamra.payments.gateway_info", { property, gateway })
-      .then(setInfo).catch(() => setInfo(null))
-  }, [property, gateway])
-  if (!info) return null
+  // the provider's own help when info() brings words of its own, else the
+  // one Kamra has for that gateway, else none
+  const setup = info.fields || info.help
+    ? (info.help ?? []).map((paragraph, i) => <p key={i}>{withWebhookUrl(t(paragraph), info.webhook_url)}</p>)
+    : info.gateway === "Razorpay" ? [
+        <p key="razorpay">
+          {t("In Razorpay, add a webhook for the payment_link.paid event pointing to")}{" "}
+          <code className={webhookCls}>{info.webhook_url}</code>
+        </p>,
+      ]
+    : info.gateway === "Cashfree" ? [
+        <p key="cashfree">
+          {t("Nothing to set up in Cashfree: every link reports back to")}{" "}
+          <code className={webhookCls}>{info.webhook_url}</code>
+          . {t("Guests need a mobile number on their profile to receive a Cashfree link.")}
+        </p>,
+      ]
+    : []
+  if (hasKeys && !setup.length) return null
   return (
     <div className="-mt-2 space-y-2 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
       {!hasKeys && (
@@ -357,18 +410,41 @@ function GatewayHelp({ property, gateway, hasKeys }: {
           {" "}{t("and take online payments for advances and bills.")}
         </p>
       )}
-      {info.needs_webhook ? (
-        <p>
-          {t("In Razorpay, add a webhook for the payment_link.paid event pointing to")}{" "}
-          <code className="select-all break-all rounded bg-white px-1 py-0.5 text-xs">{info.webhook_url}</code>
-        </p>
-      ) : (
-        <p>
-          {t("Nothing to set up in Cashfree: every link reports back to")}{" "}
-          <code className="select-all break-all rounded bg-white px-1 py-0.5 text-xs">{info.webhook_url}</code>
-          . {t("Guests need a mobile number on their profile to receive a Cashfree link.")}
-        </p>
-      )}
+      {setup}
+    </div>
+  )
+}
+
+/** The gateway the card speaks of: the one picked in the form, else the
+ *  saved one, else the pack's first - only ever one the pack offers. */
+export function chosenGateway(gateways: string[], saved: unknown, picked: unknown): string {
+  for (const gateway of [picked, saved])
+    if (typeof gateway === "string" && gateways.includes(gateway)) return gateway
+  return gateways[0] ?? ""
+}
+
+/** The Payments card: the gateway's settings and its setup help, both in
+ *  the chosen gateway's words (`info` is its provider's info(), or null
+ *  until it answers). */
+export function PaymentGatewayCard({ gateways, chosen, doc, info, onSave, onDraft }: {
+  gateways: string[]
+  chosen: string
+  doc: Doc
+  info: GatewayInfo | null
+  onSave: (changes: Doc) => Promise<void>
+  onDraft?: (draft: Doc) => void
+}) {
+  return (
+    <div className="space-y-4">
+      <SettingsCard
+        title={translateUI("Payment gateway")}
+        description={translateUI("Payment links for advances and folio settlement. Money goes straight to this property's own account. Secrets are write-only.")}
+        specs={gatewaySpecs(gateways, gatewayFields(chosen, info))}
+        doc={doc}
+        onSave={onSave}
+        onDraft={onDraft}
+      />
+      {info && <GatewayHelp info={info} hasKeys={!!doc.key_id} />}
     </div>
   )
 }
@@ -446,8 +522,10 @@ function presetForBaseUrl(presets: AiPreset[], baseUrl: string): string | null {
   if (!url) return has("openai") ? "openai" : presets[0].id
   const exact = presets.find((p) => p.base_url && norm(p.base_url) === url)
   if (exact) return exact.id
-  if (url.includes(".openai.azure.com") && has("azure")) return "azure"
-  if (url.includes(":11434") && has("ollama")) return "ollama"
+  let host = "", port = ""
+  try { ({ hostname: host, port } = new URL(url)) } catch { /* not a URL: falls through to custom */ }
+  if (host.endsWith(".openai.azure.com") && has("azure")) return "azure"
+  if (port === "11434" && has("ollama")) return "ollama"
   if (has("custom")) return "custom"
   return presets[0].id
 }
@@ -764,6 +842,8 @@ export function PaymentsSection({ property }: { property: string }) {
   const { t } = useT()
   const loc = useLocale()
   const [gateway, setGateway] = useState<Doc | null>(null)
+  const [picked, setPicked] = useState<unknown>(undefined)
+  const [answer, setAnswer] = useState<{ gateway: string; info: GatewayInfo | null } | null>(null)
   const load = useCallback(() => {
     listResource("Payment Gateway Settings", {
       fields: ["name", "gateway", "enabled", "test_mode", "key_id"],
@@ -772,6 +852,23 @@ export function PaymentsSection({ property }: { property: string }) {
   }, [property])
   useEffect(load, [load])
   const gateways = loc.integrations.payment_gateways
+  const loaded = gateway !== null
+  const chosen = chosenGateway(gateways, gateway?.gateway, picked)
+  useEffect(() => {
+    if (!loaded || !chosen) return
+    let current = true // a late answer for a gateway no longer chosen is dropped
+    call<GatewayInfo>("kamra.payments.gateway_info", { property, gateway: chosen })
+      .then((info) => current && setAnswer({ gateway: chosen, info }))
+      .catch(() => current && setAnswer({ gateway: chosen, info: null }))
+    return () => {
+      current = false
+    }
+  }, [property, chosen, loaded])
+  // a save empties the draft: keep the last pick, which is the saved one once reloaded
+  const onDraft = useCallback(
+    (draft: Doc) => setPicked((last: unknown) => (Object.keys(draft).length ? draft.gateway : last)),
+    [],
+  )
   if (!gateways.length)
     return (
       <Card>
@@ -785,38 +882,32 @@ export function PaymentsSection({ property }: { property: string }) {
     )
   if (!gateway) return null
   return (
-    <div className="space-y-4">
-      <SettingsCard
-        title={translateUI("Payment gateway")}
-        description={translateUI("Payment links for advances and folio settlement. Money goes straight to this property's own account. Secrets are write-only.")}
-        specs={gatewaySpecs(gateways)}
-        doc={{ ...gateway, gateway: gateway.gateway || gateways[0] }}
-        onSave={async (changes) => {
-          // never send empty secrets - blank means "unchanged"
-          const payload = Object.fromEntries(
-            Object.entries(changes).filter(
-              ([k, v]) =>
-                !["key_secret", "webhook_secret"].includes(k) || v !== "",
-            ),
-          )
-          if (gateway.name) {
-            await updateResource("Payment Gateway Settings", String(gateway.name), payload)
-          } else {
-            await createResource("Payment Gateway Settings", {
-              gateway: gateways[0],
-              ...payload,
-              property,
-            })
-          }
-          load()
-        }}
-      />
-      <GatewayHelp
-        property={property}
-        gateway={gateways.includes(String(gateway.gateway)) ? String(gateway.gateway) : gateways[0]}
-        hasKeys={!!gateway.key_id}
-      />
-    </div>
+    <PaymentGatewayCard
+      gateways={gateways}
+      chosen={chosen}
+      doc={{ ...gateway, gateway: gateway.gateway || gateways[0] }}
+      info={answer?.gateway === chosen ? answer.info : null}
+      onDraft={onDraft}
+      onSave={async (changes) => {
+        // never send empty secrets - blank means "unchanged"
+        const payload = Object.fromEntries(
+          Object.entries(changes).filter(
+            ([k, v]) =>
+              !["key_secret", "webhook_secret"].includes(k) || v !== "",
+          ),
+        )
+        if (gateway.name) {
+          await updateResource("Payment Gateway Settings", String(gateway.name), payload)
+        } else {
+          await createResource("Payment Gateway Settings", {
+            gateway: gateways[0],
+            ...payload,
+            property,
+          })
+        }
+        load()
+      }}
+    />
   )
 }
 

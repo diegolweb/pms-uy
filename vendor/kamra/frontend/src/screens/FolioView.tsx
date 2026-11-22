@@ -1,7 +1,8 @@
-import { Fragment, useCallback, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import { ArrowLeft, ArrowRightLeft, Printer, Trash2, X } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { call, getCurrentProperty } from "../lib/api"
+import { call, getCurrentProperty, newIdempotencyKey } from "../lib/api"
+import { subscribeRealtime } from "../lib/realtime"
 import EditableNationality from "../components/EditableNationality"
 import LinkedRecords from "../components/LinkedRecords"
 import AllowanceRequests from "../components/AllowanceRequests"
@@ -40,6 +41,10 @@ interface InvoiceData {
       charge_type: string
       description: string
       allowance_serial?: string | null
+      /** on a void's reversal line: the line it reverses (both stay on the bill) */
+      reversal_of?: string | null
+      void_reason?: string | null
+      voided_by?: string | null
       amount: number
       gst_rate: number
       gst_amount: number
@@ -124,7 +129,9 @@ interface InvoiceData {
     date: string
     amount_in_words: string
     footer: string | null
-    service_code_label: string
+    invoice_footer?: string | null
+    /** null when the country has no per-line service code */
+    service_code_label: string | null
   }
   /** Charges with the service code the tax authority expects per LINE -
    *  a room night, a restaurant cover and a laundry bag are three
@@ -188,6 +195,25 @@ interface SiblingFolio {
   bill_to_name?: string | null
   /** the company a Company or Group bill goes to */
   company?: string | null
+}
+
+/** kamra.payments.gateway_refunds: the payments of a folio its property's
+ *  gateway posted and can still give (part of) back, with what is left of
+ *  each. Empty when the gateway gives nothing back. */
+interface GatewayRefundable {
+  gateway: string | null
+  payments: { reference: string; amount: number; left: number }[]
+}
+
+/** How many refunds of one gateway payment a folio carries - the rows the
+ *  gateway posts as "refund:<payment>:<id>" or "chargeback:<payment>", read
+ *  as kamra.payments.refunded_for_payment reads them. */
+function gatewayRefundsOf(payments: InvoiceData["folio"]["payments"], reference: string) {
+  return payments.filter((p) => {
+    const ref = p.payment_kind === "Refund" ? p.reference ?? "" : ""
+    const rest = ref.includes(":") ? ref.slice(ref.indexOf(":") + 1) : ""
+    return rest === reference || rest.startsWith(`${reference}:`)
+  }).length
 }
 
 /** A distinct label per folio. Extras get numbered when there's more than
@@ -272,7 +298,7 @@ export default function FolioView() {
   const [busy, setBusy] = useState(false)
 
   const [charge, setCharge] = useState({
-    charge_type: "Food & Beverage", description: "", amount: "", gst_rate: "5",
+    charge_type: "Food & Beverage", description: "", amount: "", gst_rate: "",
     is_alcohol: false,
   })
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -289,6 +315,8 @@ export default function FolioView() {
     kind: "Payment",
     currency: "",
   })
+  // one key per Record press; reused on retry (#550)
+  const [paymentKey, setPaymentKey] = useState(newIdempotencyKey)
   // foreign currencies the hotel set a rate for TODAY (the only rate the
   // server converts a payment at); "" = the hotel's own currency
   const [fxRates, setFxRates] = useState<{ currency: string; buy_rate: number }[]>([])
@@ -325,6 +353,23 @@ export default function FolioView() {
   const [toCorrect, setToCorrect] = useState<
     { date: string; charged: number; new: number }[]>([])
   const [correction, setCorrection] = useState({ reason: "", pin: "" })
+  // Refund through the gateway (kamra.payments.refund_via_gateway): Front
+  // Desk / Finance, on a payment the gateway posted. It posts nothing: the
+  // Refund row arrives when the gateway reports the refund.
+  const canGatewayRefund = roles.some((r) =>
+    ["Finance", "Front Desk", "Hotel Admin", "System Manager", "Administrator"].includes(r))
+  const [refundable, setRefundable] = useState<GatewayRefundable | null>(null)
+  // the form open on one payment; its key makes a retry of the same refund
+  // a replay on the server, never a second refund
+  const [gwRefund, setGwRefund] = useState<{
+    reference: string; amount: string; reason: string; key: string; error: string | null
+  } | null>(null)
+  const [gwAsking, setGwAsking] = useState(false)
+  const gwAskingNow = useRef(false)  // two presses before a re-render ask once
+  // refunds asked and not on the folio yet: payment reference -> how many
+  // refund rows of it the folio will have once the gateway reports them
+  const [gwWaiting, setGwWaiting] = useState<Record<string, number>>({})
+  const [gwNote, setGwNote] = useState<string | null>(null)
 
   const load = useCallback(() => {
     if (name)
@@ -349,6 +394,40 @@ export default function FolioView() {
       .then(setAdjustCodes).catch(() => {})
   }, [])
 
+  // what the gateway can give back, again after every reload of the folio
+  const folioStatus = data?.folio.status
+  useEffect(() => {
+    if (!name || !canGatewayRefund || folioStatus !== "Open") return setRefundable(null)
+    call<GatewayRefundable>("kamra.payments.gateway_refunds", { folio: name })
+      .then(setRefundable)
+      .catch(() => setRefundable(null))
+  }, [name, canGatewayRefund, folioStatus, data])
+
+  // a refund asked: re-fetch on this folio's live pings (polling when the
+  // socket is down) until the gateway's Refund row is in, for a while at most
+  const gwListening = Object.keys(gwWaiting).length > 0
+  useEffect(() => {
+    if (!gwListening || !name) return
+    const stop = subscribeRealtime(load, {
+      filter: (e) => e.doctype === "Folio" && e.name === name,
+      fallbackMs: 5000,
+    })
+    const giveUp = setTimeout(stop, 15 * 60_000)
+    return () => {
+      clearTimeout(giveUp)
+      stop()
+    }
+  }, [gwListening, load, name])
+  const shownPayments = data?.folio.payments
+  useEffect(() => {
+    if (!shownPayments || !gwListening) return
+    const still = Object.fromEntries(Object.entries(gwWaiting).filter(
+      ([reference, rows]) => gatewayRefundsOf(shownPayments, reference) < rows))
+    if (Object.keys(still).length === Object.keys(gwWaiting).length) return
+    setGwWaiting(still)
+    if (!Object.keys(still).length) setGwNote(null)
+  }, [shownPayments, gwWaiting, gwListening])
+
   const balanceNow = data?.folio.balance
   useEffect(() => {
     if (!showIn || !name) return setShown(null)
@@ -369,8 +448,18 @@ export default function FolioView() {
 
   const [rates, setRates] = useState<number[]>(taxRates())
   useEffect(() => {
-    loadLocale().then((l) => setRates(l.tax_rates))
+    loadLocale().then((l) => {
+      setRates(l.tax_rates)
+      // start on a rate this country allows: its F&B rate if listed, else its first
+      const listed = l.tax_rates.map(String)
+      const start = l.fnb_tax_rate != null && listed.includes(String(l.fnb_tax_rate))
+        ? String(l.fnb_tax_rate)
+        : listed[0] ?? ""
+      setCharge((c) => (listed.includes(c.gst_rate) ? c : { ...c, gst_rate: start }))
+    })
   }, [])
+  // a hotel that charges no tax (its only rate is 0%) gets no tax pickers
+  const noTax = rates.length === 1 && Number(rates[0]) === 0
   // the rate the server will put on this charge when it is food & beverage
   // (same words and rate as kamra.api._resolve_charge_gst); null = the
   // picked rate applies
@@ -423,6 +512,41 @@ export default function FolioView() {
   const taxed = Number(folio.tax_total) !== 0 ||
     folio.charges.some((c) => Number(c.gst_rate) !== 0 || Number(c.gst_amount) !== 0)
   const open = folio.status === "Open"
+
+  /** Ask the gateway to give back (part of) one of its payments. One press,
+   *  one request; a retry after a failure keeps the form's key. */
+  async function askGatewayRefund() {
+    const ask = gwRefund
+    if (!ask || gwAskingNow.current) return
+    gwAskingNow.current = true
+    setGwAsking(true)
+    // the same form, as the desk left it while waiting
+    const failed = (error: string) =>
+      setGwRefund((now) => (now && now.key === ask.key ? { ...now, error } : now))
+    try {
+      const out = await call<{ status: string; message?: string }>(
+        "kamra.payments.refund_via_gateway", {
+          folio: folio.name, reference: ask.reference, amount: Number(ask.amount),
+          reason: ask.reason.trim(), idempotency_key: ask.key,
+        })
+      if (out?.status === "rejected") {
+        failed(out.message || t("That didn't go through. Please try again."))
+      } else {
+        setGwRefund(null)
+        setGwNote(out?.message || t("Requested"))
+        setGwWaiting((w) => ({
+          ...w,
+          [ask.reference]: (w[ask.reference] ?? gatewayRefundsOf(folio.payments, ask.reference)) + 1,
+        }))
+        load()
+      }
+    } catch (e) {
+      failed(serverError(e))
+    } finally {
+      gwAskingNow.current = false
+      setGwAsking(false)
+    }
+  }
 
   return (
     <div>
@@ -1094,9 +1218,11 @@ export default function FolioView() {
                       )}
                       <th className="py-2 pr-3">{t("Date")}</th>
                       <th className="py-2 pr-3">{t("Item")}</th>
-                      <th className="hidden py-2 pr-3 print:table-cell">
-                        {doc?.service_code_label ?? t("SAC")}
-                      </th>
+                      {doc?.service_code_label && (
+                        <th className="hidden py-2 pr-3 print:table-cell">
+                          {doc.service_code_label}
+                        </th>
+                      )}
                       <th className="py-2 pr-3 text-right">{t("Amount {cur}", { cur: cur() })}</th>
                       {taxed && <th className="py-2 pr-3 text-right">{taxLabel()} %</th>}
                       {taxed && <th className="py-2 pr-3 text-right">{taxLabel()} {cur()}</th>}
@@ -1107,12 +1233,15 @@ export default function FolioView() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100">
-                    {folio.charges.map((c, i) => (
+                    {folio.charges.map((c, i) => {
+                      // a voided line and its reversal stay on the bill; neither is voided or moved again
+                      const voided = !!c.reversal_of || folio.charges.some((r) => r.reversal_of === c.name)
+                      return (
                       <Fragment key={c.name ?? i}>
-                        <tr>
+                        <tr className={voided ? "text-zinc-400" : undefined}>
                           {open && (
                             <td className="py-2 pr-2 print:hidden">
-                              <input
+                              {!voided && <input
                                 type="checkbox"
                                 className="size-3.5 accent-brand-600"
                                 aria-label={t("Select charge")}
@@ -1125,7 +1254,7 @@ export default function FolioView() {
                                     return next
                                   })
                                 }
-                              />
+                              />}
                             </td>
                           )}
                           <td className="py-2 pr-3 text-zinc-500">{c.posting_date}</td>
@@ -1135,6 +1264,9 @@ export default function FolioView() {
                             {c.description && (
                               <span className="text-zinc-500"> - {c.description}</span>
                             )}
+                            {voided && (
+                              <span className="ml-1 rounded bg-zinc-100 px-1 text-xs text-zinc-500">{t("Voided")}</span>
+                            )}
                             {c.allowance_serial && (
                               <Link to={`/allowance-voucher/${encodeURIComponent(c.allowance_serial)}`}
                                 className="ml-1 font-mono text-xs text-brand-700 hover:underline print:text-zinc-500 print:no-underline"
@@ -1143,16 +1275,18 @@ export default function FolioView() {
                               </Link>
                             )}
                           </td>
-                          <td className="hidden py-2 pr-3 font-mono text-xs text-zinc-400 print:table-cell">
-                            {lines.find((l) => l.row === c.name)?.service_code ?? ""}
-                          </td>
+                          {doc?.service_code_label && (
+                            <td className="hidden py-2 pr-3 font-mono text-xs text-zinc-400 print:table-cell">
+                              {lines.find((l) => l.row === c.name)?.service_code ?? ""}
+                            </td>
+                          )}
                           <td className="py-2 pr-3 text-right">{inr(c.amount)}</td>
                           {taxed && <td className="py-2 pr-3 text-right">{c.gst_rate}%</td>}
                           {taxed && <td className="py-2 pr-3 text-right">{inr(c.gst_amount)}</td>}
                           <td className="py-2 text-right font-medium">{inr(c.total)}</td>
                           {editable && (
                             <td className="relative whitespace-nowrap py-2 pl-3 text-right print:hidden">
-                              {c.charge_type !== "Allowance" &&
+                              {c.charge_type !== "Allowance" && !voided &&
                                 (voidFor === c.name ? (
                                   <span className="mr-1.5 inline-flex items-center gap-1">
                                     <input
@@ -1202,7 +1336,7 @@ export default function FolioView() {
                                     {t("Void")}
                                   </button>
                                 ))}
-                              {open && !selected.has(c.name) && (
+                              {open && !voided && !selected.has(c.name) && (
                                 <button
                                   aria-label={t("Move or split this charge")}
                                   className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-500 hover:border-brand-400 hover:text-zinc-800"
@@ -1218,7 +1352,8 @@ export default function FolioView() {
                           )}
                         </tr>
                       </Fragment>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               </>
@@ -1359,8 +1494,17 @@ export default function FolioView() {
                 {t("Payments")}
               </h3>
               <ul className="divide-y divide-zinc-100">
-                {folio.payments.map((p, i) => (
-                  <li key={i} className="flex justify-between py-1.5">
+                {folio.payments.map((p, i) => {
+                  // only a payment the gateway posted, with something left
+                  const gw = open && p.payment_kind !== "Refund" && p.reference
+                    ? refundable?.payments.find((r) => r.reference === p.reference && r.left > 0.005)
+                    : undefined
+                  const asking = gw && gwRefund?.reference === gw.reference ? gwRefund : null
+                  const askAmount = Number(asking?.amount)
+                  const tooMuch = Boolean(gw && askAmount > gw.left + 0.005)
+                  return (
+                  <Fragment key={i}>
+                  <li className="flex justify-between py-1.5">
                     <span>
                       {p.posting_date} · {translate(p.mode)}
                       {p.payment_kind && p.payment_kind !== "Payment" && (
@@ -1378,10 +1522,55 @@ export default function FolioView() {
                         <span className="text-zinc-400"> · {p.currency} {inr(p.fx_amount)} @ {p.exchange_rate}</span>
                       )}
                     </span>
-                    <span className={Number(p.amount) < 0 ? "font-medium text-rose-600" : ""}>{cur()}{inr(p.amount)}</span>
+                    <span className="flex items-center gap-3">
+                      {gw && !asking && (
+                        <button type="button"
+                          className="text-xs font-medium text-rose-600 hover:underline print:hidden"
+                          title={refundable?.gateway ? `${t("Gateway")}: ${refundable.gateway}` : undefined}
+                          onClick={() => setGwRefund({
+                            reference: gw.reference, amount: String(gw.left), reason: "",
+                            key: newIdempotencyKey(), error: null,
+                          })}>
+                          {t("Refund")}
+                        </button>
+                      )}
+                      <span className={Number(p.amount) < 0 ? "font-medium text-rose-600" : ""}>{cur()}{inr(p.amount)}</span>
+                    </span>
                   </li>
-                ))}
+                  {gw && asking && (
+                    <li className="py-1.5 print:hidden">
+                      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 p-2">
+                        <input className={`${inputCls} w-28`} type="number" min="0" step="0.01"
+                          aria-label={t("Amount")} aria-invalid={tooMuch} placeholder={translate(cur())}
+                          value={asking.amount}
+                          onChange={(e) => setGwRefund({ ...asking, amount: e.target.value, error: null })} />
+                        <span className={tooMuch ? "text-xs font-medium text-rose-600" : "text-xs text-zinc-500"}>
+                          {cur()}{inr(gw.left)} {t("left")}
+                        </span>
+                        <input className={`${inputCls} min-w-40 flex-1`}
+                          aria-label={t("Refund reason")} placeholder={t("Refund reason")}
+                          value={asking.reason}
+                          onChange={(e) => setGwRefund({ ...asking, reason: e.target.value, error: null })} />
+                        <Button variant="outline" className="text-rose-600"
+                          disabled={gwAsking || !(askAmount > 0) || tooMuch || !asking.reason.trim()}
+                          onClick={askGatewayRefund}>
+                          {t("Refund {amount}", { amount: `${cur()}${inr(askAmount > 0 ? askAmount : 0)}` })}
+                        </Button>
+                        <Button variant="ghost" aria-label={t("Cancel")} disabled={gwAsking}
+                          onClick={() => setGwRefund(null)}>✕</Button>
+                        {asking.error && (
+                          <p role="alert" className="w-full text-xs text-rose-600">{asking.error}</p>
+                        )}
+                      </div>
+                    </li>
+                  )}
+                  </Fragment>
+                  )
+                })}
               </ul>
+              {gwNote && (
+                <p role="status" className="mt-1 text-xs text-emerald-700 print:hidden">{gwNote}</p>
+              )}
               {refund ? (
                 <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-rose-200 bg-rose-50 p-2">
                   <input className={`${inputCls} w-24`} type="number" placeholder={translate(cur())}
@@ -1426,6 +1615,12 @@ export default function FolioView() {
                 {property.gstin && property.tax_note
                   ? ` ${t(property.tax_note)}`
                   : ""}
+                {/* the hotel's own lines - CIN, bank details - as typed */}
+                {doc?.invoice_footer && (
+                  <span className="mt-2 block whitespace-pre-line">
+                    {doc.invoice_footer}
+                  </span>
+                )}
               </p>
               <div className="text-center">
                 <div className="mb-1 h-8 w-40 border-b border-zinc-300" />
@@ -1471,7 +1666,7 @@ export default function FolioView() {
                 value={charge.amount}
                 onChange={(e) => setCharge({ ...charge, amount: e.target.value })}
               />
-              {fixedRate !== null ? (
+              {noTax ? null : fixedRate !== null ? (
                 /* the server taxes food & beverage at the pack's F&B rate
                    whatever is picked (_resolve_charge_gst) - show that rate
                    rather than offer a choice that would be ignored */
@@ -1511,7 +1706,8 @@ export default function FolioView() {
                 {t("Alcohol")}
               </label>)}
               <Button
-                disabled={busy || !charge.amount}
+                disabled={busy || !charge.amount ||
+                  (fixedRate === null && rates.length > 0 && !rates.map(String).includes(charge.gst_rate))}
                 onClick={() =>
                   act(() =>
                     call("kamra.api.add_folio_charge", {
@@ -1552,6 +1748,7 @@ export default function FolioView() {
                       setAllowance({ ...allowance, amount: e.target.value })
                     }
                   />
+                  {!noTax && (
                   <select
                     className={inputCls}
                     value={allowance.gst_rate}
@@ -1565,6 +1762,7 @@ export default function FolioView() {
                       </option>
                     ))}
                   </select>
+                  )}
                   {adjustCodes.length > 0 && (
                     <select
                       className={inputCls}
@@ -1761,16 +1959,18 @@ export default function FolioView() {
               <Button
                 disabled={busy || !payment.amount}
                 onClick={() =>
-                  act(() =>
-                    call("kamra.api.add_folio_payment", withPin({
+                  act(async () => {
+                    await call("kamra.api.add_folio_payment", withPin({
                       folio: folio.name,
                       mode: payment.mode,
                       kind: payment.kind,
                       amount: Number(payment.amount),
                       reference: payment.reference || undefined,
                       currency: payment.currency || undefined,
-                    })),
-                  )
+                      idempotency_key: paymentKey,
+                    }))
+                    setPaymentKey(newIdempotencyKey())
+                  })
                 }
               >
                 {t("Record")}

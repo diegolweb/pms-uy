@@ -198,7 +198,9 @@ def expire_holds() -> dict:
 				frappe.db.rollback(save_point=savepoint)
 			except Exception:
 				pass  # the savepoint itself failed; nothing of this hold to undo
+			from kamra.privacy import guest_traceback
 			frappe.log_error(title=f"Hold expiry failed for {name}",
+			                 message=guest_traceback(("Reservation", name)),
 			                 reference_doctype="Reservation",
 			                 reference_name=name)
 		finally:

@@ -54,6 +54,8 @@ def _room_type_payload(rt) -> dict:
 
 
 def _property_payload(prop) -> dict:
+	from kamra.localization import default_country
+
 	return {
 		"name": prop.name,
 		"property_name": prop.property_name,
@@ -66,7 +68,7 @@ def _property_payload(prop) -> dict:
 		"address_line": prop.address_line,
 		"city": prop.city, "state": prop.state,
 		"pincode": prop.pincode,
-		"country": prop.get("country") or "India",
+		"country": prop.get("country") or default_country(),
 		"phone": prop.phone, "email": prop.email,
 		"website": prop.website,
 		"google_reviews_url": prop.get("google_reviews_url"),
@@ -110,6 +112,7 @@ def _property_payload(prop) -> dict:
 		"has_cancellation_tiers": bool(prop.get("cancellation_tiers")),
 		"booking_mode": prop.get("booking_mode") or "Instant",
 		"property_kind": prop.get("property_kind") or "Hotel",
+		"payment_gateway": _online_payment(prop.name),
 	}
 
 
@@ -470,7 +473,7 @@ def search_stay(property: str, check_in_date: str, check_out_date: str,
 					           pets=int(pets or 0))
 					plan = {"meal_plan": mp, "amount_after_tax": pq["amount_after_tax"],
 					        **_payment_split(prop, pq["amount_after_tax"],
-					                         pq.get("stay_rules"))}
+					                         pq.get("stay_rules"), nights)}
 					if voucher:
 						plan["list_amount"] = quote(
 							property, rt, check_in_date, check_out_date, a, c,
@@ -479,7 +482,7 @@ def search_stay(property: str, check_in_date: str, check_out_date: str,
 						q = pq
 					plans.append(plan)
 				rules = q.get("stay_rules") or {}
-				q.update(_payment_split(prop, q.get("amount_after_tax"), rules))
+				q.update(_payment_split(prop, q.get("amount_after_tax"), rules, nights))
 				row["quote"] = q
 				row["plans"] = plans
 				need = max(int(rules.get("minimum_nights") or 0),
@@ -923,13 +926,16 @@ def _over_capacity_note(above: int) -> str:
 	        "confirms the arrangement and the price for them.")
 
 
-def _advance_terms(prop, total: float, rules: dict | None = None) -> tuple[float, str]:
+def _advance_terms(prop, total: float, rules: dict | None = None,
+                   nights: int | None = None) -> tuple[float, str]:
 	"""What the guest pays online now, and a human label - computed from the
 	property's CURRENT booking-payment policy. Snapshotted onto the booking so
 	a later policy change never re-bills an existing guest. A season marked
 	full payment (holidays, December) takes the whole amount whatever the
 	usual advance; a season with its own advance % (25, 50) asks that % for
-	these dates. `rules` is the quote's stay_rules."""
+	these dates. "First night" asks for one night: the stay's total (taxes
+	and fees included) divided by its `nights`, the same for every night.
+	`rules` is the quote's stay_rules."""
 	rules = rules or {}
 	mode = prop.get("booking_payment_mode") or "Pay at hotel"
 	total = float(total or 0)
@@ -941,6 +947,9 @@ def _advance_terms(prop, total: float, rules: dict | None = None) -> tuple[float
 		pct = season_pct or float(prop.get("advance_percent") or 0)
 		due = round(total * pct / 100, 2)
 		return due, f"{pct:g}% advance ({sym}{due:,.0f}) now, rest at the hotel"
+	if mode == "First night":
+		due = min(total, round(total / max(cint(nights or 1), 1), 2))
+		return due, f"One night ({sym}{due:,.0f}) now, rest at the hotel"
 	if mode == "Registration fee":
 		due = min(float(prop.get("registration_fee") or 0), total)
 		return due, f"{sym}{due:,.0f} registration fee now, rest at the hotel"
@@ -949,16 +958,133 @@ def _advance_terms(prop, total: float, rules: dict | None = None) -> tuple[float
 	return 0.0, "Pay at the hotel"
 
 
-def _payment_split(prop, total: float, rules: dict | None = None) -> dict:
+def _payment_split(prop, total: float, rules: dict | None = None,
+                   nights: int | None = None) -> dict:
 	"""Server-computed split the booking page shows: what is due now and
 	what is left to pay at the hotel. The browser never derives these."""
 	total = float(total or 0)
-	due, policy = _advance_terms(prop, total, rules)
+	due, policy = _advance_terms(prop, total, rules, nights)
 	return {
 		"advance_due": due,
 		"balance_at_hotel": round(max(0.0, total - due), 2),
 		"payment_policy": policy,
 	}
+
+
+# ── the deposit of a web booking, paid online ─────────────────────────────
+
+# a link that can be paid needs a few minutes of life (gateways refuse one
+# that ends sooner): a hold with an online deposit is never shorter than this
+ONLINE_HOLD_MINUTES = 10
+
+
+def _status_signature(reservation: str) -> str:
+	import hashlib
+	import hmac
+
+	from frappe.utils.password import get_encryption_key
+
+	return hmac.new(get_encryption_key().encode(),
+	                f"kamra-booking-status:{reservation}".encode(),
+	                hashlib.sha256).hexdigest()[:32]
+
+
+def booking_status_token(reservation: str) -> str:
+	"""A read-only key to one web booking's status: "<reservation>.<32 hex>",
+	HMAC-SHA256 of "kamra-booking-status:<reservation>" with the site's
+	encryption key. Not the pre-check-in token: this one travels inside the
+	payment gateway's return address."""
+	return f"{reservation}.{_status_signature(reservation)}"
+
+
+def _res_by_status_token(token: str):
+	import hmac
+
+	name, _, signature = (token or "").strip().rpartition(".")
+	if not (name and len(signature) == 32
+	        and hmac.compare_digest(signature, _status_signature(name))
+	        and frappe.db.exists("Reservation", name)):
+		frappe.throw(frappe._("This booking link is not valid."), frappe.PermissionError)
+	return frappe.get_doc("Reservation", name)
+
+
+def _online_payment(property: str) -> str | None:
+	"""The gateway that takes this property's web deposits, or None: its
+	country pack offers one and an enabled Payment Gateway Settings names it."""
+	from kamra import localization as loc
+
+	offered = loc.payment_gateways(loc.pack_for(property))
+	if not offered:
+		return None
+	gateway = frappe.db.get_value("Payment Gateway Settings",
+	                              {"property": property, "enabled": 1}, "gateway")
+	return gateway if gateway in offered else None
+
+
+def _return_origins() -> set[str]:
+	conf = frappe.conf.get("booking_return_origins") or []
+	if isinstance(conf, str):
+		conf = conf.split(",")
+	return {o.strip().rstrip("/").lower() for o in conf if isinstance(o, str) and o.strip()}
+
+
+def _return_url(return_url: str | None, token: str) -> str:
+	"""Where the gateway sends the guest back: this site's /kamra/book, or a
+	page of the caller's own on an origin listed in site config
+	booking_return_origins (exact scheme://host[:port]); anything else ->
+	frappe.ValidationError. Always with booking=<token> in its query."""
+	from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+	from frappe.utils import get_url
+
+	parts = urlsplit((return_url or "").strip() or get_url("/kamra/book"))
+	own = urlsplit(get_url())
+	allowed = {f"{own.scheme}://{own.netloc}".lower()} | _return_origins()
+	if (parts.scheme not in ("http", "https") or not parts.hostname
+	        or parts.username or parts.password
+	        or f"{parts.scheme}://{parts.netloc}".lower() not in allowed):
+		frappe.throw(frappe._("This return address is not allowed."))
+	query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "booking"]
+	return urlunsplit((parts.scheme, parts.netloc, parts.path or "/",
+	                   urlencode([*query, ("booking", token)]), ""))
+
+
+def _zoned(value) -> str | None:
+	"""A stored datetime (the site's time zone, naive) as ISO 8601 with its
+	offset, so the guest's browser can show it in the guest's own time."""
+	if not value:
+		return None
+	from zoneinfo import ZoneInfo
+
+	from frappe.utils import get_datetime, get_system_timezone
+
+	return get_datetime(value).replace(
+		microsecond=0, tzinfo=ZoneInfo(get_system_timezone())).isoformat()
+
+
+def _hold_is_live(res) -> bool:
+	from frappe.utils import get_datetime, now_datetime
+
+	return bool(res.status == "Pending Payment" and res.hold_expires_on
+	            and get_datetime(res.hold_expires_on) > now_datetime())
+
+
+def _guest_folio(reservation: str):
+	return frappe.db.get_value(
+		"Folio", {"reservation": reservation, "folio_type": "Guest"},
+		["name", "status", "payment_link_url", "payment_link_amount"], as_dict=True)
+
+
+def _deposit_link(reservation: str, amount: float, return_url: str | None) -> str:
+	"""Ask the property's gateway for a link to the booking's deposit, as the
+	booking page's agent; the link goes back to the booking's status page."""
+	from kamra import payments
+
+	with act_as(GUEST_AGENT):
+		link = payments.booking_deposit_link(
+			reservation, amount,
+			return_url=_return_url(return_url, booking_status_token(reservation)))
+	return link["url"]
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -968,9 +1094,10 @@ def book(property: str, room_type: str, check_in_date: str,
          email: str = "", adults: int = 2, children: int = 0,
          meal_plan: str = "", special_requests: str = "", addons=None,
          voucher_code: str = "", idempotency_key: str = "", pets: int = 0,
-         child_ages=None, marketing_consent: int = 0):
-	"""Create a Website booking. Guest identity is the phone number; staff
-	verify at check-in. The advance owed is computed from the property's
+         child_ages=None, marketing_consent: int = 0, return_url: str = ""):
+	"""Create a Website booking. An existing guest profile is reused when
+	both the phone and the full name match; staff verify at check-in.
+	The advance owed is computed from the property's
 	current payment policy and snapshotted onto the booking.
 
 	Instant mode (default): Confirmed when nothing is due now, else
@@ -978,9 +1105,17 @@ def book(property: str, room_type: str, check_in_date: str,
 	inventory) until the host approves. A party above what the room sleeps,
 	within the extra guests it allows, is also Requested: the host confirms
 	the sleeping arrangement and agrees the price for them.
+
+	When the property takes payments online (_online_payment), a held
+	booking comes back with `payment_url`, the gateway's link for its
+	deposit, valid while the hold lasts (`payment_expires_on`); the gateway
+	sends the guest back to `return_url` (see _return_url) with the
+	booking's `status_token`, which booking_status reads. A link the gateway
+	fails to make leaves the booking held, with `payment_error`.
 	"""
 	if not guest_name.strip() or not phone.strip():
 		frappe.throw("Name and phone are required.")
+	_return_url(return_url, "")  # an unlisted origin is refused before anything is booked
 
 	from kamra.pricing import capacity_overflow
 
@@ -1013,6 +1148,9 @@ def book(property: str, room_type: str, check_in_date: str,
 
 	mode = getattr(prop, "booking_mode", None) or "Instant"
 	hold_minutes = cint(getattr(prop, "hold_minutes", None) or 120)
+	gateway = _online_payment(property)
+	if gateway:
+		hold_minutes = max(hold_minutes, ONLINE_HOLD_MINUTES)
 	key = (idempotency_key or "").strip() or None
 
 	# Peek at payment terms before insert so Instant can choose status.
@@ -1022,8 +1160,9 @@ def book(property: str, room_type: str, check_in_date: str,
 		voucher_code=voucher_code or None, pets=int(pets or 0),
 	)
 	stay_rules = q.get("stay_rules") or {}
+	nights = date_diff(check_out_date, check_in_date)
 	advance_due, policy = _advance_terms(
-		prop, float(q["amount_after_tax"] or 0), stay_rules)
+		prop, float(q["amount_after_tax"] or 0), stay_rules, nights)
 
 	status = None
 	hold_expires_on = None
@@ -1066,7 +1205,7 @@ def book(property: str, room_type: str, check_in_date: str,
 		# later change to the property's payment config never re-bills this guest
 		total = float(result["amount_after_tax"] or 0)
 		# Recompute against the saved total (voucher / engine may differ).
-		advance_due, policy = _advance_terms(prop, total, stay_rules)
+		advance_due, policy = _advance_terms(prop, total, stay_rules, nights)
 		updates = {
 			"advance_due": advance_due,
 			"payment_policy": policy,
@@ -1097,10 +1236,29 @@ def book(property: str, room_type: str, check_in_date: str,
 			set_marketing_consent(result["guest"], 1, "Booking Page", property)
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- persists the completed operation before returning to an external/public caller; reviewed as intentional
 
-	final_status = frappe.db.get_value(
-		"Reservation", result["reservation"], "status")
+	name = result["reservation"]
+	final_status, hold = frappe.db.get_value(
+		"Reservation", name, ["status", "hold_expires_on"])
+	token = booking_status_token(name)
+	payment_url, payment_error = None, False
+	if gateway and final_status == "Pending Payment" and advance_due > 0:
+		if result.get("idempotent_replay"):
+			payment_url = (_guest_folio(name) or {}).get("payment_link_url") or None
+		else:
+			# the booking is saved whatever happens here: a link the gateway
+			# fails to make leaves it held, as without a gateway
+			frappe.db.savepoint("kamra_web_deposit")
+			try:
+				payment_url = _deposit_link(name, advance_due, return_url)
+			except Exception as e:
+				frappe.db.rollback(save_point="kamra_web_deposit")
+				payment_error = True
+				frappe.log_error(title="Web booking deposit link failed",
+				                 message=type(e).__name__,
+				                 reference_doctype="Reservation", reference_name=name)
+			frappe.db.commit()  # nosemgrep: frappe-manual-commit -- persists the completed operation before returning to an external/public caller; reviewed as intentional
 	return {
-		"reservation": result["reservation"],
+		"reservation": name,
 		"amount_after_tax": result["amount_after_tax"],
 		"advance_due": advance_due,
 		"balance_at_hotel": round(
@@ -1118,7 +1276,70 @@ def book(property: str, room_type: str, check_in_date: str,
 		"security_deposit_amount": float(
 			frappe.db.get_value("Property", property, "security_deposit_amount") or 0
 		),
+		"status_token": token,
+		"payment_url": payment_url,
+		"payment_expires_on": _zoned(hold) if final_status == "Pending Payment" else None,
+		"payment_gateway": gateway,
+		"payment_error": payment_error,
 	}
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(limit=240, seconds=3600)
+def booking_status(token: str) -> dict:
+	"""What the booking page shows a guest back from paying: the state of
+	their booking and, while it is still held, the link to pay its deposit.
+	Nothing about who the guest is. `expired`: the hold ran out before the
+	deposit arrived (released, or about to be by expire_holds)."""
+	from kamra.localization import default_currency, pack_for
+	from kamra.reservation_state import HOLD_EXPIRY_NOTE
+
+	res = _res_by_status_token(token)
+	total = float(res.amount_after_tax or 0)
+	due, paid = float(res.advance_due or 0), float(res.advance_paid or 0)
+	live = _hold_is_live(res)
+	folio = _guest_folio(res.name) if live else None
+	return {
+		"reservation": res.name,
+		"status": res.status,
+		"expired": bool(
+			(res.status == "Cancelled" and (res.cancellation_note or "") == HOLD_EXPIRY_NOTE)
+			or (res.status in ("Pending Payment", "Held") and res.hold_expires_on and not live)),
+		"property_name": frappe.get_cached_value("Property", res.property, "property_name"),
+		"room_type_name": frappe.get_cached_value("Room Type", res.room_type, "room_type_name")
+		if res.room_type else None,
+		"check_in_date": str(res.check_in_date),
+		"check_out_date": str(res.check_out_date),
+		"nights": date_diff(res.check_out_date, res.check_in_date),
+		"currency": (frappe.get_cached_value("Property", res.property, "currency")
+		             or default_currency(pack_for(res.property))),
+		"amount_after_tax": total,
+		"advance_due": due,
+		"advance_paid": paid,
+		"balance_at_hotel": round(max(0.0, total - max(due, paid)), 2),
+		"hold_expires_on": _zoned(res.hold_expires_on) if live else None,
+		"payment_url": (folio.payment_link_url or None) if folio else None,
+		"payment_gateway": _online_payment(res.property),
+	}
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(limit=10, seconds=3600)
+def booking_payment_link(token: str, return_url: str = "") -> dict:
+	"""A link to pay the deposit of a booking still held for it: the folio's
+	own link when it is for what is left of the deposit, else a new one."""
+	res = _res_by_status_token(token)
+	_return_url(return_url, token)  # an unlisted origin is refused before anything
+	left = round(float(res.advance_due or 0) - float(res.advance_paid or 0), 2)
+	if not _hold_is_live(res) or left <= 0:
+		frappe.throw(frappe._("This booking is no longer waiting for a payment."))
+	folio = _guest_folio(res.name)
+	if folio and folio.payment_link_url and abs(float(folio.payment_link_amount or 0) - left) < 0.005:
+		url = folio.payment_link_url
+	else:
+		url = _deposit_link(res.name, left, return_url)
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- persists the completed operation before returning to an external/public caller; reviewed as intentional
+	return {"payment_url": url, "payment_expires_on": _zoned(res.hold_expires_on)}
 
 
 @frappe.whitelist(allow_guest=True)

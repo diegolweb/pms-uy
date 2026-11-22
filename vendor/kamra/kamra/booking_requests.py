@@ -107,7 +107,8 @@ def accept_booking_request(reservation: str, room: str | None = None):
 	refused with the reason; decline it instead."""
 	from kamra.api import agent_channel, available_rooms
 	from kamra.kamra.doctype.reservation.reservation import (
-		InventoryRefused, uses_member_rooms, villa_lockout_conflict)
+		InventoryRefused, lock_property_for_inventory, uses_member_rooms,
+		villa_lockout_conflict)
 	from kamra.reservation_state import lock_sius_for_booking
 
 	res = _load_request(reservation)
@@ -115,12 +116,15 @@ def accept_booking_request(reservation: str, room: str | None = None):
 	if getdate(ci) < getdate(nowdate()):
 		frappe.throw(_("The arrival date of {0} has passed - decline it.").format(
 			res.name), title=_("Request expired"))
+	# Property before sellable units and the room type, the same order as
+	# Reservation.validate, so the two paths cannot deadlock.
+	lock_property_for_inventory(res.property)
 	lock_sius_for_booking(res.property, res.room_type)
 	# serialize against a booking of the same category landing right now
 	frappe.db.get_value("Room Type", res.room_type, "name", for_update=True)
 
 	conflict = villa_lockout_conflict(res.property, res.room_type, ci, co,
-	                                  exclude=res.name)
+	                                  exclude=res.name, for_update=True)
 	if conflict:
 		frappe.throw(
 			_("Can't accept {0}: the villa and its rooms can't both be sold, "
@@ -159,7 +163,9 @@ def accept_booking_request(reservation: str, room: str | None = None):
 		from kamra.deposit import ensure_deposit_for_reservation
 		ensure_deposit_for_reservation(res)
 	except Exception:
-		frappe.log_error(title="Security deposit ensure on accept failed")
+		from kamra.privacy import guest_traceback
+		frappe.log_error(title="Security deposit ensure on accept failed",
+		                 message=guest_traceback(res))
 
 	from kamra.savings import log_action
 	room_no = (res.room or "").split("-")[-1]
@@ -277,6 +283,8 @@ def _notify_guest(res, *, accepted: bool, reason: str | None = None) -> list[str
 				reference_doctype="Reservation", reference_name=res.name)
 			used.append("email")
 		except Exception:
-			frappe.log_error(title=f"Booking request email failed: {res.name}")
+			from kamra.privacy import guest_traceback
+			frappe.log_error(title=f"Booking request email failed: {res.name}",
+			                 message=guest_traceback(res))
 	return used
 

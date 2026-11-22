@@ -555,6 +555,7 @@ export default function BookingEngine() {
                     >
                       <option value={"Pay at hotel"}>{translate("Pay at hotel")}</option>
                       <option value={"Advance percent"}>{translate("Advance percent")}</option>
+                      <option value={"First night"}>{translate("First night")}</option>
                       <option value={"Registration fee"}>{translate("Registration fee")}</option>
                       <option value={"Full online"}>{translate("Full online")}</option>
                     </select>
@@ -569,6 +570,9 @@ export default function BookingEngine() {
                       />
                       <span className="mt-1 block text-xs text-zinc-400">{translate("Collected upfront; the rest is paid at the hotel.")}</span>
                     </label>
+                  )}
+                  {doc.booking_payment_mode === "First night" && (
+                    <p className="text-xs text-zinc-400">{translate("Used when guests pay one night: the stay's total divided by its nights.")}</p>
                   )}
                   {doc.booking_payment_mode === "Registration fee" && (
                     <label className="block max-w-xs">

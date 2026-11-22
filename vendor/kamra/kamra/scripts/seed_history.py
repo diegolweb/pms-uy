@@ -251,7 +251,8 @@ class History:
 			frappe.db.rollback(save_point="seed_history_step")
 			self.bump(f"{key}_refused")
 			if not quiet:
-				frappe.log_error(title=f"seed_history: {key}")
+				frappe.log_error(title=f"seed_history: {key}",
+				                 message=frappe.get_traceback(with_context=False))
 			return None
 
 	def as_user(self, user: str) -> None:

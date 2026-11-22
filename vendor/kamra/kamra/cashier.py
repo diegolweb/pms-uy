@@ -284,6 +284,8 @@ def session_as_dict(name: str, persist: bool = True) -> dict[str, Any]:
 	d["totals"] = totals
 	d["transactions"] = txns
 	d["cashier_id"] = frappe.db.get_value("Cashier", doc.cashier, "cashier_id")
+	from kamra.localization import cash_denominations, pack_for
+	d["denominations"] = cash_denominations(pack_for(doc.property))
 	return d
 
 
@@ -321,23 +323,31 @@ def open_session(property: str, opening_float: float | None = None,
 			frappe.throw("That terminal is not at this property.")
 		if term.disabled:
 			frappe.throw("That terminal is switched off.")
-		taken = frappe.db.get_value(
-			"Cashier Session", {"cashier_terminal": term.name, "status": "Open"},
-			["name", "user"], as_dict=True)
+		# The second opener waits here, then the locking read sees the session
+		# the first one inserted.
+		frappe.db.get_value("Cashier Terminal", term.name, "name", for_update=True)
+		taken_rows = frappe.db.sql(
+			"""SELECT name, `user` FROM `tabCashier Session`
+			   WHERE cashier_terminal = %s AND status = 'Open'
+			   FOR UPDATE""",
+			term.name, as_dict=True)
+		taken = taken_rows[0] if taken_rows else None
 		if taken:
 			if taken.user == user:
 				return session_as_dict(taken.name)
 			frappe.throw(f"{term.terminal_name} is already open under {taken.user}. "
 			             "Ask them (or a manager) to close it first.")
 	else:
-		existing = frappe.db.get_value(
-			"Cashier Session",
-			{"property": property, "user": user, "status": "Open",
-			 "cashier_terminal": ["is", "not set"]},
-			"name",
-		)
-		if existing:
-			return session_as_dict(existing)
+		cashier_name = ensure_cashier(property, user)
+		frappe.db.get_value("Cashier", cashier_name, "name", for_update=True)
+		existing_rows = frappe.db.sql(
+			"""SELECT name FROM `tabCashier Session`
+			   WHERE property = %s AND `user` = %s AND status = 'Open'
+			     AND IFNULL(cashier_terminal, '') = ''
+			   FOR UPDATE""",
+			(property, user), as_dict=True)
+		if existing_rows:
+			return session_as_dict(existing_rows[0].name)
 	cashier = ensure_cashier(property, user)
 	bd = get_business_date(property)
 	opening = float(opening_float) if opening_float not in (None, "") else \
@@ -405,9 +415,12 @@ def my_till(property: str):
 
 @frappe.whitelist(methods=["POST"])
 @require_roles("Front Desk", "Finance", "Night Auditor", "Kamra Agent")
-def close_session(session: str, counted_cash: float,
-                  notes: str | None = None, pin: str | None = None):
-	"""Count the drawer and close the till."""
+def close_session(session: str, counted_cash: float | None = None,
+                  notes: str | None = None, pin: str | None = None,
+                  cash_count=None):
+	"""Count the drawer and close the till. cash_count is the optional
+	count by note and coin, {value: count} or [{value, count}]; it must add
+	up to counted_cash, and fills it when counted_cash is left out."""
 	doc = frappe.get_doc("Cashier Session", session)
 	if doc.status != "Open":
 		frappe.throw("This session is already closed.")
@@ -418,8 +431,20 @@ def close_session(session: str, counted_cash: float,
 		frappe.throw("Only the owning cashier (or Finance / the night auditor) can close this till.")
 	from kamra.authz import require_cashier_pin
 	require_cashier_pin(doc.property, pin)
+	count = cash_count_rows(doc.property, cash_count)
+	if count:
+		total = round(sum(r["amount"] for r in count), 2)
+		if counted_cash in (None, ""):
+			counted_cash = total
+		elif abs(float(counted_cash) - total) > 0.005:
+			from kamra.localization import money_text
+			frappe.throw(frappe._("The count by note adds up to {0}, not {1}.").format(
+				money_text(doc.property, total), money_text(doc.property, counted_cash)))
+	if counted_cash in (None, ""):
+		frappe.throw(frappe._("Give the counted cash or the count by note."))
 	totals = _recompute_session_totals(session)
 	doc.reload()
+	doc.cash_count = frappe.as_json(count) if count else None
 	doc.counted_cash = float(counted_cash)
 	doc.variance = float(counted_cash) - float(totals["expected_cash"])
 	doc.status = "Closed"
@@ -431,14 +456,45 @@ def close_session(session: str, counted_cash: float,
 		# never block a cash count; flag it for a manager instead
 		doc.variance_status = "Needs Review"
 	doc.save(ignore_permissions=True)
+	from kamra.webhooks import emit_session_closed
+	emit_session_closed(doc)
 
 	# Derive a Shift Handover row so ops history stays consistent.
 	try:
 		_sync_shift_handover(doc)
 	except Exception:
-		frappe.log_error(title="shift handover sync failed")
+		frappe.log_error(title="shift handover sync failed",
+		                 message=frappe.get_traceback(with_context=False))
 
 	return session_as_dict(doc.name)
+
+
+def cash_count_rows(property: str, raw) -> list[dict]:
+	"""A drawer count by note and coin as [{value, count, amount}], largest
+	note first. Values must be the country pack's notes and coins (any
+	positive value where the pack names none); counts whole and not negative."""
+	if raw in (None, "", [], {}):
+		return []
+	if isinstance(raw, str):
+		raw = frappe.parse_json(raw)
+	pairs = raw.items() if isinstance(raw, dict) else (
+		(r.get("value"), r.get("count")) for r in raw)
+	from kamra.localization import cash_denominations, pack_for
+	allowed = cash_denominations(pack_for(property))
+	counts: dict[float, int] = {}
+	for value, count in pairs:
+		try:
+			value, n = float(value), float(count or 0)
+		except (TypeError, ValueError):
+			frappe.throw(frappe._("Each note count needs a value and a number."))
+		if value <= 0 or n < 0 or n != int(n):
+			frappe.throw(frappe._("Count whole notes and coins of a positive value."))
+		if allowed and value not in allowed:
+			frappe.throw(frappe._("{0} is not a note or coin here. Count in: {1}.").format(
+				f"{value:g}", ", ".join(f"{v:g}" for v in allowed)))
+		counts[value] = counts.get(value, 0) + int(n)
+	return [{"value": v, "count": c, "amount": round(v * c, 2)}
+	        for v, c in sorted(counts.items(), reverse=True) if c]
 
 
 def _sync_shift_handover(sess) -> None:
@@ -642,20 +698,33 @@ def set_petty_cash_float(property: str, amount: float):
 @frappe.whitelist()
 @require_roles("Front Desk", "Finance", "Hotel Admin", "Night Auditor", "Kamra Agent")
 def list_sessions(property: str, business_date: str | None = None,
-                  status: str | None = None):
+                  status: str | None = None, to_date: str | None = None,
+                  limit: int = 100):
+	"""Till sessions, newest first: one business date, or business_date..
+	to_date, optionally only Open or Closed ones (at most `limit`, 500 top).
+	Each row: name, cashier, cashier_id, user, business_date, status,
+	terminal, cashier_terminal, outlet, opening_float, system_cash,
+	system_card, system_upi, system_other, paid_outs, drops, petty_cash,
+	expected_cash, counted_cash, variance, variance_status,
+	variance_approved_by, opened_at, closed_at, closed_by. Read
+	session_report for one session's transactions and count."""
 	filters: dict[str, Any] = {"property": property}
 	if business_date:
-		filters["business_date"] = business_date
+		filters["business_date"] = ("between", [business_date,
+		                                        _range_end(business_date, to_date)])
 	if status:
 		filters["status"] = status
 	rows = frappe.get_all(
 		"Cashier Session",
 		filters=filters,
 		fields=["name", "cashier", "user", "business_date", "status",
-		        "opening_float", "system_cash", "expected_cash", "counted_cash",
-		        "variance", "opened_at", "closed_at", "terminal"],
+		        "terminal", "cashier_terminal", "outlet", "opening_float",
+		        "system_cash", "system_card", "system_upi", "system_other",
+		        "paid_outs", "drops", "petty_cash", "expected_cash",
+		        "counted_cash", "variance", "variance_status",
+		        "variance_approved_by", "opened_at", "closed_at", "closed_by"],
 		order_by="opened_at desc",
-		limit_page_length=100,
+		limit_page_length=max(1, min(int(limit or 100), 500)),
 	)
 	for r in rows:
 		r["cashier_id"] = frappe.db.get_value("Cashier", r.cashier, "cashier_id")
@@ -665,7 +734,84 @@ def list_sessions(property: str, business_date: str | None = None,
 @frappe.whitelist()
 @require_roles("Front Desk", "Finance", "Hotel Admin", "Night Auditor", "Kamra Agent")
 def session_report(session: str):
-	return _session_view(session)
+	"""One till session for a reconciliation: the session and its totals,
+	system vs counted per method, the note-by-note count, every receipt
+	and paid-out in time order, the cashier and the supervisor.
+
+	Returns every Cashier Session field (name, property, business_date,
+	status, terminal, cashier_terminal, outlet, opening_float, system_cash,
+	system_card, system_upi, system_other, paid_outs, drops, petty_cash,
+	expected_cash, counted_cash, variance, variance_status, opened_at,
+	closed_at, close_notes, user, closed_by, variance_approved_by) plus:
+
+	- `totals`: cash, card, upi, other, foreign_cash, paid_outs, drops,
+	  petty_cash, opening_float, expected_cash, recomputed from transactions
+	- `by_method`: one row per payment mode, Cash first: mode, receipts,
+	  refunds, net, system, counted, variance. Only Cash is counted: its
+	  system is the expected drawer (float + cash - paid outs - drops -
+	  petty cash); other modes have counted and variance null
+	- `cash_count`: [{value, count, amount}], largest note first; empty when
+	  the drawer was counted as one total
+	- `denominations`: the country pack's notes and coins
+	- `receipts`: Payment, Refund and Exchange transactions, oldest first
+	- `paid_outs`: Paid Out, Drop and Petty Cash transactions, oldest first
+	- each transaction: name, kind, mode, amount (refunds and paid outs
+	  negative), business_date, folio, pos_order, outlet, reference, notes,
+	  posted_by, posted_at, guest_name, reservation
+	- `transactions`: the newest 200, as the till screen shows them
+	- `cashier_id`, and `cashier_user`, `closed_by_user`, `supervisor` as
+	  {user, full_name} or null (supervisor: who approved a variance)"""
+	d = _session_view(session)
+	txns = frappe.get_all(
+		"Cashier Transaction", filters={"session": session},
+		fields=["name", "kind", "mode", "amount", "business_date", "folio",
+		        "pos_order", "outlet", "reference", "notes", "posted_by",
+		        "posted_at"],
+		order_by="posted_at asc, creation asc")
+	folios = {t.folio for t in txns if t.folio}
+	guests = {f.name: f for f in frappe.get_all(
+		"Folio", filters={"name": ("in", list(folios))},
+		fields=["name", "guest_name", "reservation", "invoice_number"])} if folios else {}
+	for t in txns:
+		f = guests.get(t.folio)
+		t["guest_name"] = f.guest_name if f else None
+		t["reservation"] = f.reservation if f else None
+	receipts = [t for t in txns if t.kind in ("Payment", "Refund", "Exchange")]
+	methods: dict[str, dict] = {}
+	for t in receipts:
+		m = methods.setdefault(t.mode or "Other", {
+			"mode": t.mode or "Other", "receipts": 0.0, "refunds": 0.0, "net": 0.0})
+		amt = float(t.amount or 0)
+		m["receipts" if amt >= 0 else "refunds"] += abs(amt)
+		m["net"] += amt
+	closed = d.get("status") == "Closed"
+	cash = methods.setdefault("Cash", {"mode": "Cash", "receipts": 0.0,
+	                                   "refunds": 0.0, "net": 0.0})
+	for m in methods.values():
+		for k in ("receipts", "refunds", "net"):
+			m[k] = round(m[k], 2)
+		# only the cash drawer is counted; other methods are as the system has them
+		m["system"] = m["net"]
+		m["counted"] = m["variance"] = None
+	cash["system"] = round(float(d["totals"]["expected_cash"]), 2)
+	if closed:
+		cash["counted"] = float(d.get("counted_cash") or 0)
+		cash["variance"] = round(cash["counted"] - cash["system"], 2)
+
+	def person(user):
+		return {"user": user, "full_name": frappe.db.get_value(
+			"User", user, "full_name") or user} if user else None
+
+	d.update({
+		"by_method": sorted(methods.values(), key=lambda m: m["mode"] != "Cash"),
+		"cash_count": frappe.parse_json(d.get("cash_count")) if d.get("cash_count") else [],
+		"receipts": receipts,
+		"paid_outs": [t for t in txns if t.kind in ("Paid Out", "Drop", "Petty Cash")],
+		"cashier_user": person(d.get("user")),
+		"closed_by_user": person(d.get("closed_by")),
+		"supervisor": person(d.get("variance_approved_by")),
+	})
+	return d
 
 
 @frappe.whitelist()
@@ -832,21 +978,119 @@ def save_terminal(property: str, terminal_name: str, kind: str = "Front Desk",
 	return {"ok": True, "name": doc.name}
 
 
-def _safe_balance(terminal: str) -> dict[str, float]:
-	got = frappe.db.sql(
-		"""SELECT COALESCE(SUM(amount), 0) FROM `tabCash Transfer`
-		   WHERE to_terminal = %s AND kind = 'Drop' AND status = 'Received'""",
-		terminal)[0][0]
-	banked = frappe.db.sql(
-		"""SELECT COALESCE(SUM(amount), 0) FROM `tabCash Transfer`
-		   WHERE from_terminal = %s AND kind = 'Bank Deposit' AND status = 'Received'""",
-		terminal)[0][0]
-	pending = frappe.db.sql(
+# Half a cent. The same slack the till totals use when they decide a figure
+# has actually changed.
+_MONEY_TOLERANCE = 0.004
+
+
+def _lock_cash_office(terminal: str) -> None:
+	"""One deposit at a time for this safe.
+
+	The balance is a sum of transfers, not a column, so two requests can
+	both read it and both insert. Locking the cash-office row makes the
+	second wait until the first commits. The balance has to be read again
+	after this returns: under REPEATABLE READ a plain SELECT still shows
+	the snapshot from before the wait.
+	"""
+	if terminal:
+		frappe.db.get_value("Cashier Terminal", terminal, "name", for_update=True)
+
+
+def _sum_amount(query: str, terminal: str) -> float:
+	return float(frappe.db.sql(query, terminal)[0][0] or 0)
+
+
+def _locked_sum(query: str, terminal: str) -> float:
+	"""Locking read of the rows behind the balance.
+
+	A consistent read taken after `_lock_cash_office` can still be the
+	snapshot from earlier in the request, and would miss the deposit that
+	committed while this one waited. FOR UPDATE reads the latest committed
+	rows.
+	"""
+	return float(sum(float(row[0] or 0) for row in frappe.db.sql(query, terminal)))
+
+
+def _safe_balance(terminal: str, *, for_update: bool = False) -> dict[str, float]:
+	if for_update:
+		got = _locked_sum(
+			"""SELECT amount FROM `tabCash Transfer`
+			   WHERE to_terminal = %s AND kind = 'Drop' AND status = 'Received'
+			   FOR UPDATE""",
+			terminal)
+		banked = _locked_sum(
+			"""SELECT amount FROM `tabCash Transfer`
+			   WHERE from_terminal = %s AND kind = 'Bank Deposit' AND status = 'Received'
+			   FOR UPDATE""",
+			terminal)
+	else:
+		got = _sum_amount(
+			"""SELECT COALESCE(SUM(amount), 0) FROM `tabCash Transfer`
+			   WHERE to_terminal = %s AND kind = 'Drop' AND status = 'Received'""",
+			terminal)
+		banked = _sum_amount(
+			"""SELECT COALESCE(SUM(amount), 0) FROM `tabCash Transfer`
+			   WHERE from_terminal = %s AND kind = 'Bank Deposit' AND status = 'Received'""",
+			terminal)
+	pending = _sum_amount(
 		"""SELECT COALESCE(SUM(amount), 0) FROM `tabCash Transfer`
 		   WHERE to_terminal = %s AND kind = 'Drop' AND status = 'Pending'""",
-		terminal)[0][0]
-	return {"received": float(got), "banked": float(banked),
-	        "in_transit": float(pending), "balance": float(got) - float(banked)}
+		terminal)
+	return {"received": got, "banked": banked,
+	        "in_transit": pending, "balance": got - banked}
+
+
+def _counted_safe_effect(row) -> tuple[str | None, float]:
+	"""(cash office, signed effect on its balance). Positive puts cash in.
+
+	Mirrors `_safe_balance`: only a received drop into the office and a
+	received bank deposit out of it count. Anything else is not in the safe.
+	"""
+	if not row:
+		return None, 0.0
+	kind, status = row.get("kind"), row.get("status")
+	amount = float(row.get("amount") or 0)
+	if kind == "Drop" and status == "Received" and row.get("to_terminal"):
+		return row.get("to_terminal"), amount
+	if kind == "Bank Deposit" and status == "Received" and row.get("from_terminal"):
+		return row.get("from_terminal"), -amount
+	return None, 0.0
+
+
+def assert_transfer_keeps_safe_solvent(doc) -> None:
+	"""A save may not take a safe balance below zero.
+
+	`bank_deposit` checks before it inserts. This is the same rule on the
+	document, so a Desk save cannot go around it. A save that does not
+	reduce the safe (cash arriving, a smaller deposit) is allowed, including
+	when the safe is already short, so the office can still receive the
+	drop that repairs it.
+	"""
+	new_terminal, new_effect = _counted_safe_effect(doc)
+	if doc.flags.in_insert or doc.is_new():
+		old_terminal, old_effect = None, 0.0
+	else:
+		# check_if_latest loads this before validate. Fall back to the row
+		# when validate runs outside save, so a note edit is not treated as
+		# a brand-new withdrawal of the whole amount.
+		prev = doc.get_doc_before_save()
+		if prev is None and doc.name and frappe.db.exists("Cash Transfer", doc.name):
+			prev = frappe.db.get_value(
+				"Cash Transfer", doc.name,
+				["kind", "status", "amount", "from_terminal", "to_terminal"],
+				as_dict=True)
+		old_terminal, old_effect = _counted_safe_effect(prev)
+	for terminal in sorted({t for t in (new_terminal, old_terminal) if t}):
+		effect = new_effect if terminal == new_terminal else 0.0
+		saved = old_effect if terminal == old_terminal else 0.0
+		# Not a reduction: nothing to refuse.
+		if effect >= saved - _MONEY_TOLERANCE:
+			continue
+		_lock_cash_office(terminal)
+		current = _safe_balance(terminal, for_update=True)["balance"]
+		resulting = current - saved + effect
+		if resulting < -_MONEY_TOLERANCE:
+			frappe.throw("That is more than the safe holds.")
 
 
 @frappe.whitelist()
@@ -925,7 +1169,9 @@ def bank_deposit(cash_office: str, amount: float, notes: str | None = None,
 	amt = float(amount)
 	if amt <= 0:
 		frappe.throw("Amount must be positive.")
-	if amt > _safe_balance(office.name)["balance"] + 0.004:
+	# Serialise on the safe, then read the balance the lock waited for.
+	_lock_cash_office(office.name)
+	if amt > _safe_balance(office.name, for_update=True)["balance"] + _MONEY_TOLERANCE:
 		frappe.throw("That is more than the safe holds.")
 	now = now_datetime()
 	doc = frappe.get_doc({

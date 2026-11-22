@@ -12,14 +12,21 @@ from frappe.utils import cint, getdate
 NUMBERS = ("min_stay_arrival", "min_stay_through", "max_stay")
 
 
+def _number_name(field: str) -> str:
+	"""The name the restrictions screen gives each number, in the desk's
+	language (the doctype labels are the Desk's, untranslated)."""
+	return {"min_stay_arrival": _("Min. stay on arrival"),
+	        "min_stay_through": _("Min. stay through"),
+	        "max_stay": _("Max. stay")}[field]
+
+
 class ChannelRestriction(Document):
 	def validate(self):
 		if getdate(self.date_to) < getdate(self.date_from):
 			frappe.throw(_("The end date cannot be before the start date."))
 		for field in NUMBERS:
 			if cint(self.get(field)) < 0:
-				frappe.throw(_("{0} cannot be negative.").format(
-					_(self.meta.get_label(field))))
+				frappe.throw(_("{0} cannot be negative.").format(_number_name(field)))
 		mins = max(cint(self.min_stay_arrival), cint(self.min_stay_through))
 		if not (self.stop_sell or self.closed_to_arrival or self.closed_to_departure
 		        or mins > 1 or cint(self.max_stay) > 0):

@@ -26,6 +26,11 @@ from frappe.utils import add_days, nowdate
 
 from kamra.authz import require_roles
 from kamra.channels import provider_for
+from kamra.kamra.doctype.channel_manager_connection.channel_manager_connection import (
+	missing_property_id,
+	no_property_id_message,
+)
+from kamra.privacy import _scrub_guest  # HR-76's scrubber, shared with every Error Log
 
 
 # The sites a booking can arrive from. Channel managers spell them their own
@@ -283,7 +288,8 @@ def push_all_ari(property: str | None = None):
 		try:
 			push_ari(name)
 		except Exception:
-			frappe.log_error(title=f"ARI push failed: {name}")
+			frappe.log_error(title=f"ARI push failed: {name}",
+			                 message=frappe.get_traceback(with_context=False))
 
 
 def enqueue_property_push(property: str | None, outbox: bool = True) -> None:
@@ -307,7 +313,8 @@ def enqueue_property_push(property: str | None, outbox: bool = True) -> None:
 		frappe.enqueue("kamra.channel_manager.push_all_ari", queue="long",
 		               enqueue_after_commit=True, property=property)
 	except Exception:
-		frappe.log_error(title="enqueue_property_push failed")
+		frappe.log_error(title="enqueue_property_push failed",
+		                 message=frappe.get_traceback(with_context=False))
 
 
 def on_reservation_change(doc, method=None):
@@ -409,6 +416,17 @@ def _room_type_for(connection: str, external_id: str) -> str | None:
 		"Channel Room Mapping",
 		{"connection": connection, "external_room_id": external_id},
 		"room_type")
+
+
+def _rate_plan_for(connection: str, external_rate_id: str | None) -> str | None:
+	"""The Rate Plan the connection's mapping of this provider rate id names;
+	None when the id is blank, unmapped or mapped to the base price."""
+	if not external_rate_id:
+		return None
+	return frappe.db.get_value(
+		"Channel Room Mapping",
+		{"connection": connection, "external_rate_id": external_rate_id},
+		"rate_plan") or None
 
 
 def _storable_phone(phone: str | None) -> bool:
@@ -529,12 +547,29 @@ def _sibling_reservation(property: str, e: dict):
 		["name", "status"], as_dict=True)
 
 
+def _locked_live_ota(property: str, ota_ref: str | None):
+	"""The stay for this OTA reference, after the property inventory lock.
+
+	A non-cancelled stay wins when a cancelled one shares the reference.
+	The locking read sees a delivery that committed while this one waited.
+	"""
+	if not ota_ref:
+		return None
+	from kamra.kamra.doctype.reservation.reservation import lock_property_for_inventory
+	lock_property_for_inventory(property)
+	rows = frappe.db.sql(
+		"""SELECT name, status FROM `tabReservation`
+		   WHERE property = %s AND ota_ref = %s
+		   ORDER BY CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END, creation
+		   FOR UPDATE""",
+		(property, ota_ref), as_dict=True)
+	return rows[0] if rows else None
+
+
 def _apply_event(conn, e: dict, requested_reason: str | None = None) -> dict:
 	"""One normalized OTA event -> the same paths a human would take."""
 	e["channel"] = canonical_channel(e.get("channel")) or "OTA"
-	existing = frappe.db.get_value(
-		"Reservation", {"property": conn.property, "ota_ref": e["ota_ref"]},
-		["name", "status"], as_dict=True) if e.get("ota_ref") else None
+	existing = _locked_live_ota(conn.property, e.get("ota_ref"))
 	if e["event"] == "modify" and not existing and e.get("ota_ref"):
 		# one room to two (X -> X-0, X-1) or back: the line under its sibling
 		# name is the same stay - keep it, with its folio and payments
@@ -593,6 +628,8 @@ def _apply_event(conn, e: dict, requested_reason: str | None = None) -> dict:
 		doc.adults = e.get("adults") or 2
 		doc.children = e.get("children") or 0
 		doc.ota_ref = e["ota_ref"]
+		# the plan it was sold on (HR-86); an unmapped rate leaves the one it had
+		doc.rate_plan = _rate_plan_for(conn.name, e.get("external_rate_id")) or doc.rate_plan
 		# #468 follow-up: keep this line on any rewrite of _apply_event - a
 		# modify carries the contact line too: the new one when the channel
 		# sends a contact the profile can't hold, else the one it already had.
@@ -643,11 +680,23 @@ def _apply_event(conn, e: dict, requested_reason: str | None = None) -> dict:
 		"special_requests": notes or None,
 		# the OTA already sold at its price - keep their number, don't reprice
 		"auto_price": 0 if requested_reason or e.get("total") else 1,
+		# the plan it was sold on (HR-86): priced on it when no amount came;
+		# with an amount, the locked nights bill and the plan is not applied
+		"rate_plan": _rate_plan_for(conn.name, e.get("external_rate_id")),
 	})
 	if e.get("total"):
 		doc.amount_after_tax = e["total"]
 		lock_channel_rates(doc, e["total"], e.get("nightly"))
-	doc.insert(ignore_permissions=True)
+	try:
+		doc.insert(ignore_permissions=True)
+	except frappe.DuplicateEntryError:
+		# The other delivery committed while this one waited on the property
+		# lock. Hand back that stay instead of booking the guest twice.
+		winner = _locked_live_ota(conn.property, e.get("ota_ref"))
+		if winner:
+			return {"ota_ref": e.get("ota_ref"), "result": "duplicate_ignored",
+			        "reservation": winner.name}
+		raise
 	# the channel's own commission when it sends one, else the site's default
 	if e.get("commission"):
 		doc.db_set("commission_amount", float(e["commission"]))
@@ -727,43 +776,6 @@ def _release(doc, reason: str, note: str) -> None:
 		doc.save(ignore_permissions=True)
 	finally:
 		frappe.flags.kamra_cancelling = False
-
-
-_PHONE_TAIL = 7  # a phone is found by its last digits, whatever the prefix or the separators
-_PHONE_SEP = r"[\s\-.()/]*"
-
-
-def _phone_pattern(phone) -> re.Pattern | None:
-	"""Any writing of the number that ends in its last digits: +598 99 123
-	456, +59899123456, 099 123 456..."""
-	digits = re.sub(r"\D", "", str(phone or ""))
-	if len(digits) < 4:
-		return None
-	tail = _PHONE_SEP.join(digits[-_PHONE_TAIL:])
-	return re.compile(r"\+?(?:\d" + _PHONE_SEP + r")*?" + tail + r"(?!\d)")
-
-
-def _scrub_guest(text: str, events: list[dict]) -> str:
-	"""An error text with the booking's guest taken out: the name (whole and
-	each word), the email (whole and its local part), the phone in any
-	writing and the guest's notes. For the Error Log of a delivery."""
-	secrets: set[str] = set()
-	patterns = []
-	for e in events or []:
-		name = str(e.get("guest_name") or "")
-		if name != "OTA Guest":  # the parser's placeholder, nobody's name
-			secrets.add(name)
-			secrets.update(name.split())
-		email = str(e.get("email") or "")
-		secrets.update((email, email.split("@")[0]))
-		secrets.add(str(e.get("notes") or ""))
-		if pattern := _phone_pattern(e.get("phone")):
-			patterns.append(pattern)
-	for pattern in patterns:
-		text = pattern.sub("[redacted]", text)
-	for secret in sorted((s.strip() for s in secrets if len(s.strip()) > 2), key=len, reverse=True):
-		text = re.sub(re.escape(secret), "[redacted]", text, flags=re.IGNORECASE)
-	return text
 
 
 def process_webhook_events(connection: str, payload: dict) -> None:
@@ -1024,11 +1036,16 @@ def import_room_mappings(connection: str, dry_run: int = 0):
 	gets one mapping per provider rate plan instead, matched to a Kamra Rate
 	Plan by code or name; the one plan of a room left unmatched sells the
 	room type's base price. `warnings` lists what to check by hand: currency,
-	time zone, room counts, per-person plans and fixed-amount plans."""
+	time zone, room counts, per-person plans and fixed-amount plans.
+
+	Without the provider's property id it says so and calls nobody: for
+	Channex, GET properties/ would read the account, not the hotel (HR-140)."""
 	conn = frappe.get_doc("Channel Manager Connection", connection)
 	provider = provider_for(conn.provider)
 	if not hasattr(provider, "fetch_property_details"):
 		frappe.throw(f"{conn.provider} does not support mapping import.")
+	if missing_property_id(conn):
+		frappe.throw(no_property_id_message())
 	details = provider.fetch_property_details(conn)
 
 	rts = frappe.get_all("Room Type",
@@ -1132,9 +1149,7 @@ def _import_rate_plan_mappings(conn, details: dict, index: dict, dry_run: int) -
 			                  "reason": _("Several rate plans of this room match no Kamra rate plan: map them by hand.")})
 		for rp, plan in paired:
 			rate_id = str(rp.get("rateplan_id") or "")
-			if rp.get("sell_mode") == "per_person":
-				warn("per_person", rate_id, _("Rate plan {0} is priced per person; Kamra sends one price per room.").format(
-					rp.get("rateplan_name") or rate_id))
+			# a plan priced per person needs no warning: the outbox sends it a rate per occupancy
 			if plan and plan.modifier_type in ("Amount", "Absolute"):
 				warn("fixed_amount", plan.name, _("Rate plan {0} adds a fixed amount: on the channels it applies every "
 				                                  "night, on direct bookings once per stay.").format(plan.rate_plan_name))

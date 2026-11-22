@@ -93,6 +93,35 @@ class ChannelRestrictionDoctypeTestCase(RestrictionFixture):
 			with self.assertRaisesRegex(frappe.ValidationError, "cannot be negative"):
 				self.restriction(stop_sell=1, **{field: -1})
 
+	def negative_message(self, lang: str, field: str) -> str:
+		frappe.local.lang = lang
+		try:
+			with self.assertRaises(frappe.ValidationError) as caught:
+				self.restriction(stop_sell=1, **{field: -1})
+		finally:
+			frappe.local.lang = "en"
+		return str(caught.exception)
+
+	# HR-161: the field inside «{0} cannot be negative.» carries the name the
+	# restrictions screen gives it, in the desk's language.
+	def test_a_negative_number_names_its_field_in_spanish(self):
+		for field, message in (
+			("max_stay", "Estadía máx. no admite valores negativos."),
+			("min_stay_arrival", "Estadía mín. al llegar no admite valores negativos."),
+			("min_stay_through", "Estadía mín. durante no admite valores negativos."),
+		):
+			with self.subTest(field=field):
+				self.assertEqual(self.negative_message("es", field), message)
+
+	def test_a_negative_number_names_its_field_in_portuguese(self):
+		for field, message in (
+			("max_stay", "Estadia máx. não aceita valores negativos."),
+			("min_stay_arrival", "Estadia mín. na chegada não aceita valores negativos."),
+			("min_stay_through", "Estadia mín. durante não aceita valores negativos."),
+		):
+			with self.subTest(field=field):
+				self.assertEqual(self.negative_message("pt", field), message)
+
 	def test_the_maximum_stay_cannot_be_shorter_than_the_minimum(self):
 		with self.assertRaisesRegex(frappe.ValidationError, "maximum stay"):
 			self.restriction(min_stay_through=4, max_stay=3)

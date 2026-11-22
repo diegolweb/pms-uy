@@ -133,7 +133,9 @@ def store_id_document(res, data: str, source: str) -> str:
 			frappe.delete_doc("File", old, ignore_permissions=True,
 			                  delete_permanently=True)
 		except Exception:
-			frappe.log_error(title=f"ID document: stale file kept ({res.name})")
+			from kamra.privacy import guest_traceback
+			frappe.log_error(title=f"ID document: stale file kept ({res.name})",
+			                 message=guest_traceback(res))
 
 	from frappe.utils.file_manager import save_file
 	f = save_file(
@@ -181,5 +183,7 @@ def discard_id_document(reservation: str) -> int:
 			"id_document_discarded": 1,
 		}, update_modified=False)
 	except Exception:
-		frappe.log_error(title=f"ID document discard failed: {reservation}")
+		from kamra.privacy import guest_traceback
+		frappe.log_error(title=f"ID document discard failed: {reservation}",
+		                 message=guest_traceback(("Reservation", reservation)))
 	return gone

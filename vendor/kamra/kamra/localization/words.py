@@ -106,3 +106,32 @@ def amount_in_words(amount, currency: str = "INR", indian: bool = True) -> str:
 	if negative:
 		words = "Minus " + words
 	return f"{words} Only"
+
+
+# num2words' Arabic speller knows only these currencies by name: any other
+# code it reads as Saudi riyals, so a dirham or dollar bill must not reach it
+_ONLY_THESE_CURRENCIES = {"ar": {"SAR", "EGP", "KWD", "TND"}}
+
+
+def amount_in_words_in(amount, currency: str, language: str) -> str | None:
+	"""The amount spelled out in `language` ("es", "pt", "ar", "fr"...) with
+	num2words, which ships with Frappe; first letter upper-case. None for
+	English or no language, or when num2words cannot spell this currency in
+	this language - the caller then falls back to amount_in_words()."""
+	language = (language or "").strip().lower()
+	currency = (currency or "").strip().upper()
+	if not language or language == "en" or not currency:
+		return None
+	allowed = _ONLY_THESE_CURRENCIES.get(language)
+	if allowed is not None and currency not in allowed:
+		return None
+	try:
+		from num2words import num2words
+
+		# never an int: num2words reads a whole number as cents
+		value = Decimal(str(amount or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+		text = num2words(value, lang=language, to="currency", currency=currency)
+	except (NotImplementedError, KeyError, TypeError, ValueError, OverflowError, ImportError):
+		return None
+	text = (text or "").strip()
+	return text[:1].upper() + text[1:] if text else None

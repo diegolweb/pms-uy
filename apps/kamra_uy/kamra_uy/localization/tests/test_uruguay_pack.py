@@ -24,7 +24,7 @@ from kamra.tests.audit_fixtures import (
 	make_room_type,
 )
 from kamra_uy.localization import uruguay
-from kamra_uy.pure import bcu
+from kamra_uy.pure import bcu, uy_tax
 
 PROP_UY = "UT UY Roosevelt"
 BCU_REPLY = (Path(__file__).resolve().parents[3] / "tests" / "unit" / "uy" / "fixtures"
@@ -94,25 +94,75 @@ class TestUruguayPack(AuditTestCase):
 		self.assertIs(localization.pack_for(PROP_UY), uruguay)
 
 	def test_default_rates(self):
-		self.assertEqual(uruguay.calculate_room_tax(PROP_UY, None, 1000), Decimal("10"))
+		# la noche se cotiza sin IVA para todos (D-HR-40, HR-239); los cargos de recepción siguen ofreciendo 10 y 22
+		self.assertEqual(uruguay.calculate_room_tax(PROP_UY, None, 1000), Decimal("0"))
 		self.assertEqual(uruguay.fnb_tax_rate(PROP_UY), 22.0)
 		self.assertEqual(localization.services_tax_rate(uruguay, PROP_UY), 22.0)
 		self.assertEqual(uruguay.tax_rate_options(PROP_UY), [0, 10, 22])
 
-	def test_room_type_rate_wins(self):
+	def test_room_type_rate_wins_where_the_price_includes_iva(self):
 		rt = frappe.get_doc("Room Type", make_room_type(PROP_UY, "UY12", tax_percent=12))
+		self.assertEqual(uruguay.calculate_room_tax(PROP_UY, rt, 1000), Decimal("0"))
+		make_uy_property(rates_include_tax=1)
 		self.assertEqual(uruguay.calculate_room_tax(PROP_UY, rt, 1000), Decimal("12"))
 
 	def test_rates_are_configured_per_property(self):
 		make_uy_property(uy_iva_room_pct=11, uy_iva_standard_pct=20)
-		self.assertEqual(uruguay.calculate_room_tax(PROP_UY, {"tax_percent": 0}, 1000), Decimal("11"))
+		self.assertEqual(uruguay.calculate_room_tax(PROP_UY, {"tax_percent": 0}, 1000), Decimal("0"))
 		self.assertEqual(uruguay.fnb_tax_rate(PROP_UY), 20.0)
 		self.assertEqual(uruguay.tax_rate_options(PROP_UY), [0, 11, 20])
+		make_uy_property(uy_iva_room_pct=11, uy_iva_standard_pct=20, rates_include_tax=1)
+		self.assertEqual(uruguay.calculate_room_tax(PROP_UY, {"tax_percent": 0}, 1000), Decimal("11"))
 
 	def test_india_rates_of_the_property_are_not_used(self):
-		make_uy_property(gst_rate_low=5, gst_rate_high=18, uy_iva_room_pct=0, uy_iva_standard_pct=0)
+		make_uy_property(gst_rate_low=5, gst_rate_high=18, uy_iva_room_pct=0, uy_iva_standard_pct=0, rates_include_tax=1)
 		self.assertEqual(uruguay.calculate_room_tax(PROP_UY, None, 1000), Decimal("10"))
 		self.assertEqual(uruguay.fnb_tax_rate(PROP_UY), 22.0)
+
+
+class TestTheQuoteHasNoIva(AuditTestCase):
+	"""HR-239: la cotización en línea y su anticipo van sin IVA para todos, y el precio que Kamra manda al channel
+	manager (`channel_ari._plan_night_rate`, el `room_total` de `quote`) es el de antes."""
+
+	properties = (PROP_UY,)
+
+	def setUp(self):
+		super().setUp()
+		self.at(TODAY, "kamra.folio", "kamra.business_date", "kamra.ledger")
+		make_uy_property()
+		self.rt = make_room_type(PROP_UY, "UYQ", base_price=230)
+		self.check_in, self.check_out = frappe.utils.add_days(TODAY, 30), frappe.utils.add_days(TODAY, 35)
+
+	def test_the_quote_and_its_total_carry_no_iva(self):
+		from kamra.pricing import quote
+
+		q = quote(PROP_UY, self.rt, self.check_in, self.check_out, adults=2)
+		self.assertGreater(q["room_total"], 0)
+		self.assertEqual({n["gst_rate"] for n in q["nightly"]}, {0.0})
+		self.assertEqual((q["tax_amount"], q["amount_after_tax"]), (0.0, q["amount_before_tax"]))
+		# con el gancho de antes, la misma estancia llevaba el 10 % (lo que el extranjero pagaba de más al reservar)
+		with patch.object(uruguay, "calculate_room_tax", _hook_before_hr239):
+			before = quote(PROP_UY, self.rt, self.check_in, self.check_out, adults=2)
+		self.assertEqual(before["room_total"], q["room_total"])
+		self.assertAlmostEqual(before["tax_amount"], q["room_total"] * 0.10, places=2)
+
+	def test_the_price_sent_to_the_channel_manager_does_not_change(self):
+		from kamra.channel_ari import _plan_night_rate
+
+		for included in (0, 1):
+			with self.subTest(rates_include_tax=included):
+				make_uy_property(rates_include_tax=included)
+				now = _plan_night_rate(PROP_UY, self.rt, None, self.check_in)
+				with patch.object(uruguay, "calculate_room_tax", _hook_before_hr239):
+					before = _plan_night_rate(PROP_UY, self.rt, None, self.check_in)
+				self.assertIsNotNone(now)
+				self.assertGreater(now, 0)
+				self.assertEqual(now, before)
+
+
+def _hook_before_hr239(property, room_type_doc, nightly_rate) -> Decimal:
+	"""`calculate_room_tax` antes de HR-239: la tasa de habitación (10) para todos al cotizar."""
+	return uy_tax.room_rate(room_type_doc.get("tax_percent") if room_type_doc else None, 10)
 
 	def test_mercado_pago_is_the_online_gateway(self):
 		self.assertEqual(localization.payment_gateways(localization.pack_for(PROP_UY)), ["Mercado Pago"])

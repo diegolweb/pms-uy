@@ -1172,7 +1172,9 @@ def run_banquet_reminders():
 						          if a.get("kind") == "quote_no_response"))
 			except Exception:
 				# a chase email must never break the diary - record it instead
-				frappe.log_error(title="Banquet: quote chase email failed")
+				from kamra.privacy import guest_traceback
+				frappe.log_error(title="Banquet: quote chase email failed",
+				                 message=guest_traceback(("Venue Booking", f["function"])))
 			sent = False
 			if f["sales_owner"]:
 				mobile = frappe.db.get_value("User", f["sales_owner"], "mobile_no")
@@ -1213,7 +1215,7 @@ def banquet_document(function: str, kind: str = "quote"):
 		"Property", doc.property,
 		["property_name", "legal_name", "address_line", "city", "state",
 		 "pincode", "country", "phone", "email", "website", "gstin",
-		 "logo_url"], as_dict=True) or {}
+		 "logo_url", "invoice_footer"], as_dict=True) or {}
 	prop["address"] = ", ".join(filter(None, [  # nosemgrep: frappe-no-functional-code -- drops empty address parts
 		prop.get("address_line"), prop.get("city"), prop.get("state"),
 		prop.get("pincode")]))
@@ -1253,8 +1255,9 @@ def banquet_document(function: str, kind: str = "quote"):
 		"valid_till": str(doc.quote_valid_till) if doc.quote_valid_till else None,
 		"beo_number": doc.beo_number,
 		"amount_in_words": loc.amount_in_words(pack, prop_doc, doc.grand_total),
-		"service_code_label": (ctx.get("service_code") or {}).get("label", "SAC"),
+		"service_code_label": (ctx.get("service_code") or {}).get("label"),
 		"footer": ctx.get("footer"),
+		"invoice_footer": prop.get("invoice_footer"),
 		"place_of_supply": ctx.get("place_of_supply"),
 		"tax_label": ctx.get("tax_label"),
 		"tax_id_label": ctx.get("tax_id_label"),

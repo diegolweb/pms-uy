@@ -72,6 +72,8 @@ interface Showcase {
     has_cancellation_tiers?: boolean
     booking_mode: string
     property_kind: string
+    /** The gateway that takes this property's deposits online, if any. */
+    payment_gateway?: string | null
     star_category: string | null
     address_line: string | null
     city: string
@@ -459,7 +461,198 @@ function PhotoStrip({ photos, name, onOpen }: {
   )
 }
 
+/** The primary button look, on a link: paying leaves for the gateway's own page. */
+const payButton =
+  "inline-flex w-full items-center justify-center rounded-lg bg-brand-600 px-3 py-2.5 text-base font-medium " +
+  "text-white transition-colors hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 " +
+  "focus-visible:outline-brand-600"
+
+/** When a hold ends, in the guest's own time zone: the hour if that is today, else the day and the hour. */
+function holdTime(iso: string, lang: string): string {
+  const at = new Date(iso)
+  const today = at.toDateString() === new Date().toDateString()
+  return new Intl.DateTimeFormat(lang, today
+    ? { hour: "numeric", minute: "2-digit" }
+    : { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(at)
+}
+
+/** What /book?booking=<status token> knows about one web booking - never who the guest is. */
+interface BookingStatus {
+  reservation: string
+  status: string
+  expired: boolean
+  property_name: string
+  room_type_name: string | null
+  check_in_date: string
+  check_out_date: string
+  nights: number
+  currency: string | null
+  amount_after_tax: number
+  advance_due: number
+  advance_paid: number
+  balance_at_hotel: number
+  hold_expires_on: string | null
+  payment_url: string | null
+  payment_gateway: string | null
+}
+
+// back from an approved payment, the gateway's notice confirms the booking a moment later
+const CONFIRM_POLL_MS = 4000
+const CONFIRM_WAIT_MS = 90_000
+
+/** The guest's way back from the payment gateway: the state of their booking, and paying again while it is held. */
+function BookingReturn({ token }: { token: string }) {
+  const { t, lang } = useT()
+  useEffect(() => adoptGuestLanguage(), [])
+  const navigate = useNavigate()
+  const location = useLocation()
+  const qs = new URLSearchParams(location.search)
+  const outcome = (qs.get("collection_status") || qs.get("status") || "").toLowerCase()
+  const [s, setS] = useState<BookingStatus | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [waitedOut, setWaitedOut] = useState(false)
+  const [linkFailed, setLinkFailed] = useState(false)
+  const [opening, setOpening] = useState(false)
+
+  useEffect(() => {
+    let stop = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const started = Date.now()
+    const load = () =>
+      callGuest<BookingStatus>("kamra.public_api.booking_status", { token })
+        .then((st) => {
+          if (stop) return
+          setS(st)
+          if (outcome === "approved" && st.status === "Pending Payment" && !st.expired) {
+            if (Date.now() - started < CONFIRM_WAIT_MS) timer = setTimeout(load, CONFIRM_POLL_MS)
+            else setWaitedOut(true)
+          }
+        })
+        .catch(() => {
+          if (!stop) setFailed(true)
+        })
+    load()
+    return () => {
+      stop = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [token, outcome])
+
+  async function newLink() {
+    setOpening(true)
+    setLinkFailed(false)
+    try {
+      const link = await callGuest<{ payment_url: string }>("kamra.public_api.booking_payment_link", { token })
+      window.location.assign(link.payment_url)
+    } catch {
+      setLinkFailed(true)
+      setOpening(false)
+    }
+  }
+
+  if (failed)
+    return (
+      <div data-testid="booking-unavailable" className="flex min-h-screen items-center justify-center bg-zinc-50 px-4">
+        <div className="max-w-md rounded-2xl border border-zinc-200 bg-white p-8 text-center">
+          <CalendarDays className="mx-auto size-10 text-zinc-300" aria-hidden />
+          <h1 className="mt-4 text-xl font-semibold text-zinc-900">{t("This booking link is not valid.")}</h1>
+          <p className="mt-2 text-sm text-zinc-500">{t("The link may be out of date. See all the places you can book here.")}</p>
+          <div className="mt-6 flex justify-center gap-2">
+            <Button onClick={() => navigate("/book")}>{t("See all properties")}</Button>
+          </div>
+          <SourceCodeLink className="mt-6 block text-center text-xs" />
+        </div>
+      </div>
+    )
+
+  if (!s) return <div className="min-h-screen bg-zinc-50" aria-busy="true" aria-label={t("Loading…")} />
+
+  const money = (n: number) =>
+    s.currency
+      ? new Intl.NumberFormat(lang, { style: "currency", currency: s.currency, maximumFractionDigits: 2 }).format(n)
+      : n.toLocaleString(lang, { maximumFractionDigits: 2 })
+  const day = (iso: string) =>
+    (parseDate(iso) ?? new Date()).toLocaleDateString(lang, { weekday: "short", day: "numeric", month: "short" })
+  const waiting = s.status === "Pending Payment" && !s.expired
+  const confirming = waiting && outcome === "approved"
+  const owed = Math.max(0, s.advance_due - s.advance_paid)
+  const payLabel = t("Pay the {amount} deposit with {gateway}", { amount: money(owed), gateway: s.payment_gateway ?? "" })
+
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-50 px-4 py-10">
+      <div data-testid="booking-status" data-status={s.status} data-expired={String(s.expired)}
+        className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-6 text-center sm:p-8">
+        <div className={`mx-auto flex size-14 items-center justify-center rounded-full ${s.status === "Confirmed" ? "bg-brand-50" : "bg-zinc-100"}`}>
+          {s.status === "Confirmed"
+            ? <Check className="size-7 text-brand-700" aria-hidden />
+            : waiting ? <Clock className="size-7 text-zinc-500" aria-hidden />
+              : <CalendarDays className="size-7 text-zinc-400" aria-hidden />}
+        </div>
+        <h1 className="mt-4 text-lg font-semibold text-zinc-900">{s.property_name}</h1>
+        <p className="mt-1 text-sm text-zinc-500">{t("Booking number")}</p>
+        <p className="text-2xl font-semibold tracking-tight text-zinc-900">{s.reservation}</p>
+        <dl className="mt-6 divide-y divide-zinc-100 rounded-2xl border border-zinc-200 px-5 text-start text-sm">
+          {s.room_type_name && (
+            <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{t("Room")}</dt><dd className="text-end font-medium text-zinc-800">{s.room_type_name}</dd></div>
+          )}
+          <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{t("Dates")}</dt><dd className="text-end font-medium text-zinc-800">{day(s.check_in_date)} {t("to")} {day(s.check_out_date)}</dd></div>
+          <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{t("Total")}</dt><dd className="text-end font-semibold text-zinc-900">{money(s.amount_after_tax)}</dd></div>
+          {waiting && owed > 0 && (
+            <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{t("Due now")}</dt><dd className="text-end font-semibold text-zinc-900">{money(owed)}</dd></div>
+          )}
+          {s.balance_at_hotel > 0 && s.status !== "Cancelled" && (
+            <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{t("Pay at the property")}</dt><dd className="text-end font-medium text-zinc-800">{money(s.balance_at_hotel)}</dd></div>
+          )}
+        </dl>
+        <div className="mt-5 space-y-3 text-sm leading-relaxed text-zinc-600" role="status">
+          {s.status === "Confirmed" && (
+            <p>{s.advance_paid > 0
+              ? t("Your booking is confirmed. We received your deposit of {amount}.", { amount: money(s.advance_paid) })
+              : t("Booking confirmed")}</p>
+          )}
+          {confirming && <p aria-busy={!waitedOut}>{waitedOut
+            ? t("Your payment is still being processed. The hotel will confirm your booking as soon as it arrives.")
+            : t("We're confirming your payment…")}</p>}
+          {waiting && !confirming && (
+            <>
+              {outcome === "rejected" && <p className="text-red-700">{t("The payment wasn't completed. You can try again while your rooms are held.")}</p>}
+              {s.hold_expires_on && (
+                <p>{t("Your rooms are held until {time}. If the deposit doesn't arrive by then, they're released.",
+                  { time: holdTime(s.hold_expires_on, lang) })}</p>
+              )}
+              {s.payment_gateway && owed > 0 ? (
+                s.payment_url
+                  ? <a data-testid="pay-deposit" href={s.payment_url} className={payButton}>{payLabel}</a>
+                  : <Button className="w-full justify-center py-2.5 text-base" disabled={opening} onClick={newLink}>
+                    {opening ? t("Loading…") : payLabel}
+                  </Button>
+              ) : (
+                <p>{t("We've saved your number; the front desk will reach out with payment details and before arrival.")}</p>
+              )}
+              {linkFailed && <p role="alert" className="text-red-700">{t("We couldn't open the payment page. Try again in a moment.")}</p>}
+            </>
+          )}
+          {s.expired && (
+            <>
+              <p>{t("The hold expired before the deposit arrived, and the rooms were released. If you paid, the hotel will contact you.")}</p>
+              <Button className="w-full justify-center py-2.5" onClick={() => navigate("/book")}>{t("Search again")}</Button>
+            </>
+          )}
+          {s.status === "Cancelled" && !s.expired && <p>{t("This booking was cancelled.")}</p>}
+        </div>
+      </div>
+      <SourceCodeLink className="mt-6 block text-center text-xs" />
+    </div>
+  )
+}
+
+/** /book: the guest back from paying (?booking=<status token>) sees their booking; anyone else searches and books. */
 export default function PublicBooking() {
+  const token = new URLSearchParams(useLocation().search).get("booking")
+  return token ? <BookingReturn token={token} /> : <BookingPage />
+}
+
+function BookingPage() {
   const { t, tn, lang } = useT()
   useEffect(() => adoptGuestLanguage(), [])
   const params = useParams()
@@ -540,6 +733,11 @@ export default function PublicBooking() {
     advance_due: number
     balance_at_hotel: number
     status: string
+    status_token: string | null
+    payment_url: string | null
+    payment_expires_on: string | null
+    payment_gateway: string | null
+    payment_error: boolean
   } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
@@ -746,6 +944,11 @@ export default function PublicBooking() {
         advance_due: number
         balance_at_hotel: number
         status: string
+        status_token?: string
+        payment_url?: string | null
+        payment_expires_on?: string | null
+        payment_gateway?: string | null
+        payment_error?: boolean
       }>("kamra.public_api.book",
         {
           property,
@@ -770,9 +973,30 @@ export default function PublicBooking() {
         advance_due: Number(res.advance_due || 0),
         balance_at_hotel: Number(res.balance_at_hotel ?? res.amount_after_tax ?? 0),
         status: res.status,
+        status_token: res.status_token ?? null,
+        payment_url: res.payment_url ?? null,
+        payment_expires_on: res.payment_expires_on ?? null,
+        payment_gateway: res.payment_gateway ?? null,
+        payment_error: !!res.payment_error,
       })
     } catch (e) {
       setError(serverError(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // the gateway did not open the payment page at booking time: ask again
+  async function retryPayment() {
+    if (!done?.status_token) return
+    setBusy(true)
+    try {
+      const link = await callGuest<{ payment_url: string; payment_expires_on: string | null }>(
+        "kamra.public_api.booking_payment_link", { token: done.status_token })
+      setDone({ ...done, payment_url: link.payment_url,
+        payment_expires_on: link.payment_expires_on ?? done.payment_expires_on, payment_error: false })
+    } catch {
+      // still no page: the message stays and the guest can try again
     } finally {
       setBusy(false)
     }
@@ -886,6 +1110,8 @@ export default function PublicBooking() {
 
   const mealChoices = [...new Set(Object.values(results).flatMap((r) => plansOf(r).map((pl) => pl.meal_plan)))]
   const sel = selected ? data.room_types.find((r) => r.name === selected.room_type) : null
+  // held for a deposit the gateway takes online (or failed to open the page for)
+  const payOnline = !!done && done.status === "Pending Payment" && (!!done.payment_url || done.payment_error)
   const selPlan = selected ? plansOf(results[selected.room_type]).find((pl) => pl.meal_plan === selected.meal_plan) : null
   const selTerms = selected ? cancelTerms(results[selected.room_type]) : null
   const roomsShown = data.room_types.filter((rt) => !availableOnly || canReserve(results[rt.name]))
@@ -1692,7 +1918,10 @@ export default function PublicBooking() {
       {booking && sel && selPlan && (
         <Sheet
           wide
-          title={done ? (done.status === "Requested" ? t("Request sent") : t("Booking confirmed")) : t("Complete your booking")}
+          title={done
+            ? (done.status === "Requested" ? t("Request sent")
+              : payOnline ? t("Complete your booking") : t("Booking confirmed"))
+            : t("Complete your booking")}
           description={done ? undefined : `${sel.room_type_name}, ${mealLabel(selPlan.meal_plan)}`}
           onClose={() => {
             setBooking(null)
@@ -1741,14 +1970,37 @@ export default function PublicBooking() {
                   <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{t("Pay at the property")}</dt><dd className="text-end font-medium text-zinc-800">{money(done.balance_at_hotel)}</dd></div>
                 )}
               </dl>
-              <p className="mt-5 text-sm leading-relaxed text-zinc-600">
-                {done.status === "Pending Payment"
-                  ? `${t("Your rooms are held until the advance is received.")} `
-                  : ""}
-                {done.status === "Requested"
-                  ? t("Your request goes to the property to confirm.")
-                  : t("We've saved your number; the front desk will reach out with payment details and before arrival.")}
-              </p>
+              {payOnline ? (
+                <div className="mt-5 space-y-3 text-sm leading-relaxed text-zinc-600">
+                  {done.payment_expires_on && (
+                    <p>{t("Your rooms are held until {time}. If the deposit doesn't arrive by then, they're released.",
+                      { time: holdTime(done.payment_expires_on, lang) })}</p>
+                  )}
+                  {done.payment_url ? (
+                    <a data-testid="pay-deposit" href={done.payment_url} className={payButton}>
+                      {t("Pay the {amount} deposit with {gateway}",
+                        { amount: money(done.advance_due), gateway: done.payment_gateway ?? "" })}
+                    </a>
+                  ) : (
+                    <>
+                      <p role="alert" className="text-red-700">{t("We couldn't open the payment page. Try again in a moment.")}</p>
+                      <Button className="w-full justify-center py-2.5" disabled={busy} onClick={retryPayment}>
+                        {busy ? t("Loading…") : t("Try again")}
+                      </Button>
+                      <p>{t("We've saved your number; the front desk will reach out with payment details and before arrival.")}</p>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <p className="mt-5 text-sm leading-relaxed text-zinc-600">
+                  {done.status === "Pending Payment"
+                    ? `${t("Your rooms are held until the advance is received.")} `
+                    : ""}
+                  {done.status === "Requested"
+                    ? t("Your request goes to the property to confirm.")
+                    : t("We've saved your number; the front desk will reach out with payment details and before arrival.")}
+                </p>
+              )}
             </div>
           ) : (
             <div className="space-y-6">
@@ -1876,9 +2128,17 @@ export default function PublicBooking() {
                       ? t("The full amount is paid online to confirm this booking.")
                       : p.payment_mode === "Advance percent"
                         ? t("A {percent}% advance is collected to confirm; the rest is paid at the hotel.", { percent: p.advance_percent })
-                        : p.payment_mode === "Registration fee"
+                        : p.payment_mode === "First night"
+                          // a season with its own advance % asks that instead: say the amount, not "one night"
+                          ? (selPlan && nights > 0 && Math.abs((selPlan.advance_due ?? 0) - selPlan.amount_after_tax / nights) > 0.01
+                            ? t("{amount} due now", { amount: money(selPlan.advance_due || 0) })
+                            : t("One night is collected to confirm; the rest is paid at the hotel."))
+                          : p.payment_mode === "Registration fee"
                           ? t("A registration fee of {amount} is collected to confirm; the rest is paid at the hotel.", { amount: money(p.registration_fee) })
                           : t("No payment today, pay at the property")}
+                    {p.payment_gateway && p.payment_mode !== "Pay at hotel" && (
+                      <> {t("Paid online with {gateway}.", { gateway: p.payment_gateway })}</>
+                    )}
                   </p>
                 </div>
                 {(p.security_deposit_amount || 0) > 0 && (

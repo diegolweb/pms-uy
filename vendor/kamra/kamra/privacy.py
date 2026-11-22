@@ -16,6 +16,9 @@ right thing the default and the lawful thing one click:
                      text and AI assistant chats older than
                      Property.message_retention_days are cleared nightly;
                      who, when and delivery status stay for audit.
+  guest_traceback    the Error Log: an error about a guest's record is
+                     logged without the frames' local variables and without
+                     the guest's name, email, phone or ID number.
 
 What is deliberately kept after erasure: amounts, dates, rooms and invoice
 numbers (GST law needs them), an ID masked to its last 4 digits in the stay
@@ -23,7 +26,13 @@ register, and one audit line saying the erasure happened (without the name).
 """
 
 
+import re
+import sys
+import traceback
+from collections import defaultdict
+
 import frappe
+from frappe.model.document import Document
 from frappe.utils import add_days, add_months, cint, getdate, now_datetime, nowdate
 
 from kamra.authz import require_roles
@@ -260,3 +269,202 @@ def update_marketing_consent(guest: str, consent) -> dict:
 	set_marketing_consent(guest, consent, "Desk")
 	return frappe.db.get_value("Guest", guest, ["marketing_consent", "marketing_consent_date",
 	                                            "marketing_consent_source"], as_dict=True)
+
+
+# ---------------------------------------------------------------------------
+# the Error Log
+# ---------------------------------------------------------------------------
+# frappe.log_error with no message stores the traceback with every frame's
+# local variables on a developer-mode site (the booking, the guest, the
+# payload), and on any site the error text itself may quote a guest (an
+# address the mail server refused, a phone a provider rejected). Every
+# log_error in Kamra passes a message - a test reads the source to keep it
+# so - and where the error can be about a guest that message is
+# guest_traceback(<the record>).
+
+_PHONE_TAIL = 7  # a phone is found by its last digits, whatever the prefix or the separators
+_PHONE_SEP = r"[\s\-.()/]*"
+
+
+def _phone_pattern(phone) -> re.Pattern | None:
+	"""Any writing of the number that ends in its last digits: +598 99 123
+	456, +59899123456, 099 123 456..."""
+	digits = re.sub(r"\D", "", str(phone or ""))
+	if len(digits) < 4:
+		return None
+	tail = _PHONE_SEP.join(digits[-_PHONE_TAIL:])
+	return re.compile(r"\+?(?:\d" + _PHONE_SEP + r")*?" + tail + r"(?!\d)")
+
+
+def _scrub_guest(text: str, events: list[dict]) -> str:
+	"""An error text with the guests taken out: the name (whole and each
+	word), the email (whole and its local part), the phone in any writing,
+	the ID number and the notes. `events` are dicts with any of guest_name,
+	email, phone, id_number and notes - a channel delivery's events, or
+	guests_of(...)."""
+	secrets: set[str] = set()
+	patterns = []
+	for e in events or []:
+		name = str(e.get("guest_name") or "")
+		if name != "OTA Guest":  # the parser's placeholder, nobody's name
+			secrets.add(name)
+			secrets.update(name.split())
+		email = str(e.get("email") or "")
+		secrets.update((email, email.split("@")[0]))
+		secrets.add(str(e.get("id_number") or ""))
+		secrets.add(str(e.get("notes") or ""))
+		if pattern := _phone_pattern(e.get("phone")):
+			patterns.append(pattern)
+	for pattern in patterns:
+		text = pattern.sub("[redacted]", text)
+	for secret in sorted((s.strip() for s in secrets if len(s.strip()) > 2), key=len, reverse=True):
+		text = re.sub(re.escape(secret), "[redacted]", text, flags=re.IGNORECASE)
+	return text
+
+
+# who a record names: (name, email, phone, ID number) fields, per doctype
+_PEOPLE = {
+	"Guest": (("full_name", "email", "phone", "id_number"), ("first_name", None, None, None),
+	          ("last_name", None, None, None)),
+	"Reservation": (("guest_name", None, None, None), ("booked_by_name", None, "booked_by_phone", None)),
+	"Folio": (("guest_name", None, None, None), ("bill_to_name", None, None, None)),
+	"Stay Occupant": (("full_name", None, "phone", "id_number"),),
+	"Venue Booking": (("customer_name", "customer_email", "customer_phone", None),
+	                  ("billing_name", None, None, None)),
+}
+_NOTES = {"Reservation": "special_requests"}
+# the links that lead from a record to the people behind it
+_LINKS = ("guest", "reservation", "folio", "master_reservation")
+
+
+def _people(doctype: str, row) -> list[dict]:
+	out = []
+	for name, email, phone, id_number in _PEOPLE.get(doctype, ()):
+		person = {"guest_name": row.get(name), "email": email and row.get(email),
+		          "phone": phone and row.get(phone), "id_number": id_number and row.get(id_number)}
+		if any(person.values()):
+			out.append(person)
+	if (notes := _NOTES.get(doctype)) and row.get(notes):
+		out.append({"notes": row.get(notes)})
+	return out
+
+
+def _follow(meta, row, wanted: dict) -> None:
+	for fieldname in _LINKS:
+		field = meta.get_field(fieldname)
+		if field and field.fieldtype == "Link" and row.get(fieldname):
+			wanted[field.options].add(row.get(fieldname))
+
+
+def _stays_on(property: str, day=None) -> list[str]:
+	"""The stays a property has on `day` (its business date by default): in
+	house, arriving and leaving."""
+	day = day or frappe.db.get_value("Property", property, "business_date") or nowdate()
+	return frappe.get_all("Reservation", filters={"property": property,
+		"check_in_date": ("<=", day), "check_out_date": (">=", day)}, pluck="name")
+
+
+def guests_of(*records, stays: tuple | None = None) -> list[dict]:
+	"""The people `records` name, in _scrub_guest's shape: a Reservation's
+	guest, booker and occupants; a Folio's guest and its stay's; a Guest; a
+	Venue Booking's customer; any other record through its guest,
+	reservation, folio or master_reservation link. A record is a Document
+	(read as it stands, saved or not) or (doctype, name or list of names);
+	None is skipped. stays=(property, day) adds every stay the property has
+	that day (day None: its business date), for a job that runs a hotel."""
+	people: list[dict] = []
+	wanted: dict[str, set] = defaultdict(set)
+	for record in records:
+		if record is None:
+			continue
+		if isinstance(record, Document):
+			people += _people(record.doctype, record)
+			for table in record.meta.get_table_fields():
+				for row in record.get(table.fieldname) or []:
+					people += _people(table.options, row)
+			_follow(record.meta, record, wanted)
+			continue
+		doctype, names = record
+		wanted[doctype].update([names] if isinstance(names, str) else (names or []))
+	if stays:
+		wanted["Reservation"].update(_stays_on(*stays))
+	done: dict[str, set] = defaultdict(set)
+	for _ in range(4):  # a link leads down (a POS order -> folio -> stay -> guest): a few hops
+		batch = {dt: {n for n in names if n} - done[dt] for dt, names in list(wanted.items())}
+		batch = {dt: names for dt, names in batch.items() if names}
+		if not batch:
+			break
+		for doctype, names in batch.items():
+			done[doctype] |= names
+			meta = frappe.get_meta(doctype)
+			fields = {f for spec in _PEOPLE.get(doctype, ()) for f in spec if f}
+			fields |= {f for f in (_NOTES.get(doctype), *_LINKS) if f}
+			fields = ["name", *sorted(f for f in fields if meta.has_field(f))]
+			for row in frappe.get_all(doctype, filters={"name": ("in", sorted(names))}, fields=fields):
+				people += _people(doctype, row)
+				_follow(meta, row, wanted)
+			for table in meta.get_table_fields():
+				if table.options not in _PEOPLE:
+					continue
+				child = frappe.get_meta(table.options)
+				child_fields = [f for spec in _PEOPLE[table.options] for f in spec
+				                if f and child.has_field(f)]
+				for row in frappe.get_all(table.options, fields=child_fields, filters={
+						"parenttype": doctype, "parentfield": table.fieldname,
+						"parent": ("in", sorted(names))}):
+					people += _people(table.options, row)
+	return people
+
+
+def scrub_people(text: str, *records, stays: tuple | None = None, withheld: str = "") -> str:
+	"""`text` with the people of `records` (see guests_of) taken out, or
+	`withheld` if they cannot be looked up: an error path never fails, and
+	never keeps a guest it could not find."""
+	try:
+		return _scrub_guest(text, guests_of(*records, stays=stays))
+	except Exception:
+		return withheld
+
+
+def withheld_traceback(exc: BaseException | None) -> str:
+	"""exc's traceback with every exception's text left out: the frames, the
+	code and the exception types stay, the chained exceptions too. Never
+	raises (it is the last resort of an error path)."""
+	try:
+		return _withheld(exc)
+	except Exception:
+		return f"{type(exc).__name__}: [withheld: its text may name a guest]"
+
+
+def _withheld(exc: BaseException | None) -> str:
+	from frappe.utils import get_bench_path
+	parts, seen = [], set()
+	while exc is not None and id(exc) not in seen:
+		seen.add(id(exc))
+		kind = type(exc)
+		parts.append("Traceback (most recent call last):\n"
+		             + "".join(traceback.format_tb(exc.__traceback__))
+		             + f"{kind.__module__}.{kind.__qualname__}: [withheld: its text may name a guest]")
+		if exc.__cause__ is not None:
+			parts.append("\nThe above exception was the direct cause of the following exception:\n")
+			exc = exc.__cause__
+		elif exc.__context__ is not None and not exc.__suppress_context__:
+			parts.append("\nDuring handling of the above exception, another exception occurred:\n")
+			exc = exc.__context__
+		else:
+			exc = None
+	return "\n".join(reversed(parts)).replace(get_bench_path() + "/", "")
+
+
+def guest_traceback(*records, stays: tuple | None = None) -> str:
+	"""The message for frappe.log_error in an `except` that may be about a
+	guest: the traceback without local variables and without the people of
+	`records` (see guests_of). If they cannot be looked up, the error texts
+	are withheld (withheld_traceback): the trace stays, the guest never
+	goes in."""
+	exc = sys.exc_info()[1]
+	text = frappe.get_traceback(with_context=False)
+	try:
+		return _scrub_guest(text, guests_of(*records, stays=stays))
+	except Exception:
+		return withheld_traceback(exc)

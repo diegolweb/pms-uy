@@ -95,23 +95,39 @@ def group_nights(check_in_date, check_out_date) -> list[str]:
 	return [str(add_days(ci, i)) for i in range(max((co - ci).days, 1))]
 
 
-def unpicked_by_night(group: str, room_type: str) -> dict[str, int]:
+def unpicked_by_night(group: str, room_type: str, *,
+                      for_update: bool = False) -> dict[str, int]:
 	"""{night: rooms of the block still held} over the group's nights. A
 	night's block is its own count (rooms per night) or Rooms Blocked; a
 	night is picked up by every live stay of the group covering it."""
-	row = frappe.db.get_value(
-		"Group Room Block", {"parent": group, "room_type": room_type},
-		["rooms_blocked", "nightly_counts"], as_dict=True)
+	if for_update:
+		locked = frappe.db.sql(
+			"""SELECT rooms_blocked, nightly_counts FROM `tabGroup Room Block`
+			   WHERE parent = %s AND room_type = %s FOR UPDATE""",
+			(group, room_type), as_dict=True)
+		row = locked[0] if locked else None
+	else:
+		row = frappe.db.get_value(
+			"Group Room Block", {"parent": group, "room_type": room_type},
+			["rooms_blocked", "nightly_counts"], as_dict=True)
 	if not row or not (row.rooms_blocked or row.nightly_counts):
 		return {}
 	gb = frappe.db.get_value("Group Booking", group,
 	                         ["check_in_date", "check_out_date"], as_dict=True)
 	nightly = parse_nightly(row.nightly_counts)
 	# a stay that has checked out used its nights too
-	stays = frappe.get_all("Reservation", filters={
-		"group_booking": group, "room_type": room_type,
-		"status": ("in", [*LIVE_STATUSES, "Checked Out"])},
-		fields=["check_in_date", "check_out_date"])
+	if for_update:
+		stays = frappe.db.sql(
+			"""SELECT check_in_date, check_out_date FROM `tabReservation`
+			   WHERE group_booking = %s AND room_type = %s
+			     AND status IN ('Confirmed', 'Checked In', 'Held', 'Pending Payment', 'Checked Out')
+			   FOR UPDATE""",
+			(group, room_type), as_dict=True)
+	else:
+		stays = frappe.get_all("Reservation", filters={
+			"group_booking": group, "room_type": room_type,
+			"status": ("in", [*LIVE_STATUSES, "Checked Out"])},
+			fields=["check_in_date", "check_out_date"])
 	out = {}
 	for d in group_nights(gb.check_in_date, gb.check_out_date):
 		night = getdate(d)
@@ -142,7 +158,8 @@ def block_hold(property: str, room_type: str, check_in_date, check_out_date,
 
 
 def block_hold_by_night(property: str, room_type: str, nights: list,
-                        for_group: str | None = None) -> dict[str, int]:
+                        for_group: str | None = None,
+                        for_update: bool = False) -> dict[str, int]:
 	"""Per-night hold for `room_type`: {date: rooms held}. One read of the
 	groups for the whole range, then each group counts on its own nights."""
 	if not nights:
@@ -152,7 +169,7 @@ def block_hold_by_night(property: str, room_type: str, nights: list,
 	                         add_days(max(dates), 1), for_group)
 	out = {str(d): 0 for d in dates}
 	for gb in groups:
-		held = unpicked_by_night(gb.name, room_type)
+		held = unpicked_by_night(gb.name, room_type, for_update=for_update)
 		for d in dates:
 			out[str(d)] += held.get(str(d), 0)
 	return out
@@ -190,9 +207,10 @@ def release_expired_blocks() -> list[dict]:
 		frappe.db.savepoint(sp)
 		try:
 			doc = frappe.get_doc("Group Booking", gb.name)
-			parts, total = [], 0
+			parts, total, rows = [], 0, []
 			for row in doc.blocks:
 				n = _unpicked(doc.name, row.room_type)
+				rows.append({"room_type": row.room_type, "rooms_released": n})
 				# the release record: written straight to the rows - a
 				# system stamp, not an edit of the negotiated block
 				frappe.db.set_value("Group Room Block", row.name,
@@ -215,9 +233,13 @@ def release_expired_blocks() -> list[dict]:
 			)
 			released.append({"group_booking": doc.name, "rooms_released": total})
 			if total:
+				from kamra.webhooks import emit_group_block_released
+				emit_group_block_released(doc, rows)
 				from kamra.channel_manager import enqueue_property_push
 				enqueue_property_push(doc.property)
 		except Exception:
 			frappe.db.rollback(save_point=sp)
-			frappe.log_error(title=f"Group block release failed: {gb.name}")
+			from kamra.privacy import guest_traceback
+			frappe.log_error(title=f"Group block release failed: {gb.name}",
+			                 message=guest_traceback(("Group Booking", gb.name)))
 	return released

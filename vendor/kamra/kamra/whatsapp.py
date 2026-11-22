@@ -232,7 +232,9 @@ def queue_room_charge_alert(folio, charge) -> bool:
 		               description=charge.get("description") or charge.get("charge_type") or "")
 		return True
 	except Exception:
-		frappe.log_error(title="WhatsApp room charge alert not queued")
+		from kamra.privacy import guest_traceback
+		frappe.log_error(title="WhatsApp room charge alert not queued",
+		                 message=guest_traceback(("Folio", folio.get("name"))))
 		return False
 
 
@@ -317,7 +319,8 @@ def _payment_link(res, amount) -> str | None:
 		return None
 	except Exception:
 		# the gateway is down: the message still goes, with the desk wording
-		frappe.log_error(title="WhatsApp payment link failed")
+		from kamra.privacy import guest_traceback
+		frappe.log_error(title="WhatsApp payment link failed", message=guest_traceback(res))
 		frappe.clear_messages()
 		return None
 

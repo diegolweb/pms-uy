@@ -25,6 +25,42 @@ def day(n: int) -> str:
 	return str(add_days(nowdate(), n))
 
 
+# a day's stay rules when nothing restricts it (HR-17: they go with the rate)
+OPEN_RULES = {"min_stay_arrival": 1, "min_stay_through": 1, "max_stay": 0,
+              "closed_to_arrival": False, "closed_to_departure": False}
+
+
+# HR-140: what the desk reads, in each language, when the Channex property id is missing:
+# activating the connection without it, and importing or syncing before it is entered.
+PROPERTY_ID_TO_ACTIVATE = {
+	"en": "Enter the provider's property ID (your property's ID in Channex) to activate this connection: "
+	      "without it, availability and rates do not reach Channex and its bookings do not come in.",
+	"es": "Ingrese el ID del alojamiento en el proveedor (el ID de su alojamiento en Channex) para activar "
+	      "esta conexión: sin él, la disponibilidad y las tarifas no llegan a Channex y sus reservas no entran.",
+	"pt": "Informe o ID da propriedade do provedor (o ID da sua propriedade no Channex) para ativar esta "
+	      "conexão: sem ele, a disponibilidade e as tarifas não chegam ao Channex e as reservas dele não entram.",
+}
+PROPERTY_ID_FIRST = {
+	"en": "This connection has no provider's property ID yet: enter your property's ID in Channex first.",
+	"es": "Esta conexión todavía no tiene el ID del alojamiento en el proveedor: primero ingrese el ID de "
+	      "su alojamiento en Channex.",
+	"pt": "Esta conexão ainda não tem o ID da propriedade do provedor: primeiro informe o ID da sua "
+	      "propriedade no Channex.",
+}
+
+
+def channex_plan(rp_id: str, room: str, sell_mode: str = "per_room", rate_mode: str = "manual",
+                 occupancies=(2,), primary: int | None = None) -> dict:
+	"""A rate plan as Channex's GET rate_plans gives it, with its occupancy
+	options (a per_person plan: one per count of adults; per_room: one, for
+	the room's maximum). The primary option is the largest unless named."""
+	primary = primary or (max(occupancies) if occupancies else None)
+	return {"type": "rate_plan", "id": rp_id, "attributes": {
+		"title": rp_id, "sell_mode": sell_mode, "rate_mode": rate_mode, "currency": "USD",
+		"options": [{"occupancy": n, "is_primary": n == primary, "rate": 0} for n in occupancies]},
+		"relationships": {"room_type": {"data": {"type": "room_type", "id": room}}}}
+
+
 class _Response:
 	def __init__(self, status_code, body=None, headers=None):
 		self.status_code, self._body, self.headers = status_code, body, headers or {}
@@ -176,6 +212,42 @@ class ChannexAriAdapterTestCase(UnitTestCase):
 		self.assertEqual(rooms["rt2"]["rateplans"][0], {"rateplan_id": "rp2", "rateplan_name": "Plan 2",
 		                                                "sell_mode": "per_room", "currency": "USD"})
 
+	# HR-88: a rate plan Channex prices per person takes one rate per occupancy
+	def test_per_person_rates_go_one_per_occupancy_as_decimal_strings(self):
+		fake = FakeChannex()
+		with patch.object(channex, "_send", side_effect=fake):
+			channex.push_ari_changes(_conn(), "restrictions", [
+				{"external_id": "rp1", "date_from": "2030-01-01", "date_to": "2030-01-05", "values": {
+					"rates": [{"occupancy": 2, "rate": Decimal("120")}, {"occupancy": 1, "rate": Decimal("90.005")}],
+					"stop_sell": False}}])
+		self.assertEqual(fake.posts("restrictions"), [[
+			{"property_id": "prop", "rate_plan_id": "rp1", "date_from": "2030-01-01", "date_to": "2030-01-05",
+			 "rates": [{"occupancy": 1, "rate": "90.01"}, {"occupancy": 2, "rate": "120.00"}], "stop_sell": False}]])
+
+	def test_rate_occupancies_are_the_ones_kamra_prices_on_each_per_person_plan(self):
+		"""manual: every option; auto: the primary one (Channex works out the
+		others); derived and cascade take their price from another plan, and
+		a per_room plan has one rate: none of them is listed."""
+		fake = FakeChannex()
+		fake.room_types = [{"type": "room_type", "id": "rt3", "attributes": {"title": "Triple", "occ_adults": 3}}]
+		fake.rate_plans = [
+			channex_plan("rp-room", "rt1"),
+			channex_plan("rp-manual", "rt1", "per_person", occupancies=(3, 1, 2)),
+			channex_plan("rp-auto", "rt1", "per_person", "auto", occupancies=(1, 2, 3), primary=2),
+			channex_plan("rp-derived", "rt1", "per_person", "derived", occupancies=(1, 2)),
+			channex_plan("rp-cascade", "rt1", "per_person", "cascade", occupancies=(1, 2)),
+			*[channex_plan(f"rp-{i}", "rt1") for i in range(100)]]
+		with patch.object(channex, "_send", side_effect=fake):
+			self.assertEqual(channex.fetch_rate_occupancies(_conn()), {"rp-manual": [1, 2, 3], "rp-auto": [2]})
+		self.assertEqual([(c[0], c[1], c[2]["filter[property_id]"]) for c in fake.calls],
+		                 [("GET", "rate_plans", "prop"), ("GET", "rate_plans", "prop")])
+		# a manual per_person plan Channex lists no options for: 1..occ_adults of its room type
+		fake.rate_plans = [channex_plan("rp-bare", "rt3", "per_person", occupancies=())]
+		fake.calls = []
+		with patch.object(channex, "_send", side_effect=fake):
+			self.assertEqual(channex.fetch_rate_occupancies(_conn()), {"rp-bare": [1, 2, 3]})
+		self.assertEqual([c[1] for c in fake.calls], ["rate_plans", "room_types"])
+
 	def test_seam_push_ari_sends_ranges_in_two_calls(self):
 		fake = FakeChannex()
 		snapshot = [{"room_type": "T", "external_room_id": "rt1", "external_rate_id": "rp1", "days": [
@@ -223,7 +295,8 @@ class _AriFixture:
 
 	def clear_cache(self):
 		# connection names come back after each test's rollback; their cache keys must not
-		for key in ("channex_ari_error::{c}", "channex_pause::{c}", "channex_feed_error::{c}"):
+		for key in ("channex_ari_error::{c}", "channex_pause::{c}", "channex_feed_error::{c}",
+		            "channex_ari_occupancies::{c}"):
 			frappe.cache.delete_value(key.format(c=self.conn.name))
 		for kind in ("availability", "restrictions"):
 			frappe.cache.delete_value(f"channex_ari_pause::{self.conn.name}::{kind}")
@@ -288,7 +361,7 @@ class ChannexAriCellsTestCase(_AriFixture, IntegrationTestCase):
 		cells = channel_ari.restriction_cells(self.conn, day(2), day(4))
 		self.assertEqual(cells["rp-double-bar"][day(3)]["rate"], Decimal("150.00"))
 		self.assertEqual(cells["rp-double-bb"][day(3)]["rate"], Decimal("170.00"))
-		self.assertEqual(cells["rp-double-bar"][day(2)], {"rate": Decimal("120.00"), "stop_sell": False})
+		self.assertEqual(cells["rp-double-bar"][day(2)], dict(OPEN_RULES, rate=Decimal("120.00"), stop_sell=False))
 		self.assertEqual(cells["rp-twin-bb"][day(3)]["rate"], Decimal("120.00"))
 		self.assertEqual(sorted(cells), ["rp-double-bar", "rp-double-bb", "rp-twin-bar", "rp-twin-bb"])
 
@@ -296,7 +369,54 @@ class ChannexAriCellsTestCase(_AriFixture, IntegrationTestCase):
 		from kamra import channel_ari
 		with patch("kamra.pricing.quote", side_effect=frappe.ValidationError("closed")):
 			cells = channel_ari.restriction_cells(self.conn, day(1), day(1))
-		self.assertEqual(cells["rp-twin-bar"][day(1)], {"stop_sell": True})
+		self.assertEqual(cells["rp-twin-bar"][day(1)], dict(OPEN_RULES, stop_sell=True))
+
+	# HR-88: a plan Channex prices per person gets the quote for each count of adults
+	def test_a_per_person_plan_is_priced_for_each_occupancy_by_quote(self):
+		from kamra import channel_ari
+		from kamra.pricing import quote
+		frappe.db.set_value("Room Type", self.double, "single_occupancy_price", 90)
+		cells = channel_ari.restriction_cells(self.conn, day(2), day(3), {"rp-double-bar": [1, 2],
+		                                                                  "rp-double-bb": [1, 2]})
+		quoted = {(plan, n): Decimal(str(quote(self.property, self.double, day(3), day(4), adults=n, children=0,
+		                                        rate_plan=plan)["room_total"])) for plan in (None, self.bb)
+		          for n in (1, 2)}
+		self.assertEqual(quoted, {(None, 1): 90, (None, 2): 120, (self.bb, 1): 110, (self.bb, 2): 140})
+		self.assertEqual(cells["rp-double-bar"][day(3)], dict(OPEN_RULES, stop_sell=False, rates=[
+			{"occupancy": 1, "rate": quoted[None, 1]}, {"occupancy": 2, "rate": quoted[None, 2]}]))
+		self.assertEqual(cells["rp-double-bb"][day(3)]["rates"], [
+			{"occupancy": 1, "rate": quoted[self.bb, 1]}, {"occupancy": 2, "rate": quoted[self.bb, 2]}])
+		self.assertNotIn("rate", cells["rp-double-bar"][day(3)])
+		# the plans not listed keep one rate, the base occupancy's
+		self.assertEqual(cells["rp-twin-bar"][day(3)], dict(OPEN_RULES, rate=Decimal("100.00"), stop_sell=False))
+		plain = channel_ari.restriction_cells(self.conn, day(2), day(3))
+		self.assertEqual((cells["rp-twin-bar"], cells["rp-twin-bb"]), (plain["rp-twin-bar"], plain["rp-twin-bb"]))
+		self.assertEqual(plain["rp-double-bar"][day(3)]["rate"], Decimal("120.00"))
+
+	def test_a_per_person_day_without_a_price_stops_sale_and_sends_no_rates(self):
+		from kamra import channel_ari
+		with patch("kamra.pricing.quote", side_effect=frappe.ValidationError("closed")):
+			cells = channel_ari.restriction_cells(self.conn, day(1), day(1), {"rp-twin-bar": [1, 2]})
+		self.assertEqual(cells["rp-twin-bar"][day(1)], dict(OPEN_RULES, stop_sell=True))
+
+	def test_the_rates_of_a_day_diff_and_join_as_one_value(self):
+		"""A day's rates are one value, as rate is: the same rates are not
+		sent again, one occupancy that moves sends the day's rates whole, and
+		consecutive days with the same rates go as one range."""
+		from kamra import channel_ari
+		rates = [{"occupancy": 1, "rate": Decimal("90.00")}, {"occupancy": 2, "rate": Decimal("120.00")}]
+		cells = {"rp1": {day(i): {"rates": copy.deepcopy(rates), "stop_sell": False} for i in (1, 2, 3)}}
+		sent = {"rp1": {day(i): {"rates": [{"occupancy": 1, "rate": "90.00"}, {"occupancy": 2, "rate": "120.00"}],
+		                         "stop_sell": False} for i in (1, 2, 3)}}
+		self.assertEqual(channel_ari.diff_cells(cells, sent), {})
+		for i in (2, 3):
+			cells["rp1"][day(i)]["rates"][0]["rate"] = Decimal("95")
+		changed = channel_ari.diff_cells(cells, sent)
+		self.assertEqual(changed, {"rp1": {day(i): {"rates": [{"occupancy": 1, "rate": Decimal("95")},
+		                                                      {"occupancy": 2, "rate": Decimal("120.00")}]}
+		                                   for i in (2, 3)}})
+		self.assertEqual([(c.get("date_from"), c.get("date_to")) for c in channel_ari.compress(changed)],
+		                 [(day(2), day(3))])
 
 	def test_availability_counts_a_booking_once_per_room_type(self):
 		from kamra import channel_ari
@@ -687,6 +807,135 @@ class ChannexAriClaimTestCase(_AriWorkerMixin, IntegrationTestCase):
 		self.assertEqual(self.ari.enqueue_ari_change(self.property, day(5), day(5), reason="test"), mine)
 
 
+class ChannexAriPerPersonTestCase(_AriWorkerMixin, IntegrationTestCase):
+	"""HR-88: a Channex rate plan priced per person takes a rate per
+	occupancy - the quote for that many adults - instead of one rate. The
+	worker learns which plans those are from Channex (GET rate_plans), at
+	most once an hour, again after a mapping changes and for a full sync.
+	Here Double's BAR is per person (1 and 2 adults); the rest per room."""
+
+	def setUp(self):
+		super().setUp()
+		frappe.db.set_value("Room Type", self.double, "single_occupancy_price", 90)
+		self.fake.rate_plans = [
+			channex_plan("rp-twin-bar", "rt-twin"), channex_plan("rp-twin-bb", "rt-twin"),
+			channex_plan("rp-double-bar", "rt-double", "per_person", occupancies=(1, 2)),
+			channex_plan("rp-double-bb", "rt-double")]
+
+	@staticmethod
+	def by_adults(property, room_type, rate_plan, d, adults=None):
+		"""A quick price (the horizon by quote would be slow): 100 + adults."""
+		return Decimal(100 + (adults or 2))
+
+	def plan_reads(self) -> int:
+		return sum(1 for c in self.fake.calls if c[:2] == ("GET", "rate_plans"))
+
+	def restrictions(self) -> list:
+		"""Every value posted to restrictions, in order."""
+		return [v for call in self.fake.posts("restrictions") for v in call]
+
+	def test_a_per_person_plan_takes_a_rate_per_occupancy_and_per_room_keeps_rate(self):
+		"""A season on Double moves both of its plans: the per_person BAR goes
+		with rates for 1 and 2 adults (the quote for each), the per_room BB
+		with its rate, in the same call."""
+		from kamra.pricing import quote
+		self.season(self.double, 7, value=10, kind="Percent")
+		self.flush()
+		quoted = {n: Decimal(str(quote(self.property, self.double, day(7), day(8), adults=n,
+		                               children=0)["room_total"])) for n in (1, 2)}
+		self.assertEqual(quoted, {1: 99, 2: 132})
+		self.assertEqual(self.fake.posts("restrictions"), [[
+			{"property_id": "cx-test", "rate_plan_id": "rp-double-bar", "date": day(7),
+			 "rates": [{"occupancy": 1, "rate": "99.00"}, {"occupancy": 2, "rate": "132.00"}]},
+			{"property_id": "cx-test", "rate_plan_id": "rp-double-bb", "date": day(7), "rate": "152.00"}]])
+		known = self.sent("restrictions", "rp-double-bar")[day(7)]
+		self.assertEqual(known["rates"], [{"occupancy": 1, "rate": "99.00"}, {"occupancy": 2, "rate": "132.00"}])
+		self.assertNotIn("rate", known)  # what Channex holds for the day is its rates now
+		self.assertEqual({r.status for r in self.rows()}, {"Sent"})
+
+	def test_ranges_and_what_was_sent_work_on_the_rates_as_on_a_rate(self):
+		self.ari.enqueue_ari_change(self.property, day(2), day(11), reason="test")
+		self.flush()
+		self.assertEqual(self.restrictions(), [
+			{"property_id": "cx-test", "rate_plan_id": "rp-double-bar", "date_from": day(2), "date_to": day(11),
+			 "rates": [{"occupancy": 1, "rate": "90.00"}, {"occupancy": 2, "rate": "120.00"}]}])
+		self.ari.enqueue_ari_change(self.property, day(2), day(11), reason="again")
+		self.assertEqual(self.flush()["restrictions"], {"sent": 0})
+		# only the price for one adult moves: those days go again, with their rates whole
+		frappe.db.set_value("Room Type", self.double, "single_occupancy_price", 95)
+		self.ari.enqueue_ari_change(self.property, day(4), day(6), reason="single")
+		self.flush()
+		self.assertEqual(len(self.fake.posts("restrictions")), 2)
+		self.assertEqual(self.restrictions()[-1], {"property_id": "cx-test", "rate_plan_id": "rp-double-bar",
+			"date_from": day(4), "date_to": day(6),
+			"rates": [{"occupancy": 1, "rate": "95.00"}, {"occupancy": 2, "rate": "120.00"}]})
+
+	def test_the_plans_are_read_once_an_hour_and_again_after_a_mapping_change_or_for_a_full_sync(self):
+		from kamra.channel_ari import request_full_sync
+		self.season(self.double, 7, value=10, kind="Percent")
+		self.flush()
+		self.season(self.double, 8, value=10, kind="Percent")
+		self.flush()
+		self.assertEqual(self.plan_reads(), 1)
+		self.tick(3600)
+		self.season(self.double, 9, value=10, kind="Percent")
+		self.flush()
+		self.assertEqual(self.plan_reads(), 2)
+		with patch("kamra.channel_ari._plan_night_rate", side_effect=self.by_adults):
+			# the mapping is re-pointed to a new Channex plan, per person: it goes whole, with rates
+			self.fake.rate_plans.append(channex_plan("rp-double-pp", "rt-double", "per_person", occupancies=(1, 2)))
+			mapping = frappe.get_doc("Channel Room Mapping", {"connection": self.conn.name,
+			                                                  "external_rate_id": "rp-double-bb"})
+			mapping.external_rate_id = "rp-double-pp"
+			mapping.save(ignore_permissions=True)
+			self.flush()
+			self.assertEqual(self.plan_reads(), 3)
+			moved = [v for v in self.restrictions() if v["rate_plan_id"] == "rp-double-pp"]
+			self.assertEqual([(v["date_from"], v["date_to"], v["rates"]) for v in moved], [
+				(day(0), day(self.ari.ARI_HORIZON_DAYS - 1),
+				 [{"occupancy": 1, "rate": "101.00"}, {"occupancy": 2, "rate": "102.00"}])])
+			self.assertEqual(request_full_sync(self.conn.name), {"queued": True})
+			self.flush()
+		self.assertEqual(self.plan_reads(), 4)
+
+	def test_until_channex_says_which_plans_are_per_person_no_rate_goes_out(self):
+		self.fake.fail("rate_plans", channex.ChannexError(500, "boom"))
+		self.season(self.double, 7, value=10, kind="Percent")
+		self.book(self.twin, 4)
+		out = self.flush()
+		self.assertIn("retry", out["restrictions"])
+		self.assertEqual(self.fake.posts("restrictions"), [])
+		self.assertEqual(len(self.fake.posts("availability")), 1)  # availability does not wait for it
+		self.assertEqual(self.error_logs(f"Channex ARI {self.conn.name}"), 1)
+		self.tick(30)
+		self.flush()
+		# the booking's night moves price too (occupancy): the per_person BAR first goes with its rates that day
+		self.assertEqual([(v["rate_plan_id"], v["date"], "rates" in v) for v in self.restrictions()],
+		                 [("rp-double-bar", day(4), True), ("rp-double-bar", day(7), True),
+		                  ("rp-double-bb", day(7), False)])
+		self.assertEqual({r.status for r in self.rows()}, {"Sent"})
+
+	def test_a_4xx_reading_the_plans_fails_the_rows_as_one_posting_them_would(self):
+		self.fake.fail("rate_plans", channex.ChannexError(401, "unauthorized"))
+		self.season(self.double, 7, value=10, kind="Percent")
+		out = self.flush()
+		self.assertIn("401", out["restrictions"]["failed"])
+		self.assertEqual([r.status for r in self.rows()], ["Failed"])
+		self.assertEqual(self.fake.posts("restrictions"), [])
+
+	def test_when_channex_does_not_answer_the_last_reading_stands(self):
+		self.season(self.double, 7, value=10, kind="Percent")
+		self.flush()
+		self.tick(3600)
+		self.fake.fail("rate_plans", channex.ChannexError(503, "down"))
+		self.season(self.double, 8, value=10, kind="Percent")
+		self.assertEqual(self.flush()["restrictions"], {"sent": 2})
+		self.assertEqual(self.plan_reads(), 2)
+		self.assertEqual(self.restrictions()[-2], {"property_id": "cx-test", "rate_plan_id": "rp-double-bar",
+			"date": day(8), "rates": [{"occupancy": 1, "rate": "99.00"}, {"occupancy": 2, "rate": "132.00"}]})
+		self.assertEqual(self.error_logs(f"Channex ARI {self.conn.name}"), 1)
+
+
 class ChannexAriTriggersTestCase(_AriWorkerMixin, IntegrationTestCase):
 	BASELINE_DAYS = 0
 
@@ -709,7 +958,9 @@ class ChannexAriTriggersTestCase(_AriWorkerMixin, IntegrationTestCase):
 		with patch("kamra.channel_ari._plan_night_rate", side_effect=self.priced):
 			self.assertEqual(request_full_sync(self.conn.name), {"queued": True})
 			self.flush()
-		self.assertEqual([c[1] for c in self.fake.calls], ["availability", "restrictions"])
+		# the two ARI calls; between them, the read of which plans are per person (HR-88)
+		self.assertEqual([c[:2] for c in self.fake.calls],
+		                 [("POST", "availability"), ("GET", "rate_plans"), ("POST", "restrictions")])
 		for kind, ids in (("availability", {"rt-twin", "rt-double"}),
 		                  ("restrictions", {"rp-twin-bar", "rp-twin-bb", "rp-double-bar", "rp-double-bb"})):
 			values = self.fake.posts(kind)[0]
@@ -763,7 +1014,8 @@ class ChannexAriTriggersTestCase(_AriWorkerMixin, IntegrationTestCase):
 			self.ari.nightly_sweep()
 			self.assertFalse(frappe.db.exists("Channel ARI Outbox", old.name))
 			self.flush()
-			self.assertEqual(self.fake.calls, [])
+			# no ARI call: only the read of which plans are per person (HR-88)
+			self.assertEqual([c[:2] for c in self.fake.calls], [("GET", "rate_plans")])
 			# tomorrow: day 499 was never sent, the rest is known
 			for kind, ext_id in (("availability", "rt-twin"), ("restrictions", "rp-double-bb")):
 				name = f"{self.conn.name}|{kind}|{ext_id}"
@@ -877,12 +1129,13 @@ class ChannexAriImportTestCase(_AriFixture, IntegrationTestCase):
 		self.assertEqual((len(out["created"]), len(out["updated"])), (0, 4))
 		self.assertEqual(len(self.mapped()), 4)
 
-	def test_the_five_warnings(self):
+	def test_the_four_warnings(self):
 		self.fake.property.update(currency="EUR", timezone="Europe/Madrid")
 		self.fake.room_types[0]["attributes"]["count_of_rooms"] = 9
+		# HR-88: a plan priced per person is no warning any more: it gets a rate per occupancy
 		self.fake.rate_plans[2] = self._plan(2, "BAR", "rt-double", sell_mode="per_person")
 		codes = [w["code"] for w in self.run_import()["warnings"]]
-		self.assertEqual(sorted(codes), ["count_of_rooms", "currency", "fixed_amount", "per_person", "timezone"])
+		self.assertEqual(sorted(codes), ["count_of_rooms", "currency", "fixed_amount", "timezone"])
 		frappe.db.set_value("Rate Plan", self.bb, "modifier_type", "Percent")
 		self.fake.property.update(currency="USD", timezone="America/Montevideo")
 		self.fake.room_types[0]["attributes"]["count_of_rooms"] = 8
@@ -894,3 +1147,117 @@ class ChannexAriImportTestCase(_AriFixture, IntegrationTestCase):
 		out = self.run_import()
 		self.assertEqual(sorted(u["rateplan_id"] for u in out["unmatched"]), ["rp-7", "rp-twin-bar"])
 		self.assertNotIn("rp-twin-bar", self.mapped())
+
+	# HR-140: without the Channex property id, GET properties/ would read the
+	# account, not the hotel. The import says what to fill in and calls nobody.
+	def test_without_its_property_id_the_import_says_so_and_never_calls_channex(self):
+		# a connection still being set up: inactive, its Channex property not entered yet
+		self.conn.update({"active": 0, "external_property_id": ""})
+		self.conn.save(ignore_permissions=True)
+		for lang, message in PROPERTY_ID_FIRST.items():
+			with self.subTest(lang=lang):
+				frappe.local.lang = lang
+				try:
+					with self.assertRaises(frappe.ValidationError) as caught:
+						self.run_import(dry_run=1)
+				finally:
+					frappe.local.lang = "en"
+				self.assertEqual(str(caught.exception), message)
+		with self.assertRaises(frappe.ValidationError):
+			self.run_import()
+		self.assertEqual(self.fake.calls, [])
+		self.assertEqual(self.mapped(), {})
+
+
+class ChannexPropertyIdTestCase(_AriWorkerMixin, IntegrationTestCase):
+	"""HR-140: a Channex connection is only active with its Channex property
+	id. Without it the save is refused; and one that lost it anyway (written
+	straight to the database, or saved before this rule) gets no outbox rows
+	and sends nothing - every ARI value would carry property_id "" and come
+	back a 4xx, failing the rows."""
+
+	def new_connection(self, **values):
+		return frappe.get_doc(dict({"doctype": "Channel Manager Connection", "property": self.property,
+			"provider": "Channex", "active": 1, "webhook_secret": "ut-hook"}, **values))
+
+	def lose_property_id(self):
+		"""What a connection saved before HR-140, or written with db.set_value, can hold."""
+		frappe.db.set_value("Channel Manager Connection", self.conn.name, "external_property_id", "")
+		self.conn.reload()
+
+	def refusal(self, lang: str) -> str:
+		frappe.local.lang = lang
+		try:
+			with self.assertRaises(frappe.ValidationError) as caught:
+				self.new_connection(external_property_id="").insert(ignore_permissions=True)
+		finally:
+			frappe.local.lang = "en"
+		return str(caught.exception)
+
+	def test_an_active_channex_connection_is_not_saved_without_its_property_id(self):
+		for value in (None, "", "   "):
+			with self.subTest(external_property_id=value):
+				with self.assertRaises(frappe.ValidationError):
+					self.new_connection(external_property_id=value).insert(ignore_permissions=True)
+		self.conn.external_property_id = ""
+		with self.assertRaises(frappe.ValidationError):
+			self.conn.save(ignore_permissions=True)
+		self.assertEqual(frappe.db.get_value("Channel Manager Connection", self.conn.name,
+		                                     "external_property_id"), "cx-test")
+
+	def test_the_refusal_says_what_to_fill_in_in_english_spanish_and_portuguese(self):
+		for lang, message in PROPERTY_ID_TO_ACTIVATE.items():
+			with self.subTest(lang=lang):
+				self.assertEqual(self.refusal(lang), message)
+
+	def test_a_connection_being_set_up_saves_inactive_and_activates_with_its_property_id(self):
+		doc = self.new_connection(active=0, external_property_id="").insert(ignore_permissions=True)
+		doc.active = 1
+		with self.assertRaises(frappe.ValidationError):
+			doc.save(ignore_permissions=True)
+		doc.reload()
+		doc.update({"active": 1, "external_property_id": "  cx-new \t"})
+		doc.save(ignore_permissions=True)
+		self.assertEqual(frappe.db.get_value("Channel Manager Connection", doc.name,
+		                                     ["active", "external_property_id"]), (1, "cx-new"))
+
+	def test_other_providers_are_not_asked_for_it(self):
+		for provider in ("AioSell", "STAAH", "Custom"):
+			with self.subTest(provider=provider):
+				doc = self.new_connection(provider=provider, external_property_id="").insert(
+					ignore_permissions=True)
+				self.assertEqual(doc.active, 1)
+
+	def test_a_connection_without_its_property_id_gets_no_outbox_rows(self):
+		self.assertEqual([c.name for c in self.ari.outbox_connections(self.property)], [self.conn.name])
+		self.lose_property_id()
+		self.assertEqual(self.ari.outbox_connections(self.property), [])
+		self.assertNotIn(self.conn.name, [c.name for c in self.ari.outbox_connections()])
+		self.season(self.twin, 5)
+		self.ari.nightly_sweep()
+		self.assertEqual(self.rows(), [])
+
+	def test_rows_queued_before_it_was_lost_wait_and_nothing_goes_out(self):
+		self.season(self.twin, 5)  # queued while the connection still had its id
+		self.lose_property_id()
+		out = self.flush()
+		self.assertEqual(self.fake.calls, [])
+		self.assertEqual(out, {kind: {"nothing": True} for kind in self.ari.KINDS})
+		self.assertEqual([(r.status, r.attempts) for r in self.rows()], [("Pending", 0)])
+		self.assertEqual(self.error_logs(f"Channex ARI failed {self.conn.name}"), 0)
+		# the id entered again (through the form, so through validate): the row goes out with it
+		self.conn.external_property_id = "cx-test"
+		self.conn.save(ignore_permissions=True)
+		self.flush()
+		self.assertEqual({v["property_id"] for v in self.fake.posts("restrictions")[0]}, {"cx-test"})
+		self.assertEqual({r.status for r in self.rows()}, {"Sent"})
+
+	def test_a_full_sync_without_its_property_id_says_so_and_queues_nothing(self):
+		from kamra import channel_manager as cm
+		self.lose_property_id()
+		for ask in (lambda: self.ari.request_full_sync(self.conn.name), lambda: cm.push_ari(self.conn.name)):
+			with self.assertRaisesRegex(frappe.ValidationError, "no provider's property ID yet"):
+				ask()
+		self.assertEqual(self.rows(), [])
+		self.assertEqual(self.fake.calls, [])
+		self.assertFalse(frappe.db.get_value("Channel Manager Connection", self.conn.name, "last_full_sync"))

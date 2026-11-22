@@ -17,6 +17,7 @@ import RoomInsights from "../components/RoomInsights"
 import CheckOutDialog from "../components/CheckOutDialog"
 import CheckInDialog from "../components/CheckInDialog"
 import RoomChangeDialog from "../components/RoomChangeDialog"
+import { sortFloors } from "../lib/floors"
 
 
 const NO_FLOOR = "__none__"
@@ -85,8 +86,23 @@ export default function Rooms() {
 
   useEffect(() => {
     load()
-    const id = setInterval(load, 30_000)
-    return () => clearInterval(id)
+    let id: ReturnType<typeof setInterval> | null = null
+    const arm = () => {
+      if (id) clearInterval(id)
+      id = null
+      if (document.visibilityState === "hidden") return
+      id = setInterval(load, 60_000)
+    }
+    const onVis = () => {
+      arm()
+      if (document.visibilityState === "visible") load()
+    }
+    arm()
+    document.addEventListener("visibilitychange", onVis)
+    return () => {
+      if (id) clearInterval(id)
+      document.removeEventListener("visibilitychange", onVis)
+    }
   }, [load, refreshKey])
 
   const setParam = (k: string, v: string | null) =>
@@ -102,13 +118,13 @@ export default function Rooms() {
 
   const rooms = board?.rooms ?? []
   const floorOf = (r: BoardRoom) => (r.floor || "").trim() || NO_FLOOR
-  const floors = useMemo(
-    () =>
-      Array.from(new Set(rooms.map(floorOf))).sort((a, b) =>
-        a === NO_FLOOR ? 1 : b === NO_FLOOR ? -1 : a.localeCompare(b, undefined, { numeric: true }),
-      ),
-    [rooms],
-  )
+  const floors = useMemo(() => {
+    const names = Array.from(new Set(rooms.map(floorOf)))
+    return [
+      ...sortFloors(names.filter((n) => n !== NO_FLOOR), board?.floors),
+      ...names.filter((n) => n === NO_FLOOR),
+    ]
+  }, [rooms, board?.floors])
   const shown = rooms.filter(
     (r) =>
       (floor === "all" || floorOf(r) === floor) &&

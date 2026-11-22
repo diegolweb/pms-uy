@@ -122,6 +122,15 @@ class TestMercadoPago(CobrosCase):
 			kamra_payments.create_payment_link(folio, amount=10)
 		self.assertEqual(core.calls[0][1]["return_url"], get_url("/pago"))
 
+	def test_the_return_url_kamra_asks_for_goes_to_core(self):
+		# HR-31: la reserva web vuelve a /kamra/book?booking=<token>, no a /pago
+		_, folio = self.booking("Confirmed")
+		core = self.core(reply={"link_id": "l", "url": "http://mp/1"})
+		kamra_payments.create_payment_link(folio, amount=10, return_url="https://x.example/r?booking=R.1")
+		self.assertEqual(core.calls[0][1]["return_url"], "https://x.example/r?booking=R.1")
+		kamra_payments.create_payment_link(folio, amount=10)
+		self.assertEqual(core.calls[1][1]["return_url"], RETURN)
+
 	def test_what_reception_reads_when_core_fails(self):
 		_, folio = self.booking("Confirmed")
 		cases = [

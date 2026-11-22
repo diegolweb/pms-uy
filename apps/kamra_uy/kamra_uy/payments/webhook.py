@@ -3,8 +3,9 @@
 `POST /api/method/kamra_uy.payments.webhook.core_event`, con `X-HR-Signature`, `X-HR-Event-Id` y `X-HR-Event-Type`.
 Respuestas: cuerpo que no es un aviso → 400; firma mala, propiedad desconocida, `X-HR-Event-Id` cambiado o folio de
 otra propiedad → 403; aviso ya recibido → 200 {"duplicate": true}; lo que no se arregla reintentando (folio cerrado,
-otra moneda, folio que no existe, todo contracargo) → 200, «Needs attention» y un correo a Finanzas. Un error
-inesperado no guarda nada y da 500: el servicio reintenta todo lo que no sea 2xx.
+otra moneda, folio que no existe, todo contracargo, el pago que llega con la reserva ya cancelada) → 200, «Needs
+attention» y un correo a Finanzas. Un error inesperado no guarda nada y da 500: el servicio reintenta todo lo que no
+sea 2xx.
 
 Cada aviso queda en UY Core Event (una vez por `event_id`); cada pago y cada devolución, una vez por su referencia.
 """
@@ -25,6 +26,8 @@ EVENT_DOCTYPE = "UY Core Event"
 APPLIED, DUPLICATE, NEEDS_ATTENTION = "Applied", "Duplicate", "Needs attention"
 _KIND = {"payment.approved": texts.KIND_PAYMENT, "payment.refunded": texts.KIND_REFUND,
          "payment.charged_back": texts.KIND_CHARGEBACK}
+# una reserva así ya no espera ningún pago: si llega uno (la retención venció mientras el huésped pagaba), es tardío
+LATE = ("Cancelled", "No Show")
 
 
 class InvalidEvent(frappe.ValidationError):
@@ -87,6 +90,8 @@ def _apply(event: dict, folio: str | None, prop: str, payload: bytes, headers: d
 	currency = (frappe.get_cached_value("Property", prop, "currency") or "").upper()
 	if currency != event["currency"]:
 		return NEEDS_ATTENTION, f"currency {event['currency']} != {currency or '-'}", texts.ACTION_CURRENCY
+	if event["type"] == "payment.approved" and _booking_status(folio) in LATE:
+		return _late_payment(folio, payload, headers)
 	if frappe.db.get_value("Folio", folio, "status") == "Closed":
 		return NEEDS_ATTENTION, "folio_closed", texts.ACTION_FOLIO_CLOSED
 
@@ -121,6 +126,27 @@ def _apply(event: dict, folio: str | None, prop: str, payload: bytes, headers: d
 	return NEEDS_ATTENTION, f"chargeback posted: {left:.2f}", texts.ACTION_CHARGEBACK
 
 
+def _booking_status(folio: str) -> str | None:
+	reservation = frappe.db.get_value("Folio", folio, "reservation")
+	return frappe.db.get_value("Reservation", reservation, "status") if reservation else None
+
+
+def _late_payment(folio: str, payload: bytes, headers: dict) -> tuple[str, str, str | None]:
+	"""El pago de una reserva que ya no lo esperaba (HR-31): el dinero existe, así que se asienta si el folio está
+	abierto, y desde ahí se puede devolver; pero la reserva NO se reactiva sola (su habitación pudo venderse otra vez).
+	Siempre lo revisa Finanzas."""
+	if frappe.db.get_value("Folio", folio, "status") == "Closed":
+		return NEEDS_ATTENTION, "late payment: folio closed, not posted", texts.ACTION_LATE_PAYMENT
+	from kamra import payments
+
+	out = payments.handle_webhook(GATEWAY, payload, headers)
+	if out.get("ignored"):
+		return NEEDS_ATTENTION, "ignored by the gateway door", texts.ACTION_NO_FOLIO
+	if not out.get("posted"):
+		return DUPLICATE, "payment already posted", None
+	return NEEDS_ATTENTION, "late payment: posted", texts.ACTION_LATE_PAYMENT
+
+
 def _refund_outcome(out: dict, action: str | None) -> tuple[str, str, str | None]:
 	if out.get("posted"):
 		return APPLIED, "posted", action
@@ -151,5 +177,17 @@ def _mail_finance(doc, event: dict, action: str) -> None:
 		kind=_KIND[event["type"]], folio=escape_html(event["folio"]),
 		amount=escape_html(money_text(doc.property, amount_to_float(event["amount"]))),
 		action=escape_html(action))
-	frappe.sendmail(recipients=recipients, subject=subject, message=message,
-	                reference_doctype=EVENT_DOCTYPE, reference_name=doc.name)
+	# El aviso vale más que su correo: si no se puede encolar (sin cuenta saliente, sendmail LANZA OutgoingEmailError,
+	# HTTP 501), se deshace solo el correo, el aviso se guarda y queda en «Needs attention», y el porqué va al Error Log
+	# del aviso. Antes, el error tumbaba la transacción entera y core reintentaba un aviso que nunca entraba (HR-224).
+	savepoint = "kamra_uy_mail_finance"
+	frappe.db.savepoint(savepoint)
+	try:
+		frappe.sendmail(recipients=recipients, subject=subject, message=message,
+		                reference_doctype=EVENT_DOCTYPE, reference_name=doc.name)
+	except Exception as e:
+		frappe.db.rollback(save_point=savepoint)
+		frappe.log_error(title="kamra_uy cobros: correo a Finanzas sin enviar",  # sin traza: ni destinatarios ni locales
+		                 message=f"{type(e).__name__}: {e}", reference_doctype=EVENT_DOCTYPE, reference_name=doc.name)
+	else:
+		frappe.db.release_savepoint(savepoint)

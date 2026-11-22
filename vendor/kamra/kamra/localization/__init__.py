@@ -27,16 +27,30 @@ and the accessors refuse rather than fall back to another country's:
 """
 
 import importlib
+import inspect
 from datetime import date
 
 import frappe
 
 
-def pack_for(property: str | None = None):
-	country = None
+def default_country() -> str:
+	"""The install's own country (System Settings, set by the setup wizard),
+	or "" - never a guess."""
+	return (frappe.db.get_single_value("System Settings", "country") or "").strip()
+
+
+def property_country(property: str | None) -> str:
+	"""The property's country, else the install's, else ""."""
+	country = ""
 	if property:
-		country = frappe.get_cached_value("Property", property, "country")
-	return pack_for_country(country or "India")
+		country = (frappe.get_cached_value("Property", property, "country") or "").strip()
+	return country or default_country()
+
+
+def pack_for(property: str | None = None):
+	"""The country pack for a property. A property with no country takes the
+	install's; with neither, the plain generic pack - never India by guess."""
+	return pack_for_country(property_country(property))
 
 
 def pack_for_country(country: str):
@@ -98,21 +112,31 @@ def default_nationality(pack) -> str:
 def money_text(property: str | None, amount) -> str:
 	"""An amount in the property's currency for server-written text (the
 	activity log, alerts) - never a hardcoded rupee sign."""
-	symbol = ""
+	symbol, currency = "", ""
 	try:
 		if property:
 			prop = frappe.get_cached_doc("Property", property)
-			symbol = pack_for(property).locale(prop).get("currency_symbol") or ""
+			loc = pack_for(property).locale(prop)
+			symbol, currency = loc.get("currency_symbol") or "", loc.get("currency") or ""
 	except Exception:
 		symbol = ""
 	try:
 		value = float(amount or 0)
 	except (TypeError, ValueError):
 		return f"{symbol}{amount}"
-	text = f"{value:,.2f}"
-	if text.endswith(".00"):
-		text = text[:-3]
-	return f"{symbol}{text}"
+	return f"{'-' if value < 0 else ''}{symbol}{group_digits(abs(value), currency == 'INR')}"
+
+
+def group_digits(value: float, lakh: bool = False) -> str:
+	"""11025 -> 11,025 and 28360.4 -> 28,360.40; with lakh, 120000 -> 1,20,000
+	as the desk shows rupees."""
+	text = f"{value:,.2f}".removesuffix(".00")
+	if not lakh:
+		return text
+	whole, _, frac = text.replace(",", "").partition(".")
+	head, tail = whole[:-3], whole[-3:]
+	groups = [head[max(i - 2, 0):i] for i in range(len(head), 0, -2)][::-1]
+	return ",".join([*groups, tail]) + (f".{frac}" if frac else "")
 
 
 def service_code_for(pack, prop_doc, charge_type: str | None = None):
@@ -141,14 +165,27 @@ def invoice_tax_note(pack) -> str:
 	return getattr(pack, "INVOICE_TAX_NOTE", None) or ""
 
 
+def invoice_language(prop_doc) -> str:
+	"""The language a bill is written in: the property's booking_language,
+	else the site's language, else "en". Base code only ("pt-BR" -> "pt")."""
+	language = (prop_doc.get("booking_language") or "").strip()
+	if not language:
+		language = (frappe.db.get_single_value("System Settings", "language") or "").strip()
+	return (language.replace("_", "-").split("-")[0] or "en").lower()
+
+
 def amount_in_words(pack, prop_doc, amount) -> str:
+	"""The invoice's amount in words. The pack's own speller if it has one;
+	else num2words in the bill's language; else Kamra's English speller."""
 	fn = getattr(pack, "amount_in_words", None)
 	if fn:
 		return fn(prop_doc, amount)
 	from kamra.localization.words import amount_in_words as spell
+	from kamra.localization.words import amount_in_words_in
 
-	loc = pack.locale(prop_doc)
-	return spell(amount, loc.get("currency") or "", indian=False)
+	currency = pack.locale(prop_doc).get("currency") or ""
+	return (amount_in_words_in(amount, currency, invoice_language(prop_doc))
+	        or spell(amount, currency, indian=False))
 
 
 # ── front-desk vocabulary: IDs and ways to pay ───────────────────────────
@@ -177,6 +214,12 @@ def payment_modes(pack) -> list[str]:
 	modes = getattr(pack, "PAYMENT_MODES", None) or GENERIC_PAYMENT_MODES
 	allowed = (*GENERIC_PAYMENT_MODES, *instant_payment_modes(pack))
 	return [m for m in modes if m in allowed]
+
+
+def cash_denominations(pack) -> list[float]:
+	"""The notes and coins a till counts at close (CASH_DENOMINATIONS),
+	largest first. Empty where the pack names none: any value is counted."""
+	return [float(v) for v in getattr(pack, "CASH_DENOMINATIONS", None) or ()]
 
 
 def outlet_payment_modes(pack) -> list[str]:
@@ -319,10 +362,26 @@ def _provider(pack, gateway: str | None):
 	return pack.payment_provider(gateway)
 
 
-def create_gateway_link(pack, settings, **link) -> tuple[str, str]:
+def create_gateway_link(pack, settings, return_url: str | None = None,
+                        **link) -> tuple[str, str]:
 	"""A live payment link on the property's own gateway account.
-	Returns (link id, url)."""
-	return _provider(pack, settings.gateway).create_link(settings, **link)
+	Returns (link id, url). `return_url`, where the gateway sends the guest
+	after paying, reaches providers whose create_link takes it; the others
+	keep their own page."""
+	provider = _provider(pack, settings.gateway)
+	if return_url and _takes(provider.create_link, "return_url"):
+		link["return_url"] = return_url
+	return provider.create_link(settings, **link)
+
+
+def _takes(fn, name: str) -> bool:
+	"""Whether `fn` accepts the keyword `name` (by name or through **kwargs)."""
+	try:
+		params = inspect.signature(fn).parameters
+	except (TypeError, ValueError):
+		return False
+	return name in params or any(
+		p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
 def test_gateway_link(pack, gateway: str | None, link_id: str) -> str:
@@ -450,6 +509,16 @@ def supported_countries() -> list[dict]:
 # record can be regenerated, a guest kept waiting at checkout cannot.
 
 
+def _hook_record(name: str, args: tuple):
+	"""The record an e-invoicing hook works on - whose buyer its error may
+	quote: the bill (a folio), a POS order, or the printed source."""
+	if name == "invoice_print_block" and len(args) >= 2:
+		return (args[0], args[1])
+	if not args:
+		return None
+	return ("POS Order" if name == "on_pos_bill_paid" else "Folio", args[0])
+
+
 def _hook(pack, name, *args):
 	fn = getattr(pack, name, None)
 	if not fn:
@@ -461,7 +530,9 @@ def _hook(pack, name, *args):
 		return fn(*args)
 	except Exception:
 		frappe.db.rollback(save_point=sp)
-		frappe.log_error(title=f"e-invoicing: {name} failed")
+		from kamra.privacy import guest_traceback
+		frappe.log_error(title=f"e-invoicing: {name} failed",
+		                 message=guest_traceback(_hook_record(name, args)))
 		return None
 
 

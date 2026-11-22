@@ -257,6 +257,11 @@ export default function BanquetDocument() {
           <footer className="mt-10 flex items-end justify-between gap-6 border-t border-zinc-200 pt-4">
             <p className="max-w-sm text-[11px] leading-relaxed text-zinc-400">
               {doc.header.footer}
+              {doc.header.invoice_footer && (
+                <span className="mt-2 block whitespace-pre-line">
+                  {doc.header.invoice_footer}
+                </span>
+              )}
             </p>
             <div className="shrink-0 text-center">
               <div className="mb-1 h-10 w-44 border-b border-zinc-300" />
@@ -515,13 +520,15 @@ function Lines({ doc, showsMoney }: { doc: Doc; showsMoney: boolean }) {
   useUILanguage()
   const all = [...doc.lines, ...doc.complimentary]
   if (all.length === 0) return null
+  // no tax column on a document none of whose lines is taxed
+  const taxed = Number(doc.totals.tax) !== 0
   return (
     <Section title={(showsMoney ? translate("Charges") : translate("What's included"))}>
       <table className="w-full">
         <thead>
           <tr className="border-b border-zinc-200 text-left text-xs uppercase tracking-wider text-zinc-400">
             <th className="py-1.5 font-medium">{translate("Item")}</th>
-            {showsMoney && (
+            {showsMoney && doc.header.service_code_label && (
               <th className="py-1.5 font-medium">
                 {doc.header.service_code_label}
               </th>
@@ -530,7 +537,7 @@ function Lines({ doc, showsMoney }: { doc: Doc; showsMoney: boolean }) {
             {showsMoney && (
               <>
                 <th className="py-1.5 text-right font-medium">{translate("Rate")}</th>
-                <th className="py-1.5 text-right font-medium">{taxLabel()}</th>
+                {taxed && <th className="py-1.5 text-right font-medium">{taxLabel()}</th>}
                 <th className="py-1.5 text-right font-medium">{translate("Amount")}</th>
               </>
             )}
@@ -553,7 +560,7 @@ function Lines({ doc, showsMoney }: { doc: Doc; showsMoney: boolean }) {
                   <p className="text-xs text-zinc-400">{l.notes}</p>
                 )}
               </td>
-              {showsMoney && (
+              {showsMoney && doc.header.service_code_label && (
                 <td className="py-1.5 font-mono text-[11px] text-zinc-400">
                   {l.service_code ?? ""}
                 </td>
@@ -567,9 +574,11 @@ function Lines({ doc, showsMoney }: { doc: Doc; showsMoney: boolean }) {
                   <td className="py-1.5 text-right tabular-nums">
                     {l.chargeable ? inrExact(l.rate) : "-"}
                   </td>
+                  {taxed && (
                   <td className="py-1.5 text-right tabular-nums text-zinc-500">
                     {l.chargeable ? `${l.gst_rate}%` : "-"}
                   </td>
+                  )}
                   <td className="py-1.5 text-right tabular-nums">
                     {l.chargeable ? inrExact(l.net_amount) : "-"}
                   </td>
@@ -688,7 +697,7 @@ function PackList({ doc }: { doc: Doc }) {
 function TaxBreakup({ doc }: { doc: Doc }) {
   const { lang, t } = useT()
   const rows = doc.tax_breakup ?? []
-  if (!rows.length) return null
+  if (!rows.length || Number(doc.totals.tax) === 0) return null
   const label = doc.header.tax_label ?? "GST"
   return (
     <Section title={translate("{v0} breakup", { v0: String(label) })}>
@@ -737,8 +746,8 @@ function Totals({ doc }: { doc: Doc }) {
       <div className="w-72 space-y-1">
         <Amt k="Subtotal" v={t.subtotal} />
         {t.discount > 0 && <Amt k="Discount" v={-t.discount} />}
-        <Amt k="Taxable" v={t.taxable} />
-        {t.tax_summary.map((s) => (
+        {Number(t.tax) !== 0 && <Amt k="Taxable" v={t.taxable} />}
+        {Number(t.tax) !== 0 && t.tax_summary.map((s) => (
           <Amt
             key={s.gst_rate}
             k={`${taxLabel()} @ ${s.gst_rate}%`}

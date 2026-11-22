@@ -22,6 +22,12 @@ def fnb_tax_rate(property) -> float:
 
 
 def tax_rate_options(property) -> list:
+	# a property that charges no tax (its rates are 0) offers only 0%, so a
+	# charge added by hand can't pick up a tax by mistake
+	if property:
+		prop = frappe.get_cached_doc("Property", property)
+		if not float(prop.get("gst_rate_low") or 0) and not float(prop.get("gst_rate_high") or 0):
+			return [0]
 	return [0, 5, 10, 12, 15, 20]
 
 
@@ -31,7 +37,8 @@ def invoice_context(prop_doc) -> dict:
 		"tax_id_label": "Tax ID",
 		"service_code": None,
 		"sac": None,
-		"place_of_supply": prop_doc.get("state"),
+		# "place of supply" is a GST notion: a country with no pack has none
+		"place_of_supply": None,
 		"split": [("tax", Decimal("1"))],
 		"footer": "This is a computer-generated invoice.",
 	}

@@ -6,10 +6,11 @@ Lo corre `bench run-tests --app kamra_uy` (o `--module kamra_uy.contingency.test
 """
 
 import email
+import json
 from unittest.mock import patch
 
 import frappe
-from frappe.utils import add_days, getdate, nowdate
+from frappe.utils import add_days, getdate, now_datetime, nowdate
 from kamra import api as kamra_api
 from kamra.tests.audit_fixtures import (
 	AuditTestCase,
@@ -162,7 +163,7 @@ class TestContingencyReport(ContingencyCase):
 
 	def test_an_active_channex_connection_switches_the_mode_off(self):
 		frappe.get_doc({"doctype": "Channel Manager Connection", "property": PROP, "provider": "Channex",
-		                "active": 1}).insert(ignore_permissions=True)
+		                "active": 1, "external_property_id": "cx-contingencia"}).insert(ignore_permissions=True)
 		result = report.build_report(PROP)
 		self.assertIs(result["active"], False)
 		self.assertEqual(result["rows"], [])
@@ -241,7 +242,7 @@ class TestContingencyAccess(ContingencyCase):
 
 	def test_the_page_when_the_mode_is_off(self):
 		frappe.get_doc({"doctype": "Channel Manager Connection", "property": PROP, "provider": "Channex",
-		                "active": 1}).insert(ignore_permissions=True)
+		                "active": 1, "external_property_id": "cx-contingencia"}).insert(ignore_permissions=True)
 		with patch.dict(frappe.form_dict, {"property": PROP}, clear=True):
 			context = frappe._dict()
 			page.get_context(context)
@@ -291,7 +292,7 @@ class TestContingencyAlerts(ContingencyCase):
 
 	def test_channex_on_sends_nothing(self):
 		frappe.get_doc({"doctype": "Channel Manager Connection", "property": PROP, "provider": "Channex",
-		                "active": 1}).insert(ignore_permissions=True)
+		                "active": 1, "external_property_id": "cx-contingencia"}).insert(ignore_permissions=True)
 		before = self.mails()
 		self.book(5)
 		self.assertEqual(self.mails(), before)
@@ -368,7 +369,7 @@ class TestContingencyPageRenders(ContingencyCase):
 
 	def test_the_off_page_is_one_line(self):
 		frappe.get_doc({"doctype": "Channel Manager Connection", "property": PROP, "provider": "Channex",
-		                "active": 1}).insert(ignore_permissions=True)
+		                "active": 1, "external_property_id": "cx-contingencia"}).insert(ignore_permissions=True)
 		status, html = self.render("Administrator")
 		self.assertEqual(status, 200)
 		self.assertIn("La sincronización con las plataformas está activa: el modo contingencia está apagado.", html)
@@ -503,3 +504,99 @@ class TestContingencyPropertyScope(ContingencyCase):
 			frappe.local.request = saved
 		self.assertEqual(response.status_code, 403)
 		self.assertNotIn("Ya lo hice en las extranets", response.get_data(as_text=True))
+
+	# --- HR-152: los ajustes y las fotos del plan, bajo el alcance estricto por propiedad de Kamra (la misma regla que
+	# sus doctypes con propiedad): con kamra_strict_property_scope, quien no tiene User Permission de Property no los
+	# lista ni los lee por ningún camino de Frappe; limitado a una propiedad, no ve los de otra, con la bandera a False
+	# y a True.
+
+	def scoped_rows(self) -> dict[str, dict[str, str]]:
+		"""Por doctype, el nombre de su fila de PROP y de OTHER (los ajustes se llaman como su propiedad)."""
+		snapshots = {p: frappe.get_doc({"doctype": report.SNAPSHOT, "property": p, "applied_on": now_datetime(),
+		                                "plan": "{}"}).insert(ignore_permissions=True).name for p in (PROP, OTHER)}
+		return {report.SETTINGS: {PROP: PROP, OTHER: OTHER}, report.SNAPSHOT: snapshots}
+
+	def assert_seen(self, rows: dict[str, dict[str, str]], visible: tuple[str, ...]):
+		for doctype, by_property in rows.items():
+			with self.subTest(doctype=doctype):
+				expected = {path: {by_property[p] for p in visible} for path in READ_PATHS}
+				self.assertEqual(seen(doctype, sorted(by_property.values())), expected)
+
+	@staticmethod
+	def strict(on: bool = True):
+		return patch.dict(frappe.conf, {"kamra_strict_property_scope": int(on)})
+
+	def test_strict_scope_hides_settings_and_snapshots_from_staff_without_property_permissions(self):
+		rows = self.scoped_rows()
+		for role in ("Front Desk", "Hotel Admin"):
+			with self.subTest(role=role):
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- fixture: give the persona its role
+				ensure_user(SCOPED, [role])
+				frappe.set_user(SCOPED)  # nosemgrep: frappe-setuser -- the unscoped persona under strict scope
+				with self.strict():
+					self.assert_seen(rows, ())
+
+	def test_without_the_strict_scope_staff_without_property_permissions_read_every_property(self):
+		rows = self.scoped_rows()
+		frappe.set_user(SCOPED)  # nosemgrep: frappe-setuser -- the unscoped persona, legacy scope
+		with self.strict(False):
+			self.assert_seen(rows, (PROP, OTHER))
+
+	def test_staff_limited_to_one_property_never_see_another_propertys_settings_or_snapshots(self):
+		rows = self.scoped_rows()
+		self.limit_to(OTHER)
+		for on in (False, True):
+			with self.subTest(strict=on), self.strict(on):
+				self.assert_seen(rows, (OTHER,))
+
+	def test_finance_never_reads_the_contingency_doctypes(self):
+		# Finanzas no tiene permiso de rol sobre estos doctypes: con la bandera o sin ella, no los lista ni los lee
+		rows = self.scoped_rows()
+		ensure_user(FINANCE, ["Finance"])
+		frappe.set_user(FINANCE)  # nosemgrep: frappe-setuser -- the Finance persona
+		for on in (False, True):
+			with self.subTest(strict=on), self.strict(on):
+				self.assert_seen(rows, ())
+
+	def test_strict_scope_still_lets_permitted_staff_open_the_page_and_mark_it_done(self):
+		self.limit_to(PROP)
+		with self.strict(), patch.dict(frappe.form_dict, {"property": PROP}, clear=True):
+			context = frappe._dict()
+			page.get_context(context)
+			self.assertEqual((context.property, context.report["active"]), (PROP, True))
+			snapshot = api.mark_applied(PROP)["snapshot"]
+			self.assertEqual(seen(report.SNAPSHOT, [snapshot]), {path: {snapshot} for path in READ_PATHS})
+		self.assertEqual(frappe.db.get_value(report.SNAPSHOT, snapshot, ["property", "applied_by"]), (PROP, SCOPED))
+
+
+FINANCE = "finanzas-contingencia@roosevelt.test"
+READ_PATHS = ("frappe.get_list", "/api/resource (lista)", "/api/resource (ficha)", "frappe.has_permission")
+
+
+def seen(doctype: str, names: list[str]) -> dict[str, set[str]]:
+	"""Lo que la sesión actual alcanza de `names` por cada camino de lectura de Frappe: frappe.get_list, la lista y la
+	ficha de /api/resource (frappe.api.v1, lo que sirve esa ruta) y frappe.has_permission (Desk y los enlaces). Una
+	lista que Frappe niega entera (sin permiso de rol) no alcanza nada."""
+	from frappe.api import v1
+
+	def listed(fetch) -> set[str]:
+		try:
+			return fetch()
+		except frappe.PermissionError:
+			return set()
+
+	rest = {"fields": json.dumps(["name"]), "filters": json.dumps({"name": ["in", names]}), "limit_page_length": 0}
+	by_list = listed(lambda: set(frappe.get_list(doctype, filters={"name": ["in", names]}, pluck="name",
+	                                             limit_page_length=0)))
+	with patch.dict(frappe.form_dict, rest, clear=True):
+		by_rest = listed(lambda: {row["name"] for row in v1.document_list(doctype)})
+	rest_read = set()
+	with patch.dict(frappe.form_dict, {}, clear=True):
+		for name in names:
+			try:
+				v1.read_doc(doctype, name)
+			except frappe.PermissionError:
+				continue
+			rest_read.add(name)
+	allowed = {name for name in names if frappe.has_permission(doctype, "read", name)}
+	return dict(zip(READ_PATHS, (by_list, by_rest, rest_read, allowed), strict=True))

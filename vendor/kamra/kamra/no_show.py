@@ -248,7 +248,9 @@ def release_non_guaranteed_arrivals():
 				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- scheduler job persists each property's releases independently; reviewed as intentional
 		except Exception:
 			frappe.db.rollback()
-			frappe.log_error(title=f"Non-guaranteed release failed: {p}")
+			from kamra.privacy import guest_traceback
+			frappe.log_error(title=f"Non-guaranteed release failed: {p}",
+			                 message=guest_traceback(stays=(p, None)))
 
 
 def release_for_property(property: str, now: datetime | None = None) -> list[str]:

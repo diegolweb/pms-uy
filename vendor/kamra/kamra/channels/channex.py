@@ -160,6 +160,10 @@ def _ari_value(field: str, value):
 	if field == "rate":
 		# a decimal string: Channex refuses a bare float with decimals
 		return str(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+	if field == "rates":
+		# a plan priced per person: one rate per occupancy, by occupancy
+		return [{"occupancy": int(r["occupancy"]), "rate": _ari_value("rate", r["rate"])}
+		        for r in sorted(value, key=lambda r: int(r["occupancy"]))]
 	if field == "availability":
 		return int(value)
 	return value
@@ -240,6 +244,39 @@ def fetch_property_details(conn) -> dict:
 	return {"hotel_id": prop.get("id") or pid, "hotel_name": prop.get("title"),
 	        "currency": prop.get("currency"), "timezone": prop.get("timezone"),
 	        "per_rate_plan": True, "rooms": rooms}
+
+
+def fetch_rate_occupancies(conn) -> dict[str, list[int]]:
+	"""{rate_plan_id: [occupancy, ...]} (ascending) for the property's rate
+	plans priced per person, with the occupancies Kamra prices on each: a
+	plan with manual rates, every option (or 1..occ_adults of its room type
+	when Channex lists none); an auto plan, its primary option - Channex
+	works out the others from it. A per_room plan, or a derived or cascade
+	one (priced from another plan), is not listed: it takes one rate."""
+	scope = {"filter[property_id]": conn.external_property_id}
+	out: dict[str, list[int]] = {}
+	bare: dict[str, str] = {}  # manual plans without options: their room type
+	for item in _all_pages(conn, "rate_plans", scope):
+		attrs = item.get("attributes") or {}
+		mode = attrs.get("rate_mode") or "manual"
+		if attrs.get("sell_mode") != "per_person" or mode not in ("manual", "auto"):
+			continue
+		options = [o for o in attrs.get("options") or [] if o.get("occupancy")]
+		if mode == "auto":
+			options = [o for o in options if o.get("is_primary")]
+		occupancies = sorted({int(o["occupancy"]) for o in options})
+		if occupancies:
+			out[str(item.get("id"))] = occupancies
+		elif mode == "manual":
+			bare[str(item.get("id"))] = str(
+				(((item.get("relationships") or {}).get("room_type") or {}).get("data") or {}).get("id"))
+	if bare:
+		adults = {str(r.get("id")): int((r.get("attributes") or {}).get("occ_adults") or 0)
+		          for r in _all_pages(conn, "room_types", scope)}
+		for rate_id, room_id in bare.items():
+			if adults.get(room_id):
+				out[rate_id] = list(range(1, adults[room_id] + 1))
+	return out
 
 
 def push_ari(conn, snapshot) -> tuple[bool, str]:

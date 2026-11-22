@@ -26,6 +26,7 @@ import ImageField from "./ImageField"
 import { fmtAmount } from "../lib/money"
 import { useT, t as translate, useUILanguage } from "../lib/i18n"
 import { useAuth } from "../lib/auth"
+import { downloadCsv } from "../lib/csv"
 
 const BACKDATE_ROLES = ["Finance", "Hotel Admin", "System Manager", "Administrator"]
 
@@ -44,6 +45,52 @@ export type MenuMasterKey =
   | "prep_stations"
   | "courses"
   | "categories"
+
+/** Options loaded from a doctype: the value stored, the label shown. */
+export interface OptionSource {
+  linkDoctype: string
+  /** field stored/filtered on (default: the record name) */
+  valueField?: string
+  /** field shown (default: the value) */
+  labelField?: string
+  propertyScoped?: boolean
+  orderBy?: string
+}
+
+/** The Floor master as an option source: floor names in the master's order. */
+export const floorSource: OptionSource = {
+  linkDoctype: "Floor",
+  valueField: "floor_name",
+  propertyScoped: true,
+  orderBy: "sort_order asc, floor_name asc",
+}
+
+export type FilterSpec = {
+  field: string
+  label: string
+  /** static options */
+  options?: string[]
+} & Partial<Omit<OptionSource, "linkDoctype">> & { linkDoctype?: string; optionsFrom?: "Floor" }
+
+type Opt = { value: string; label: string }
+
+function sourceOf(f: FilterSpec): OptionSource | null {
+  if (f.optionsFrom === "Floor") return floorSource
+  return f.linkDoctype ? (f as OptionSource) : null
+}
+
+function loadOptions(src: OptionSource): Promise<Opt[]> {
+  const vf = src.valueField ?? "name"
+  const lf = src.labelField ?? vf
+  return listResource(src.linkDoctype, {
+    fields: Array.from(new Set([vf, lf])),
+    filters: src.propertyScoped ? [["property", "=", getCurrentProperty()]] : undefined,
+    limit: 500,
+    orderBy: src.orderBy ?? `${lf} asc`,
+  }).then((r) =>
+    r.map((x) => ({ value: String(x[vf] ?? ""), label: String(x[lf] ?? x[vf] ?? "") })),
+  )
+}
 
 export interface FieldSpec {
   field: string
@@ -64,6 +111,10 @@ export interface FieldSpec {
   options?: string[] // for select / tags (static fallback)
   /** Load options from Settings → F&B → Menu master lists */
   optionsFrom?: MenuMasterKey
+  /** select options loaded from a doctype (e.g. the property's floors) */
+  source?: OptionSource
+  /** with `source`: offer "Add a floor" to type a value not in the list yet */
+  allowNew?: string
   linkDoctype?: string // for link
   /** link options only from the current property (the target has a `property` field) */
   linkPropertyScoped?: boolean
@@ -93,7 +144,7 @@ export interface ScreenConfig {
   /** Fields searched (LIKE) by the search box. Adds a search input when set. */
   searchFields?: string[]
   /** Dropdown filters shown in the toolbar (e.g. status). */
-  filters?: { field: string; label: string; options: string[] }[]
+  filters?: FilterSpec[]
   /** Rows per page (adds pagination when set). */
   pageSize?: number
   /** Date-range filter on this date field (adds From/To pickers). */
@@ -175,6 +226,63 @@ function TagsInput(props: {
   )
 }
 
+/** A select whose options come from a doctype; allowNew adds a typed value. */
+function SourceSelect(props: {
+  spec: FieldSpec
+  value: unknown
+  onChange: (v: unknown) => void
+  t: (s: string) => string
+}) {
+  const { spec, value, onChange, t } = props
+  const [opts, setOpts] = useState<Opt[]>([])
+  const [adding, setAdding] = useState(false)
+  useEffect(() => {
+    loadOptions(spec.source!).then(setOpts).catch(() => setOpts([]))
+  }, [spec.source])
+  const cur = String(value ?? "")
+  if (adding)
+    return (
+      <div className="flex gap-2">
+        <input
+          autoFocus
+          className={inputCls}
+          value={cur}
+          placeholder={t(spec.allowNew ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <button
+          type="button"
+          className="text-xs text-zinc-500 hover:text-zinc-700"
+          onClick={() => setAdding(false)}
+        >
+          {t("Choose from list")}
+        </button>
+      </div>
+    )
+  return (
+    <select
+      className={inputCls}
+      value={cur}
+      onChange={(e) => {
+        if (e.target.value === NEW) {
+          onChange("")
+          setAdding(true)
+        } else onChange(e.target.value)
+      }}
+    >
+      <option value="">-</option>
+      {cur && !opts.some((o) => o.value === cur) && <option value={cur}>{cur}</option>}
+      {opts.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+      {spec.allowNew && <option value={NEW}>{t(spec.allowNew)}</option>}
+    </select>
+  )
+}
+const NEW = "__new__"
+
 function FieldInput(props: {
   spec: FieldSpec
   value: unknown
@@ -202,6 +310,10 @@ function FieldInput(props: {
         />
       )
     case "select":
+      if (spec.source)
+        return (
+          <SourceSelect spec={spec} value={value} onChange={onChange} t={t} />
+        )
       return (
         <select
           className={inputCls}
@@ -389,6 +501,17 @@ export function ResourceScreen({
   const visibleCols = config.columns.filter((c) => !hiddenCols.has(c.field))
   const [debounced, setDebounced] = useState("")
   const [filterVals, setFilterVals] = useState<Record<string, string>>({})
+  const [filterOpts, setFilterOpts] = useState<Record<string, Opt[]>>({})
+  useEffect(() => {
+    for (const f of config.filters ?? []) {
+      const src = sourceOf(f)
+      if (src)
+        loadOptions(src)
+          .then((o) => setFilterOpts((p) => ({ ...p, [f.field]: o })))
+          .catch(() => {})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.doctype])
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
   const [page, setPage] = useState(0)
@@ -478,20 +601,11 @@ export function ResourceScreen({
       limit: 2000,
     })
     const cols = visibleCols
-    const esc = (v: unknown) => {
-      const t = String(v ?? "")
-      return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t
-    }
-    const csv = [
-      cols.map((c) => esc(c.label)).join(","),
-      ...all.map((r) => cols.map((c) => esc(r[c.field])).join(",")),
-    ].join("\n")
-    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" })
-    const a = document.createElement("a")
-    a.href = URL.createObjectURL(blob)
-    a.download = `${config.doctype.toLowerCase().replace(/ /g, "-")}-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(a.href)
+    downloadCsv(
+      `${config.doctype.toLowerCase().replace(/ /g, "-")}-${new Date().toISOString().slice(0, 10)}`,
+      cols.map((c) => c.label),
+      all.map((r) => cols.map((c) => r[c.field] as string | number | null)),
+    )
   }
 
   // load link options and menu master lists once per screen
@@ -639,11 +753,17 @@ export function ResourceScreen({
                 className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm focus:outline-2 focus:outline-offset-1 focus:outline-brand-600"
               >
                 <option value="">{t("{label}: all", { label: t(f.label) })}</option>
-                {f.options.map((o) => (
-                  <option key={o} value={o}>
-                    {t(o)}
-                  </option>
-                ))}
+                {f.options
+                  ? f.options.map((o) => (
+                      <option key={o} value={o}>
+                        {t(o)}
+                      </option>
+                    ))
+                  : (filterOpts[f.field] ?? []).map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
               </select>
             ))}
             {config.dateFilter && (

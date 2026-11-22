@@ -149,7 +149,9 @@ def notify_departments_on_confirm(doc) -> None:
 			except Exception:
 				# the notification is best-effort - but a silent failure means
 				# nobody knows the team was never told
-				frappe.log_error(title="Banquet: WhatsApp alert to staff failed")
+				from kamra.privacy import guest_traceback
+				frappe.log_error(title="Banquet: WhatsApp alert to staff failed",
+				                 message=guest_traceback(doc))
 	log_action(
 		"banquet_confirm_notify",
 		"Venue Booking",
@@ -277,7 +279,9 @@ def send_quotation(function: str, channels: str | list | None = None):
 				send_outbound(doc.property, "WhatsApp", phone, text)
 				sent.append("whatsapp")
 			except Exception:
-				frappe.log_error(title="banquet send_quotation whatsapp")
+				from kamra.privacy import guest_traceback
+				frappe.log_error(title="banquet send_quotation whatsapp",
+				                 message=guest_traceback(doc))
 
 	if not sent:
 		frappe.throw(_("Nothing was sent — check channels and guest contact."))
@@ -454,4 +458,5 @@ def maybe_email_guest_quote_chase(doc, alert: dict) -> None:
 			now=True,
 		)
 	except Exception:
-		frappe.log_error(title="banquet quote chase email")
+		from kamra.privacy import guest_traceback
+		frappe.log_error(title="banquet quote chase email", message=guest_traceback(doc))

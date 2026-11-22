@@ -117,7 +117,8 @@ def registered_adapters() -> dict[str, type[DoorLockAdapter]]:
 		try:
 			cls = frappe.get_attr(path)
 		except Exception:
-			frappe.log_error(title=f"Door lock adapter {key} failed to load")
+			frappe.log_error(title=f"Door lock adapter {key} failed to load",
+			                 message=frappe.get_traceback(with_context=False))
 			continue
 		if isinstance(cls, type) and issubclass(cls, DoorLockAdapter):
 			out[key] = cls

@@ -8,6 +8,8 @@ helpers come from the credit-control fixture.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import frappe
 
 from kamra import credit, ledger, receivables
@@ -52,6 +54,35 @@ class ReceivablesTestCase(cc.CreditControlTestCase):
 			                            account=self.account)
 		with self.assertRaises(frappe.ValidationError):  # restricted needs a why
 			receivables.save_ar_account(PROP_A, co, account=out["account"], restricted=1)
+
+	def test_edit_keeps_what_it_leaves_out_and_a_keyed_open_replays(self):
+		co = self.other_company()
+		out = receivables.save_ar_account(PROP_A, co, account_number="UT-KEY",
+		                                  credit_limit=7000, billing_address="2 Main St",
+		                                  idempotency_key="ut-open-1")
+		again = receivables.save_ar_account(PROP_A, co, idempotency_key="ut-open-1")
+		self.assertEqual((again["account"], again.get("idempotent_replay")),
+		                 (out["account"], True))
+		# the MCP update tool sends only what changes
+		receivables.save_ar_account(PROP_A, account=out["account"], credit_days=15,
+		                            use_default_credit_days=0)
+		acc = frappe.get_doc("City Ledger Account", out["account"])
+		self.assertEqual((acc.account_number, acc.credit_limit, acc.billing_address,
+		                  acc.credit_days, acc.use_default_credit_days),
+		                 ("UT-KEY", 7000, "2 Main St", 15, 0))
+		# an empty string clears a field
+		receivables.save_ar_account(PROP_A, account=out["account"], billing_address="")
+		self.assertIsNone(frappe.db.get_value("City Ledger Account", out["account"],
+		                                      "billing_address"))
+
+	def test_account_and_payment_tools_call_the_screen_functions(self):
+		from kamra.mcp_tools import BY_NAME
+		self.assertEqual(BY_NAME["create_ar_account"].dotted, "receivables.save_ar_account")
+		self.assertEqual(BY_NAME["update_ar_account"].dotted, "receivables.save_ar_account")
+		self.assertEqual(BY_NAME["record_ar_payment"].dotted, "ledger.city_ledger_settle")
+		for name in ("create_ar_account", "update_ar_account", "record_ar_payment"):
+			self.assertIn("idempotency_key", BY_NAME[name].parameters, name)
+			self.assertTrue(BY_NAME[name].mutating, name)
 
 	# invoices raised on the account -----------------------------------------
 
@@ -148,6 +179,28 @@ class ReceivablesTestCase(cc.CreditControlTestCase):
 		# the parent pays it off
 		ledger.city_ledger_settle(parent, 300)
 		self.assertAlmostEqual(_open(parent)[folio]["outstanding"], 0, 2)
+
+	def test_a_transfer_that_lands_while_this_one_waits_is_seen(self):
+		parent = receivables.save_ar_account(
+			PROP_A, self.other_company(), account_number="UT-PARENT-2")["account"]
+		_, folio = self.bill(400)
+		state = {"done": False}
+		real = frappe.db.get_value
+
+		def move_first(*args, **kwargs):
+			out = real(*args, **kwargs)
+			if (not state["done"] and args and args[0] == "City Ledger Account"
+			        and kwargs.get("for_update")):
+				state["done"] = True
+				receivables.transfer_ar_invoice(self.account, folio, parent)
+			return out
+
+		with patch.object(frappe.db, "get_value", side_effect=move_first):
+			with self.assertRaises(frappe.ValidationError):
+				receivables.transfer_ar_invoice(self.account, folio, parent,
+				                                reason="too late")
+		self.assertAlmostEqual(_open(self.account)[folio]["outstanding"], 0, 2)
+		self.assertAlmostEqual(_open(parent)[folio]["outstanding"], 400, 2)
 
 	# review follow-ups ---------------------------------------------------------
 
@@ -296,3 +349,17 @@ class ReceivablesTestCase(cc.CreditControlTestCase):
 		           rationale=f"{self.company}: pre reminder")
 		self.assertTrue(statements._reminded(folio, "pre", self.company))
 		self.assertFalse(statements._reminded(folio, "pre", self.other_company()))
+
+	def test_ar_list_shows_debit_credit_and_total_balance(self):
+		# 200 billed, 150 paid → debit 200, credit 150, outstanding 50
+		self.bill(200)
+		ledger.city_ledger_settle(self.account, 150)
+		row = next(r for r in receivables.ar_accounts(PROP_A)["accounts"]
+		           if r["name"] == self.account)
+		self.assertAlmostEqual(row["total_debit"], 200, 2)
+		self.assertAlmostEqual(row["total_credit"], 150, 2)
+		self.assertAlmostEqual(row["balance"], 50, 2)
+		pos = ledger.city_ledger_account(self.account)
+		self.assertAlmostEqual(pos["total_debit"], 200, 2)
+		self.assertAlmostEqual(pos["total_credit"], 150, 2)
+		self.assertAlmostEqual(pos["balance"], 50, 2)

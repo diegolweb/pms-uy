@@ -120,7 +120,7 @@ class CreditControlTestCase(AuditTestCase):
 
 	def aging(self, on=None):
 		if on:
-			with patch("kamra.ledger.nowdate", return_value=on):
+			with patch("kamra.ledger.aging_date", return_value=on):
 				return ledger.city_ledger_aging(PROP_A)["accounts"][0]
 		return ledger.city_ledger_aging(PROP_A)["accounts"][0]
 
@@ -252,7 +252,7 @@ class CreditControlTestCase(AuditTestCase):
 		self.assertEqual(len(res["reasons"]), 1)
 		# the account name works as well as the company
 		self.assertTrue(credit.check_company_credit(self.account, PROP_A, 200)["ok"])
-		with patch("kamra.ledger.nowdate", return_value=d(31)):
+		with patch("kamra.ledger.aging_date", return_value=d(31)):
 			res = credit.check_company_credit(self.company, PROP_A, 0)
 		self.assertAlmostEqual(res["overdue_amount"], 800, places=2)
 		self.assertFalse(res["ok"])
@@ -266,9 +266,9 @@ class CreditControlTestCase(AuditTestCase):
 		self.terms(days=30)
 		self.bill(500)
 		set_setting(PROP_A, "credit_overdue_grace_days", 10)
-		with patch("kamra.ledger.nowdate", return_value=d(38)):
+		with patch("kamra.ledger.aging_date", return_value=d(38)):
 			self.assertTrue(credit.check_company_credit(self.company, PROP_A)["ok"])
-		with patch("kamra.ledger.nowdate", return_value=d(41)):
+		with patch("kamra.ledger.aging_date", return_value=d(41)):
 			res = credit.check_company_credit(self.company, PROP_A)
 		self.assertFalse(res["ok"])
 		self.assertAlmostEqual(res["overdue_amount"], 500, places=2)
@@ -427,3 +427,21 @@ class CreditControlTestCase(AuditTestCase):
 		                                      use_default_credit_days=1)
 		self.assertEqual(out["effective_credit_days"], 30)
 		self.assertTrue(self.logs("credit_terms_changed"))
+
+	def test_a_bill_that_lands_while_the_account_is_locked_counts(self):
+		"""800 already owed, discovered only after this check takes the
+		account lock, plus 300 more is over a 1000 limit."""
+		self.terms(limit=1000)
+		state = {"done": False}
+		real = credit._lock_city_ledger_account
+
+		def bill_first(account):
+			real(account)
+			if not state["done"]:
+				state["done"] = True
+				self.bill(800)
+
+		with patch.object(credit, "_lock_city_ledger_account", bill_first):
+			res = credit.enforce_company_credit(self.company, PROP_A, 300)
+		self.assertFalse(res["ok"])
+		self.assertGreater(res["over_limit_by"], 0)

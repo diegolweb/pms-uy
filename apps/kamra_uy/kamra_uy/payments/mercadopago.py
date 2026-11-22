@@ -3,8 +3,9 @@
 Kamra no habla con Mercado Pago: pide el enlace y las devoluciones al servicio de cobros (`kamra_uy.core.client`) y
 recibe de él avisos firmados (`kamra_uy.payments.webhook`). Implementa lo que piden `kamra.localization`
 (`create_link`, `test_link`, `info`, `webhook_folio`, `verify_webhook`) y `kamra.payments.refund_via_gateway`
-(`refund`). Las credenciales son las del Payment Gateway Settings de la propiedad: `key_id` = el código de la
-propiedad en el servicio, `key_secret` = su clave, `webhook_secret` = el secreto con el que firma los avisos.
+(`refund`); y lo que `kamra_uy.payments.card` pide para la web: el enlace con su `public_key`, el cobro con tarjeta y la
+preferencia del saldo (HR-222). Las credenciales son las del Payment Gateway Settings de la propiedad: `key_id` = el
+código de la propiedad en el servicio, `key_secret` = su clave, `webhook_secret` = el secreto de sus avisos.
 """
 
 from __future__ import annotations
@@ -57,8 +58,11 @@ def _aware(value):
 
 
 def create_link(settings, *, amount: float, currency: str, reference: str, description: str, customer: dict,
-                notes: dict) -> tuple[str, str]:
-	"""(link_id, url) de un enlace que el servicio de cobros pide a Mercado Pago. `reference` es el folio."""
+                notes: dict, return_url: str | None = None) -> tuple[str, str]:
+	"""(link_id, url) de un enlace que el servicio de cobros pide a Mercado Pago. `reference` es el folio.
+
+	`return_url` es adónde vuelve el huésped tras pagar cuando Kamra la pide (la reserva web: /kamra/book?booking=…,
+	HR-31); sin ella, `hr_payment_return_url` del sitio o la página /pago."""
 	if (currency or "").upper() not in CURRENCIES:
 		frappe.throw(texts.CURRENCY)
 	folio = frappe.get_doc("Folio", reference)
@@ -75,7 +79,7 @@ def create_link(settings, *, amount: float, currency: str, reference: str, descr
 			purpose=link_purpose(status, bool(folio.get("charges"))),
 			guest_name=customer.get("name") or folio.get("guest_name"),
 			guest_email=customer.get("email"),
-			return_url=frappe.conf.get("hr_payment_return_url") or get_url("/pago"),
+			return_url=return_url or frappe.conf.get("hr_payment_return_url") or get_url("/pago"),
 			expires_at=link_expires_at(now, _aware(hold)) if hold else None,
 		)
 	except ValueError as e:
@@ -85,6 +89,32 @@ def create_link(settings, *, amount: float, currency: str, reference: str, descr
 	except CoreError as e:
 		_throw(e, texts.LINK_FAILED)
 	return link["link_id"], link["url"]
+
+
+def _link_path(link_id: str, tail: str = "") -> str:
+	from urllib.parse import quote
+
+	return f"{LINKS_PATH}/{quote(str(link_id), safe='')}{tail}"
+
+
+def link_card(settings, link_id: str) -> dict:
+	"""El enlace tal como lo tiene core (`GET /v1/payments/links/{id}`), con `card: {public_key} | null` (HR-221)."""
+	return _client(settings).get(_link_path(link_id))
+
+
+def card_payment(settings, link_id: str, body: dict, idempotency_key: str) -> dict:
+	"""Cobra el enlace con el token de una tarjeta (`POST …/card-payments`, HR-221). CoreError si core no lo cobra."""
+	return _client(settings).post(_link_path(link_id, "/card-payments"), body, idempotency_key)
+
+
+def wallet_link(settings, link_id: str, idempotency_key: str, return_url: str | None = None) -> dict:
+	"""La preferencia que solo admite el saldo de Mercado Pago (`POST …/wallet`, HR-221): {"url"}. Una por enlace.
+
+	`return_url`, adónde vuelve el huésped tras pagar; sin ella, la del enlace. Core solo la usa en la primera llamada.
+	La `idempotency_key` tiene que ir con el cuerpo (`wallet_idempotency_key(link_id, return_url)`): con otra vuelta y
+	la misma clave, core da 409 `idempotency_conflict` (HR-238)."""
+	body = {"return_url": return_url} if return_url else {}
+	return _client(settings).post(_link_path(link_id, "/wallet"), body, idempotency_key)
 
 
 def test_link(link_id: str) -> str:

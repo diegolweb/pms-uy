@@ -1,4 +1,5 @@
 import type { ScreenConfig } from "../components/ResourceScreen"
+import { floorSource } from "../components/ResourceScreen"
 import { lazy } from "react"
 
 // Drawer panels load when a row is opened, not with the app shell
@@ -14,18 +15,40 @@ const HkTaskMediaPanel = lazy(() =>
 const ReservationDetail = lazy(() => import("./ReservationDetail"))
 import { cur, locale, sellsAlcohol } from "../lib/money"
 
+export const floorsConfig: ScreenConfig = {
+  doctype: "Floor",
+  title: "Floors",
+  description: "The floors of the property, in the order the room boards and filters show them.",
+  propertyScoped: true,
+  orderBy: "sort_order asc, floor_name asc",
+  columns: [
+    { field: "floor_name", label: "Floor" },
+    { field: "sort_order", label: "Floor order" },
+    { field: "disabled", label: "Status", statusCheck: true },
+  ],
+  form: [
+    { field: "floor_name", label: "Floor", type: "data", required: true, hint: "Renaming a floor renames it on its rooms." },
+    { field: "sort_order", label: "Floor order", type: "int", hint: "Lower numbers come first (for example 0, 10, 20)." },
+    { field: "disabled", label: "Disabled", type: "check", hint: "Only a floor with no rooms can be disabled." },
+  ],
+}
+
 export const roomsConfig: ScreenConfig = {
   doctype: "Room",
   title: "Rooms",
   description: "Physical rooms - number, type, floor and live status.",
   searchFields: ["room_number", "name"],
-  filters: [{ field: "housekeeping_status", label: "Status", options: ["Clean", "Dirty", "Inspected", "Ready", "Out of Order"] }],
+  filters: [
+    { field: "housekeeping_status", label: "Status", options: ["Clean", "Dirty", "Inspected", "Ready", "Out of Order"] },
+    { field: "room_type", label: "Room type", linkDoctype: "Room Type", labelField: "room_type_name", propertyScoped: true },
+    { field: "floor", label: "Floor", optionsFrom: "Floor" },
+  ],
   pageSize: 25,
   propertyScoped: true,
   orderBy: "room_number asc",
   columns: [
     { field: "room_number", label: "Room" },
-    { field: "room_type", label: "Type" },
+    { field: "room_type", label: "Room type" },
     { field: "floor", label: "Floor" },
     { field: "housekeeping_status", label: "Housekeeping", badge: true },
     { field: "occupancy_status", label: "Occupancy", badge: true },
@@ -33,8 +56,8 @@ export const roomsConfig: ScreenConfig = {
   form: [
     { field: "room_number", label: "Room number", type: "data", required: true },
     { field: "room_type", label: "Room type", type: "link", linkDoctype: "Room Type", required: true },
-    { field: "floor", label: "Floor", type: "data" },
-    { field: "housekeeping_status", label: "Housekeeping status", type: "select", options: ["Clean", "Dirty", "Inspected", "Out of Order"] },
+    { field: "floor", label: "Floor", type: "select", source: floorSource, allowNew: "Add a floor", hint: "Floors are set up in Admin > Floors. Pick one or add a new floor here." },
+    { field: "housekeeping_status", label: "Housekeeping status", type: "select", options: ["Clean", "Dirty", "Inspected", "Ready", "Out of Order"] },
     { field: "notes", label: "Notes", type: "data" },
   ],
 }
@@ -42,13 +65,13 @@ export const roomsConfig: ScreenConfig = {
 export const roomTypesConfig: ScreenConfig = {
   doctype: "Room Type",
   title: "Room Types",
-  description: "Categories with occupancy-based pricing.",
+  description: "Room types with occupancy-based pricing.",
   propertyScoped: true,
   orderBy: "base_price asc",
   columns: [
     { field: "room_type_name", label: "Name" },
     { field: "room_type_code", label: "Code", badge: true },
-    { field: "room_category", label: "Category" },
+    { field: "room_category", label: "Unit kind" },
     { field: "base_price", label: `Base ${cur()}/night` },
     { field: "base_occupancy", label: "Base occ." },
     { field: "extra_adult_price", label: `Extra adult ${cur()}` },
@@ -58,7 +81,7 @@ export const roomTypesConfig: ScreenConfig = {
     { field: "room_type_name", label: "Name", type: "data", required: true },
     { field: "room_type_code", label: "Code (e.g. DLX)", type: "data", required: true },
     { field: "listing_slug", label: "Public listing URL slug (/stay/…)", type: "data" },
-    { field: "room_category", label: "Category", type: "select", options: ["Villa", "Private", "Shared"] },
+    { field: "room_category", label: "Unit kind", type: "select", options: ["Villa", "Private", "Shared"] },
     { field: "base_price", label: "Base price / night", type: "currency", required: true },
     { field: "base_occupancy", label: "Adults included in base price", type: "int" },
     { field: "single_occupancy_price", label: "Single occupancy price", type: "currency", dependsOn: (d) => d.room_category !== "Villa" },
@@ -92,13 +115,14 @@ export const ratePlansConfig: ScreenConfig = {
   doctype: "Rate Plan",
   title: "Rate Plans",
   description:
-    "Sellable plans (BAR, non-refundable, corporate). Clear Disabled to publish a plan at booking; tick it to unpublish.",
+    "Sellable plans (BAR, non-refundable, corporate, hourly day-use). Clear Disabled to publish a plan at booking; tick it to unpublish.",
   searchFields: ["rate_plan_name", "code"],
   pageSize: 25,
   propertyScoped: true,
   columns: [
     { field: "rate_plan_name", label: "Name" },
     { field: "code", label: "Code", badge: true },
+    { field: "billing_basis", label: "Day-use" },
     { field: "modifier_type", label: "Modifier" },
     { field: "modifier_value", label: "Value" },
     { field: "is_default", label: "Default" },
@@ -109,6 +133,11 @@ export const ratePlansConfig: ScreenConfig = {
     { field: "code", label: "Code", type: "data", required: true },
     { field: "modifier_type", label: "Modifier type", type: "select", options: ["Percent", "Amount", "Absolute"] },
     { field: "modifier_value", label: "Modifier value (-10 = 10% off)", type: "float" },
+    { field: "billing_basis", label: "Day-use billing", type: "select", options: ["Nightly", "Hourly", "Block"], hint: "Hourly and Block price same-day stays from the planned times; Nightly keeps one full room night." },
+    { field: "hourly_rate", label: "Hourly rate", type: "currency" },
+    { field: "min_hours", label: "Minimum hours", type: "float" },
+    { field: "block_hours", label: "Block hours", type: "float" },
+    { field: "block_rate", label: "Block rate", type: "currency" },
     { field: "cancellation_policy", label: "Cancellation policy", type: "data" },
     { field: "is_default", label: "Default plan", type: "check" },
     { field: "disabled", label: "Disabled (unpublished)", type: "check", hint: "Tick to unpublish; clear to activate at booking" },
@@ -148,6 +177,54 @@ export const seasonsConfig: ScreenConfig = {
     { field: "no_small_group", label: "No small-group rate", type: "check", hint: "Small parties pay the house rate on these dates, as on a weekend" },
     { field: "is_holiday", label: "Holiday / long weekend", type: "check", hint: "Quotes say these are holiday dates" },
     { field: "disabled", label: "Disabled", type: "check", hint: "Tick to deactivate; clear to activate" },
+  ],
+}
+
+export const holidayPackagesConfig: ScreenConfig = {
+  doctype: "Holiday Package",
+  title: "Packages",
+  description:
+    "Fixed holiday packages with tiered occupancy pricing (Carnaval, Réveillon, long weekends) and OTA markup strategies.",
+  propertyScoped: true,
+  orderBy: "start_date asc",
+  columns: [
+    { field: "package_name", label: "Package" },
+    { field: "start_date", label: "From" },
+    { field: "end_date", label: "To" },
+    { field: "package_nights", label: "Nights" },
+    { field: "extra_night_percent", label: "Extra %" },
+    { field: "price_2_pax", label: "Base (2p)" },
+    { field: "price_3_pax", label: "3p" },
+    { field: "price_4_pax", label: "4p" },
+    { field: "extra_night_price", label: "Extra Fixed" },
+    { field: "flyer_image", label: "Flyer" },
+    { field: "ota_strategy", label: "OTA Strategy" },
+    { field: "ota_daily_rate", label: "OTA Rate" },
+    { field: "disabled", label: "Status", statusCheck: true },
+  ],
+  form: [
+    { field: "package_name", label: "Name", type: "data", required: true },
+    { field: "room_type", label: "Room type (blank = all)", type: "link", linkDoctype: "Room Type" },
+    { field: "start_date", label: "Start date", type: "date", required: true },
+    { field: "end_date", label: "End date (inclusive)", type: "date", required: true },
+    { field: "package_nights", label: "Package nights", type: "int", required: true, hint: "Duration of package in nights (e.g. 3)" },
+    { field: "extra_night_percent", label: "Extra night %", type: "float", hint: "% of package daily rate for extra nights (e.g. 50% or 100%). Automatically scales for 2p, 3p, 4p" },
+    { field: "extra_night_price", label: "Extra night fixed override", type: "float", hint: "Optional fixed rate override instead of %" },
+    { field: "price_1_pax", label: "Package rate 1 pax (Single)", type: "float", hint: "Blank = use 2 pax base rate" },
+    { field: "price_2_pax", label: "Package rate 2 pax (Base)", type: "float", required: true },
+    { field: "price_3_pax", label: "Package rate 3 pax", type: "float" },
+    { field: "price_4_pax", label: "Package rate 4 pax", type: "float" },
+    { field: "price_5_pax", label: "Package rate 5 pax", type: "float" },
+    { field: "extra_adult_price", label: "Extra adult package rate", type: "float" },
+    { field: "child_price", label: "Child package rate", type: "float" },
+    { field: "flyer_image", label: "Flyer / Promo image", type: "image", hint: "Flyer or banner image sent to guests by WhatsApp agents" },
+    { field: "ota_strategy", label: "OTA strategy", type: "select", options: ["Markup", "Stop Sell", "None"] },
+    { field: "ota_daily_rate", label: "OTA daily rate", type: "float", hint: "Nightly rate pushed to OTAs during package" },
+    { field: "advance_percent", label: "Advance deposit %", type: "float", hint: "Deposit required (e.g. 50 or 100)" },
+    { field: "non_refundable", label: "Non-refundable", type: "check" },
+    { field: "inclusions", label: "Inclusions", type: "data", hint: "Breakfast, gala dinner, late checkout" },
+    { field: "priority", label: "Priority", type: "int" },
+    { field: "disabled", label: "Disabled", type: "check" },
   ],
 }
 
@@ -670,7 +747,7 @@ export const outletsConfig: ScreenConfig = {
   ],
   form: [
     { field: "outlet_name", label: "Outlet name", type: "data", required: true },
-    { field: "outlet_type", label: "Type", type: "select", options: ["Restaurant", "Room Service", "Bar", "Spa", "Other"] },
+    { field: "outlet_type", label: "Type", type: "select", options: ["Restaurant", "Room Service", "Bar", "Spa", "Shop", "Other"] },
     { field: "gst_rate", label: "Tax %", type: "float" },
     { field: "disabled", label: "Disabled", type: "check" },
     {
@@ -908,6 +985,7 @@ export const transactionCodesConfig: ScreenConfig = {
     { field: "description", label: "Description" },
     { field: "txn_type", label: "Type", badge: true },
     { field: "revenue_group", label: "Group" },
+    { field: "gl_code", label: "GL code" },
     { field: "default_tax_rate", label: "Tax %" },
     { field: "disabled", label: "Status", statusCheck: true },
   ],
@@ -921,6 +999,10 @@ export const transactionCodesConfig: ScreenConfig = {
       options: ["Revenue", "Payment", "Tax", "Package", "Adjustment"] },
     { field: "revenue_group", label: "Revenue group", type: "data",
       hint: "e.g. Rooms, F&B, Other - used on ledgers and exports." },
+    { field: "gl_code", label: "GL code", type: "data",
+      hint: "Your accounts' ledger code. Each line keeps the GL code it was posted with." },
+    { field: "payment_mode", label: "Payment mode", type: "data",
+      hint: "Payment codes only: a payment mode such as Cash, Card or Bank Transfer. Payments in that mode book to this code." },
     { field: "subgroup", label: "Subgroup", type: "data" },
     { field: "default_tax_rate", label: "Default tax %", type: "float" },
     { field: "is_alcohol", label: "Alcohol", type: "check", dependsOn: sellsAlcohol,

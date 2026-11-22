@@ -93,6 +93,8 @@ MODULES: tuple[Module, ...] = (
 				S("email", "Email", "email", store=P),
 				S("website", "Website", store=P),
 				S("gstin", "Tax registration number", store=P, hint="GSTIN, VAT or TRN - printed on invoices."),
+				S("invoice_footer", "Invoice footer", "textarea", store=P,
+				  hint="Your own lines at the foot of every invoice - e.g. CIN, bank name, account number and IFSC."),
 			)),
 		),
 	),
@@ -116,6 +118,10 @@ MODULES: tuple[Module, ...] = (
 				  hint="A guest checking out before the booked date: the stay is shortened and the unused "
 				       "nights are charged at none, one or all of them. Finance or a Hotel Admin can "
 				       "change it for one stay, with a reason."),
+				S("day_use_overstay", "Day-use overstay", "select", "Next hour",
+				  options=("Next hour", "Next block", "Full day"),
+				  hint="When a day-use guest stays past the planned checkout time: bill the next hour, "
+				       "the next block on a block plan, or switch to a full daily rate."),
 			)),
 			Section("deposits", "Deposits", "", (
 				S("deposit_pct", "Deposit expected at booking", "number", 0, P, min=0, max=100, unit="%"),
@@ -188,6 +194,13 @@ MODULES: tuple[Module, ...] = (
 				       "room charge template on the WhatsApp connection. At most one message per bill "
 				       "every 10 minutes; room nights and company bills never send one."),
 			)),
+			Section("room_at_booking", "Room at booking",
+			        "Whether a new reservation takes a specific room straight away.", (
+				S("assign_room_on_booking", "Allow assigning room while making the reservation", "check", 1,
+				  hint="On: a room is assigned when the reservation is made. Off: the reservation holds a "
+				       "room type only, and the room is chosen at check-in. Walk-ins keep their room. "
+				       "Availability still counts the stay against the room type."),
+			)),
 			Section("holds", "Holds & selling", "", (
 				S("hold_minutes", "Hold unconfirmed bookings for", "number", 120, P, min=5, max=10080, unit="min"),
 				S("sell_message", "Sell message", "textarea", store=P,
@@ -207,6 +220,10 @@ MODULES: tuple[Module, ...] = (
 				S("waive_no_show_fee_for_ota", "No no-show fee on OTA bookings", "check", 1, P,
 				  hint="Bookings from an OTA or channel are still marked No Show, but no fee is posted - "
 				       "the OTA charges the guest under its own policy."),
+				S("no_show_credit_default", "When a no-show paid more than the fee", "select", "Refund", P,
+				  options=("Refund", "Keep as forfeited deposit"),
+				  hint="What the desk is offered first for the rest of the advance after a no-show. "
+				       "The desk still picks and gives a reason; the audit pack lists no-shows left in credit."),
 				S("non_guaranteed_release_time", "Release non-guaranteed arrivals at", "time", None, P,
 				  hint="Leave blank to never release. At this time, today's arrivals with no advance, "
 				       "payment or deposit on the folio, and that are not an OTA or company booking, "
@@ -438,6 +455,10 @@ MODULES: tuple[Module, ...] = (
 				  hint="Each morning, email a company's billing contact 3 days before a bill is due, on the "
 				       "due date and 15 days after, with its statement attached. Each reminder goes once per "
 				       "bill, and Finance gets a notice of what was sent."),
+				S("city_ledger_payment_pin", "Ask for a PIN on every company payment", "check", 0,
+				  hint="On: the person recording a company payment confirms it with their own cashier PIN. "
+				       "A payment an AI agent records always waits for a Finance user to confirm it with "
+				       "their PIN, whatever this is set to."),
 			)),
 			Section("cashier", "Cashier controls", "", (
 				S("use_cashier_tills", "Take money through cashier tills", "check", 1,
@@ -486,7 +507,8 @@ MODULES: tuple[Module, ...] = (
 			)),
 			Section("payment", "Guest payment", "", (
 				S("booking_payment_mode", "Guests pay", "select", "Pay at hotel", P,
-				  options=("Pay at hotel", "Advance percent", "Registration fee", "Full online")),
+				  options=("Pay at hotel", "Advance percent", "First night", "Registration fee", "Full online"),
+				  hint="Used when guests pay one night: the stay's total divided by its nights."),
 				S("advance_percent", "Advance", "number", 0, P, min=0, max=100, unit="%",
 				  hint="Used when guests pay an advance percent."),
 				S("registration_fee", "Registration fee", "number", 0, P, min=0,

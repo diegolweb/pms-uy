@@ -1,0 +1,363 @@
+{
+ "actions": [],
+ "autoname": "UYCFE-.#####",
+ "creation": "2026-11-20 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "kind",
+  "purpose",
+  "status",
+  "core_status",
+  "column_break_main",
+  "property",
+  "reservation",
+  "folio",
+  "references_cfe",
+  "task",
+  "section_cfe",
+  "cfe_type",
+  "serie",
+  "number",
+  "security_code",
+  "reference_number",
+  "core_cfe_id",
+  "column_break_cfe",
+  "cae",
+  "cae_from",
+  "cae_to",
+  "cae_expires_on",
+  "qr_url",
+  "pdf_url",
+  "section_state",
+  "dgi_status",
+  "issued_via",
+  "issued_at",
+  "contingency_since",
+  "core_updated_at",
+  "column_break_state",
+  "overdue",
+  "pending_accountant",
+  "residence_assumed",
+  "attempts",
+  "currency",
+  "total",
+  "section_detail",
+  "reason",
+  "error",
+  "lines_json",
+  "request_json"
+ ],
+ "fields": [
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "label": "Clase",
+   "options": "Original\nCredit note\nReconcile",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "purpose",
+   "fieldtype": "Select",
+   "label": "Motivo",
+   "options": "\nCheck-in\nClose\nVoid",
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Estado en Kamra",
+   "options": "Pending\nSent\nDone\nNot needed\nNeeds attention",
+   "default": "Pending",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "core_status",
+   "fieldtype": "Data",
+   "label": "Estado del CFE",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Propiedad",
+   "options": "Property",
+   "reqd": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "reservation",
+   "fieldtype": "Link",
+   "label": "Reserva",
+   "options": "Reservation",
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "folio",
+   "fieldtype": "Link",
+   "label": "Folio",
+   "options": "Folio",
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "references_cfe",
+   "fieldtype": "Link",
+   "label": "Referencia (CFE original)",
+   "options": "UY CFE",
+   "read_only": 1
+  },
+  {
+   "fieldname": "task",
+   "fieldtype": "Link",
+   "label": "Pedido por",
+   "options": "UY CFE",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_cfe",
+   "fieldtype": "Section Break",
+   "label": "CFE"
+  },
+  {
+   "fieldname": "cfe_type",
+   "fieldtype": "Data",
+   "label": "Tipo",
+   "read_only": 1
+  },
+  {
+   "fieldname": "serie",
+   "fieldtype": "Data",
+   "label": "Serie",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "number",
+   "fieldtype": "Data",
+   "label": "Número",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "security_code",
+   "fieldtype": "Data",
+   "label": "Código de seguridad",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_number",
+   "fieldtype": "Data",
+   "label": "Referencia en el servicio de facturación",
+   "read_only": 1
+  },
+  {
+   "fieldname": "core_cfe_id",
+   "fieldtype": "Data",
+   "label": "Id en el servicio de facturación",
+   "unique": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_cfe",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "cae",
+   "fieldtype": "Data",
+   "label": "CAE",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cae_from",
+   "fieldtype": "Data",
+   "label": "CAE desde",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cae_to",
+   "fieldtype": "Data",
+   "label": "CAE hasta",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cae_expires_on",
+   "fieldtype": "Date",
+   "label": "Vencimiento del CAE",
+   "read_only": 1
+  },
+  {
+   "fieldname": "qr_url",
+   "fieldtype": "Small Text",
+   "label": "QR",
+   "read_only": 1
+  },
+  {
+   "fieldname": "pdf_url",
+   "fieldtype": "Small Text",
+   "label": "PDF",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_state",
+   "fieldtype": "Section Break",
+   "label": "Estado"
+  },
+  {
+   "fieldname": "dgi_status",
+   "fieldtype": "Data",
+   "label": "Estado en la DGI",
+   "read_only": 1
+  },
+  {
+   "fieldname": "issued_via",
+   "fieldtype": "Data",
+   "label": "Emitido por",
+   "read_only": 1
+  },
+  {
+   "fieldname": "issued_at",
+   "fieldtype": "Data",
+   "label": "Emitido el",
+   "read_only": 1
+  },
+  {
+   "fieldname": "contingency_since",
+   "fieldtype": "Data",
+   "label": "En contingencia desde",
+   "read_only": 1
+  },
+  {
+   "fieldname": "core_updated_at",
+   "fieldtype": "Data",
+   "label": "Último cambio en el servicio",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_state",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "overdue",
+   "fieldtype": "Check",
+   "label": "Contingencia vencida",
+   "read_only": 1
+  },
+  {
+   "fieldname": "pending_accountant",
+   "fieldtype": "Check",
+   "label": "Reglas pendientes del contador",
+   "read_only": 1
+  },
+  {
+   "fieldname": "residence_assumed",
+   "fieldtype": "Check",
+   "label": "Residencia supuesta (falta el país de residencia)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "attempts",
+   "fieldtype": "Int",
+   "label": "Intentos",
+   "read_only": 1
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Data",
+   "label": "Moneda",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total",
+   "fieldtype": "Data",
+   "label": "Total",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_detail",
+   "fieldtype": "Section Break",
+   "label": "Detalle"
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Motivo de la nota de crédito",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error",
+   "fieldtype": "Small Text",
+   "label": "Último error",
+   "read_only": 1
+  },
+  {
+   "fieldname": "lines_json",
+   "fieldtype": "Long Text",
+   "label": "Líneas",
+   "read_only": 1
+  },
+  {
+   "fieldname": "request_json",
+   "fieldtype": "Long Text",
+   "label": "Petición",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-11-20 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Fiscal",
+ "name": "UY CFE",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "Finance",
+   "read": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1,
+   "export": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1,
+ "title_field": "reference_number"
+}

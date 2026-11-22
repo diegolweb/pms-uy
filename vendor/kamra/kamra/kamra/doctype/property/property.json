@@ -45,6 +45,7 @@
   "auto_send_checkin_links",
   "column_break_c",
   "gstin",
+  "invoice_footer",
   "disabled",
   "locale",
   "sb_gst",
@@ -83,6 +84,7 @@
   "no_show_timing",
   "protect_late_arrivals",
   "waive_no_show_fee_for_ota",
+  "no_show_credit_default",
   "non_guaranteed_release_time",
   "deposit_pct",
   "driving_directions",
@@ -337,6 +339,12 @@
    "label": "GSTIN"
   },
   {
+   "description": "Printed at the foot of every invoice, under the tax note - e.g. CIN and bank details for transfers.",
+   "fieldname": "invoice_footer",
+   "fieldtype": "Small Text",
+   "label": "Invoice Footer"
+  },
+  {
    "default": "0",
    "fieldname": "disabled",
    "fieldtype": "Check",
@@ -412,7 +420,7 @@
    "fieldname": "booking_payment_mode",
    "fieldtype": "Select",
    "label": "Booking Payment",
-   "options": "Pay at hotel\nAdvance percent\nRegistration fee\nFull online",
+   "options": "Pay at hotel\nAdvance percent\nFirst night\nRegistration fee\nFull online",
    "default": "Pay at hotel",
    "description": "What the guest pays online when booking on the public page. Existing bookings keep the terms they were made under."
   },
@@ -582,6 +590,14 @@
    "label": "Waive No-show Fee for OTA Bookings"
   },
   {
+   "default": "Refund",
+   "description": "When a no-show paid more than the no-show fee, what the desk is offered first for the rest: refund it to the guest, or keep it as a forfeited deposit. The desk picks and gives a reason; the night audit pack lists no-shows still in credit.",
+   "fieldname": "no_show_credit_default",
+   "fieldtype": "Select",
+   "label": "No-show Credit Default",
+   "options": "Refund\nKeep as forfeited deposit"
+  },
+  {
    "description": "Blank = off. At this local time, today's arrivals that are not guaranteed are cancelled with no fee and the room is released. Guaranteed means: an advance paid, a payment or deposit on the folio, an OTA or channel booking, or a company (corporate) booking. Bookings made after the release time and stays flagged Late Arrival are left alone.",
    "fieldname": "non_guaranteed_release_time",
    "fieldtype": "Time",
@@ -735,7 +751,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-30 19:00:00.000000",
+ "modified": "2026-11-12 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kamra",
  "name": "Property",

@@ -46,7 +46,8 @@ class HousekeepingTask(Document):
 				from kamra.turnover import on_checkout_clean_done
 				on_checkout_clean_done(self)
 			except Exception:
-				frappe.log_error(title="Turnover inspection spawn failed")
+				frappe.log_error(title="Turnover inspection spawn failed",
+				                 message=frappe.get_traceback(with_context=False))
 		elif self.status == "Verified":
 			# Inspection verified → Ready (STR) or Inspected (hotel default).
 			profile = None

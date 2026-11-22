@@ -117,6 +117,18 @@ class ChannelManagerBookingTestCase(IntegrationTestCase):
 		self.assertEqual(self.received().status, "Requested")
 		self.assertEqual(frappe.db.count("Reservation", {"property": self.property, "ota_ref": self.ref}), 1)
 
+	def test_a_second_delivery_returns_the_original_stay(self):
+		payload = self.payload()
+		self.deliver(payload)
+		original = self.received()
+		self.assertEqual(original.status, "Confirmed")
+		self.deliver(payload)
+		self.assertEqual(frappe.db.get_value(
+			"Reservation", {"property": self.property, "ota_ref": self.ref}, "name"),
+			original.name)
+		self.assertEqual(frappe.db.count(
+			"Reservation", {"property": self.property, "ota_ref": self.ref}), 1)
+
 	def test_missing_currency_defaults_to_property_currency(self):
 		payload = self.payload()
 		payload["amount"].pop("currency")
@@ -400,3 +412,97 @@ class ChannelContactNeverDropsBookingTestCase(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_value("Reservation", first, ["ota_ref", "status"]),
 			(base, "Confirmed"))
 		self.assertEqual(frappe.db.get_value("Reservation", second, "status"), "Cancelled")
+
+
+class OtaBookingCarriesItsRatePlanTestCase(IntegrationTestCase):
+	"""HR-86: a platform booking carries the Rate Plan its mapping names for
+	the rate it was sold on. A booking with the platform's amount keeps
+	billing that amount (its locked nights); one without it is priced on
+	that plan; a rate id nobody mapped never fails the booking."""
+
+	def setUp(self):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test fixture
+		frappe.local.lang = "en"
+		self.property = frappe.get_doc({"doctype": "Property",
+			"property_name": "TEST HR86 " + frappe.generate_hash(length=8),
+			"country": "Uruguay", "currency": "USD"}).insert(ignore_permissions=True).name
+		self.room_type = frappe.get_doc({"doctype": "Room Type", "property": self.property,
+			"room_type_code": "STD", "room_type_name": "Standard", "base_price": 100,
+			"adults_capacity": 2}).insert(ignore_permissions=True).name
+		for n in ("101", "102"):
+			frappe.get_doc({"doctype": "Room", "property": self.property,
+				"room_type": self.room_type, "room_number": n}).insert(ignore_permissions=True)
+		self.bb = frappe.get_doc({"doctype": "Rate Plan", "property": self.property,
+			"rate_plan_name": "Bed and Breakfast", "code": "BB", "modifier_type": "Amount",
+			"modifier_value": 20}).insert(ignore_permissions=True).name
+		self.conn = frappe.get_doc({"doctype": "Channel Manager Connection", "property": self.property,
+			"provider": "Channex", "active": 1, "external_property_id": "demo-86"}).insert(ignore_permissions=True)
+		for rate_id, plan in (("std-bar", None), ("std-bb", self.bb)):
+			frappe.get_doc({"doctype": "Channel Room Mapping", "connection": self.conn.name,
+				"room_type": self.room_type, "external_room_id": "std",
+				"external_rate_id": rate_id, "rate_plan": plan}).insert(ignore_permissions=True)
+		self.check_in = str(add_days(nowdate(), 20))
+		self.check_out = str(add_days(nowdate(), 22))
+
+	def ev(self, **kw):
+		tag = frappe.generate_hash(length=8)
+		e = {"event": "book", "ota_ref": "TEST-86-" + tag, "channel": "Booking.com",
+			"room_type_external_id": "std", "external_rate_id": "std-bb",
+			"check_in": self.check_in, "check_out": self.check_out, "adults": 2, "children": 0,
+			"guest_name": "Prueba Plan", "phone": "", "email": f"hr86-{tag}@example.test",
+			"total": 0, "nightly": [], "currency": "USD", "notes": ""}
+		e.update(kw)
+		return e
+
+	def booked(self, e):
+		out = cm._apply_event(self.conn, e)
+		self.assertEqual(out["result"], "booked", out)
+		return frappe.get_doc("Reservation", out["reservation"])
+
+	def with_amount(self, **kw):
+		return self.ev(total=250, nightly=[{"date": self.check_in, "amount": 125},
+			{"date": str(add_days(self.check_in, 1)), "amount": 125}], **kw)
+
+	def test_hr86_rate_plan_for_reads_the_mapping_of_that_rate_id(self):
+		self.assertEqual(cm._rate_plan_for(self.conn.name, "std-bb"), self.bb)
+		self.assertIsNone(cm._rate_plan_for(self.conn.name, "std-bar"))
+		self.assertIsNone(cm._rate_plan_for(self.conn.name, "nobody-mapped-this"))
+		self.assertIsNone(cm._rate_plan_for(self.conn.name, None))
+
+	def test_hr86_a_bb_booking_with_an_amount_carries_bb_and_bills_its_locked_nights(self):
+		from kamra.folio import _nightly_room_rate
+		bb = self.booked(self.with_amount())
+		bar = self.booked(self.with_amount(external_rate_id="std-bar"))
+		self.assertEqual(bb.rate_plan, self.bb)
+		self.assertFalse(bar.rate_plan)
+		self.assertTrue(bb.night_rates)
+		first = _nightly_room_rate(bb, self.check_in)
+		self.assertEqual(first, float(bb.night_rates[0].rate))
+		self.assertEqual(first, _nightly_room_rate(bar, self.check_in))  # no +20 on top
+		self.assertEqual(float(bb.amount_after_tax), 250)
+
+	def test_hr86_without_an_amount_the_quote_applies_bb(self):
+		from kamra.pricing import quote
+		res = self.booked(self.ev())
+		self.assertEqual(res.rate_plan, self.bb)
+		on_bb = quote(self.property, self.room_type, self.check_in, self.check_out, 2, 0,
+			rate_plan=self.bb)["amount_after_tax"]
+		plain = quote(self.property, self.room_type, self.check_in, self.check_out, 2, 0)["amount_after_tax"]
+		self.assertGreater(on_bb, plain)
+		self.assertAlmostEqual(float(res.amount_after_tax), float(on_bb), places=2)
+
+	def test_hr86_an_unmapped_rate_id_books_without_a_plan(self):
+		res = self.booked(self.ev(external_rate_id="nobody-mapped-this"))
+		self.assertFalse(res.rate_plan)
+		self.assertEqual(res.status, "Confirmed")
+		self.assertFalse(self.booked(self.ev(external_rate_id=None)).rate_plan)
+
+	def test_hr86_a_modify_takes_the_new_rates_plan_and_an_unmapped_one_keeps_it(self):
+		e = self.with_amount(external_rate_id="std-bar")
+		res = self.booked(e)
+		self.assertFalse(res.rate_plan)
+		cm._apply_event(self.conn, dict(e, event="modify", external_rate_id="std-bb"))
+		self.assertEqual(frappe.db.get_value("Reservation", res.name, "rate_plan"), self.bb)
+		out = cm._apply_event(self.conn, dict(e, event="modify", external_rate_id="nobody-mapped-this"))
+		self.assertEqual(out["result"], "modified", out)
+		self.assertEqual(frappe.db.get_value("Reservation", res.name, "rate_plan"), self.bb)
