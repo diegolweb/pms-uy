@@ -26,7 +26,7 @@ CFE_STATUSES = {"queued", "issued", "rejected", "contingency"}
 ROOM_KINDS = {"Room", "Extra Guests", "Discount", "Early Check-in", "Late Check-out"}
 FNB_KINDS = {"Meal Plan", "F&B", "Restaurant"}
 
-# textos que salen en el CFE o en la factura (TEXTOS PARA EL OK DEL FUNDADOR, ver README.md)
+# textos que salen en el CFE o en la factura (aprobados con D-HR-48, ver README.md)
 CONSUMER_NAME = "Consumidor final"
 ADJUSTMENT_TEXT = "Ajuste de la estancia"
 VERIFY_TEXT = "Puede verificar el comprobante en www.dgi.gub.uy"

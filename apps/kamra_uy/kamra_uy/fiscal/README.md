@@ -47,7 +47,8 @@ CFE nuevo. Las filas de una reserva se procesan en orden y se para en la primera
 `process_now`, `retry` y `record_manual`. `api.invoice_print_block` tiene la firma de `invoice_print_block` de los
 paquetes de Kamra: el paquete de Uruguay la puede exponer tal cual cuando la factura impresa pinte el bloque.
 
-## Textos para el OK del fundador (borradores)
+## Textos aprobados
 
 Los de `texts.py` y los de `model.py` (`CONSUMER_NAME`, `ADJUSTMENT_TEXT`, `VERIFY_TEXT`, `TYPE_TITLES`,
-`STATUS_TEXTS`). Salen en el CFE (líneas y motivos de nota de crédito) o en el folio.
+`STATUS_TEXTS`). Salen en el CFE (líneas y motivos de nota de crédito) o en el folio. Fuente: D-HR-48 (22-11), con la
+que el fundador aprobó todos los textos (HR-282); lo que no le guste se cambia después.

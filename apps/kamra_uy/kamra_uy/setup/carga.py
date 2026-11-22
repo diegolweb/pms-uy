@@ -1,5 +1,6 @@
 """La carga de la planilla del hotel en Kamra (HR-33): habitaciones, tipos, temporadas con precio y el cobro de la
-propiedad. Idempotente: la planilla manda y una segunda corrida no cambia nada (claves en `plan.py`).
+propiedad; y, desde HR-290, su retención, horas de entrada y salida, cancelación, no-show y mascotas, y la capacidad de
+cada tipo en personas. Idempotente: la planilla manda y una segunda corrida no cambia nada (claves en `plan.py`).
 
 Primero la PRUEBA, que no escribe y dice qué crearía, cambiaría, dejaría igual o retiraría:
 
@@ -8,7 +9,7 @@ Primero la PRUEBA, que no escribe y dice qué crearía, cambiaría, dejaría igu
 
 y, si sale «lista para cargar», la misma orden con `"aplicar": 1`. Todo o nada: si algo falla a medias, no queda
 nada escrito. La planilla se lee fresca en cada corrida y no se copia a ningún sitio; solo se abren sus pestañas
-«Habitaciones» y «Temporadas y precios» (`planilla.PESTANAS`).
+«Habitaciones», «Temporadas y precios» y «Seña y cancelación» (`planilla.PESTANAS`).
 """
 
 import frappe
@@ -17,10 +18,13 @@ from kamra_uy.setup import plan as plan_mod
 from kamra_uy.setup import planilla as planilla_mod
 
 _CAMPOS = {
-	"Property": ["name", "country", "currency", "timezone", "booking_payment_mode", "deposit_pct", "hold_minutes"],
+	"Property": [
+		"name", "country", "currency", "timezone", "booking_payment_mode", "deposit_pct", "hold_minutes",
+		"checkin_time", "checkout_time", "free_cancel_days", "cancellation_fee", "no_show_charge", "pets_allowed",
+	],
 	"Room Type": [
 		"name", "room_type_name", "room_type_code", "base_price", "adults_capacity", "base_occupancy",
-		"children_capacity",
+		"children_capacity", "max_total_occupants", "children_within_base_occupancy", "child_price", "extra_adult_price",
 	],
 	"Room": ["name", "room_number", "room_type", "floor", "notes"],
 	"Season": [
@@ -46,6 +50,9 @@ def estado(propiedad: str) -> plan_mod.Estado:
 		tipos=todos("Room Type") if prop else [],
 		habitaciones=todos("Room") if prop else [],
 		temporadas=todos("Season") if prop else [],
+		tramos_cancelacion=frappe.db.count(
+			"Cancellation Tier", {"parent": propiedad, "parenttype": "Property"}
+		) if prop else 0,
 	)
 
 

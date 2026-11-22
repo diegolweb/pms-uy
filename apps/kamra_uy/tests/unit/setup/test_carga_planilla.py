@@ -237,9 +237,11 @@ def test_rooms_of_one_type_must_share_capacity(tmp_path) -> None:
 	]
 
 
-def test_blank_children_is_a_warning_per_type(tmp_path) -> None:
+def test_blank_children_is_not_a_warning_it_is_the_hotel_rule(tmp_path) -> None:
+	# HR-290, el fundador (22-11): en blanco vale la capacidad menos 1 (la pone el plan); no tiene que rellenarla
 	p = _lee(tmp_path)
-	assert sum("«Niños máx.» en blanco" in t for t in _textos(p.avisos)) == 3
+	assert not [t for t in _textos(p.avisos) if "Niños máx." in t]
+	assert {t.ninos for t in p.tipos.values()} == {None}
 
 
 def test_type_names_match_ignoring_case_and_keep_the_rooms_spelling(tmp_path) -> None:
@@ -254,7 +256,7 @@ def test_the_planilla_never_opens_the_personal_data_sheets(tmp_path) -> None:
 	# las dos van ROTAS en la fábrica: si la carga las abriera, esto sería un error de lectura
 	p = _lee(tmp_path)
 	assert p.errores == []
-	assert planilla.PESTANAS == ("Habitaciones", "Temporadas y precios")
+	assert planilla.PESTANAS == ("Habitaciones", "Temporadas y precios", "Seña y cancelación")
 
 
 def test_rooms_and_seasons_in_numbers(tmp_path) -> None:

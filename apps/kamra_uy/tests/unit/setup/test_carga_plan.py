@@ -29,9 +29,34 @@ def _propiedad(**kw):
 		"booking_payment_mode": "Pay at hotel",
 		"deposit_pct": 0,
 		"hold_minutes": 120,
+		**_FABRICA_KAMRA,
 	}
 	base.update(kw)
 	return base
+
+
+# lo que la pestaña «Seña y cancelación» inventada de la fábrica pone en la propiedad (HR-290)
+CONDICIONES = {
+	"hold_minutes": 45,
+	"checkin_time": "15:30:00",
+	"checkout_time": "10:15:00",
+	"free_cancel_days": 9,
+	"cancellation_fee": "Full Stay",
+	"no_show_charge": "First Night",
+	"pets_allowed": 0,
+}
+# lo que Kamra trae de fábrica en una propiedad nueva (property.json)
+_FABRICA_KAMRA = {
+	"checkin_time": datetime.timedelta(hours=14),
+	"checkout_time": datetime.timedelta(hours=11),
+	"free_cancel_days": 1,
+	"cancellation_fee": "First Night",
+	"no_show_charge": "First Night",
+	"pets_allowed": 0,
+}
+
+# lo que la carga cambia de una propiedad recién creada (lo demás ya está como lo pide la planilla)
+_CAMBIAN = {k: v for k, v in CONDICIONES.items() if k == "hold_minutes" or _FABRICA_KAMRA.get(k) != v}
 
 
 def _vacio(**kw):
@@ -79,6 +104,7 @@ def test_on_an_empty_property_it_creates_everything_and_sets_full_payment(p) -> 
 		"country": "Uruguay",
 		"booking_payment_mode": "Full online",
 		"deposit_pct": 100,
+		**_CAMBIAN,
 		"timezone": "America/Montevideo",
 		"currency": "USD",
 	}
@@ -102,8 +128,46 @@ def test_room_types_carry_capacity_and_the_lowest_price_as_base(p) -> None:
 		"base_price": 702,
 		"adults_capacity": 3,
 		"base_occupancy": 3,
+		"children_capacity": 2,
+		"max_total_occupants": 3,
+		"children_within_base_occupancy": 1,
+		"child_price": 0,
+		"extra_adult_price": 0,
 	}
 	assert tipos["Apartamento"]["room_type_code"] == "APARTAMENTO"
+
+
+def test_people_not_adults_children_up_to_capacity_minus_one_and_the_total_capped(p) -> None:
+	# HR-290, el fundador (22-11): «la capacidad maxima de la habitacion -1 es la cantidad de niños»; el total, la capacidad
+	pl = plan.planea(p, _vacio())
+	tipos = {a.tipo: a.valores for a in pl.acciones if a.doctype == "Room Type"}
+	assert {t: (v["adults_capacity"], v["children_capacity"], v["max_total_occupants"]) for t, v in tipos.items()} == {
+		"Doble": (2, 1, 2),
+		"Triple": (3, 2, 3),
+		"Apartamento": (5, 4, 5),
+	}
+
+
+def test_a_written_children_maximum_wins_over_the_rule(tmp_path) -> None:
+	hab = [list(f) for f in fabrica.HABITACIONES]
+	for f in hab:
+		if f[1] == "Triple":
+			f[4] = 1
+	ruta = tmp_path / "p.xlsx"
+	fabrica.escribe_xlsx(ruta, fabrica.pestanas(habitaciones=hab))
+	pl = plan.planea(planilla.lee(ruta), _vacio())
+	(triple,) = [a.valores for a in pl.acciones if a.doctype == "Room Type" and a.tipo == "Triple"]
+	assert (triple["children_capacity"], triple["max_total_occupants"]) == (1, 3)
+
+
+def test_children_priced_per_person_leave_the_child_prices_alone(tmp_path) -> None:
+	sena = [list(f) for f in fabrica.sena()]
+	sena[8][1] = "Menores de 5 gratis"
+	ruta = tmp_path / "p.xlsx"
+	fabrica.escribe_xlsx(ruta, fabrica.pestanas(sena_=sena))
+	pl = plan.planea(planilla.lee(ruta), _vacio())
+	(triple,) = [a.valores for a in pl.acciones if a.doctype == "Room Type" and a.tipo == "Triple"]
+	assert not {"child_price", "extra_adult_price", "children_within_base_occupancy"} & set(triple)
 
 
 def test_rooms_carry_type_floor_and_beds_with_notes(p) -> None:
@@ -216,7 +280,9 @@ def test_existing_types_are_matched_by_name_ignoring_case(p) -> None:
 	pl = plan.planea(p, estado)
 	(doble,) = [a for a in pl.acciones if a.doctype == "Room Type" and a.tipo == "Doble"]
 	assert (doble.op, doble.nombre) == ("cambiar", f"{PROP}-DBL")
-	assert doble.valores == {"room_type_name": "Doble", "base_price": 501}
+	assert doble.valores == {
+		"room_type_name": "Doble", "base_price": 501, "max_total_occupants": 2, "children_within_base_occupancy": 1
+	}
 	habs = [a for a in pl.acciones if a.doctype == "Room" and a.valores["room_number"] == "801"]
 	assert habs[0].valores["room_type"] == "Doble"
 
@@ -259,16 +325,48 @@ def test_a_different_currency_with_bookings_is_an_error(p) -> None:
 	]
 
 
-def test_a_set_timezone_and_hold_are_kept(p) -> None:
+def test_a_set_timezone_is_kept_and_the_conditions_come_from_the_planilla(p) -> None:
 	pl = plan.planea(p, _vacio(timezone="America/Montevideo", hold_minutes=45, currency="USD", country="Uruguay"))
 	(prop,) = [a for a in pl.acciones if a.doctype == "Property"]
-	assert prop.valores == {"booking_payment_mode": "Full online", "deposit_pct": 100}
+	assert prop.valores == {
+		"booking_payment_mode": "Full online", "deposit_pct": 100, **{k: v for k, v in _CAMBIAN.items() if k != "hold_minutes"}
+	}
 
 
-def test_an_empty_hold_gets_the_default(p) -> None:
-	pl = plan.planea(p, _vacio(hold_minutes=0))
+def test_kamra_times_as_timedelta_or_text_compare_with_the_planilla(p) -> None:
+	ya = {**CONDICIONES, "checkin_time": datetime.timedelta(hours=15, minutes=30), "checkout_time": "10:15:00"}
+	pl = plan.planea(p, _vacio(timezone="America/Montevideo", currency="USD", country="Uruguay",
+	                           booking_payment_mode="Full online", deposit_pct=100, **ya))
+	(prop,) = [a for a in pl.acciones if a.doctype == "Property"]
+	assert (prop.op, prop.valores) == ("igual", {})
+
+
+def _sin(tmp_path, *indices):
+	sena = [list(f) for f in fabrica.sena()]
+	for i in indices:
+		sena[i][1] = None
+	ruta = tmp_path / "p.xlsx"
+	fabrica.escribe_xlsx(ruta, fabrica.pestanas(sena_=sena))
+	return planilla.lee(ruta)
+
+
+def test_a_blank_condition_is_left_as_kamra_has_it(tmp_path) -> None:
+	pl = plan.planea(_sin(tmp_path, 3, 5, 9), _vacio())
+	(prop,) = [a for a in pl.acciones if a.doctype == "Property"]
+	assert not {"checkin_time", "free_cancel_days", "pets_allowed"} & set(prop.valores)
+
+
+def test_a_blank_hold_on_an_empty_kamra_hold_gets_the_default(tmp_path) -> None:
+	pl = plan.planea(_sin(tmp_path, 2), _vacio(hold_minutes=0))
 	(prop,) = [a for a in pl.acciones if a.doctype == "Property"]
 	assert prop.valores["hold_minutes"] == 120
+
+
+def test_cancellation_tiers_in_kamra_override_the_window_and_are_a_warning(p) -> None:
+	estado = _vacio()
+	estado.tramos_cancelacion = 2
+	pl = plan.planea(p, estado)
+	assert any("tiene 2 tramos de cancelación" in t and "mandan sobre los 9 días" in t for t in pl.avisos)
 
 
 def test_planilla_errors_stop_the_plan(tmp_path) -> None:
@@ -286,7 +384,9 @@ def test_the_report_is_spanish_and_says_what_it_would_do(p) -> None:
 	assert texto.splitlines()[0] == f"Carga de la planilla en «{PROP}» — PRUEBA: no se ha escrito nada."
 	assert "Planilla: 6 habitaciones (Apartamento 1, Doble 2, Triple 3) · 3 temporadas con fechas (9 precios) · USD" in texto
 	assert "  booking_payment_mode: Pay at hotel → Full online" in texto
-	assert "  + Doble (DOBLE): precio base 501 USD, 2 adultos" in texto
+	assert "  free_cancel_days: 1 → 9" in texto
+	assert "  checkin_time: 14:00:00 → 15:30:00" in texto
+	assert "  + Doble (DOBLE): precio base 501 USD, 2 personas (niños hasta 1)" in texto
 	assert "  + 801: Doble, piso 8" in texto
 	assert "  + Alta inventada, 01-01-2030 → 10-01-2030, Doble: 1001 USD/noche, mínimo 3 noches" in texto
 	assert "«Julio inventado» no tiene fechas" in texto

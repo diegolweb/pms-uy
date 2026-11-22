@@ -249,9 +249,9 @@ A discount needs a reason - it goes on the record.,Un descuento necesita un moti
 Set access instructions on the Property first.,Primero configure las instrucciones de acceso en la propiedad.
 Invalid link.,Enlace no válido.
 Cannot release access yet. Failed gates: {0},Todavía no se puede liberar el acceso. Controles pendientes: {0}
-Enter the deposit amount.,Ingrese el importe de la seña.
-No deposit is due - enter the amount to request.,No hay seña pendiente: ingrese el importe a solicitar.
-"Hello {guest}, please pay the deposit of {cur} {amount} to secure your booking {ref} at {property} ({checkin} → {checkout}): {url}","Hola, {guest}: para garantizar tu reserva {ref} en {property} ({checkin} → {checkout}), paga la seña de {cur} {amount} aquí: {url}"
+Enter the deposit amount.,Ingrese el importe del pago.
+No deposit is due - enter the amount to request.,No hay pago pendiente: ingrese el importe a solicitar.
+"Hello {guest}, please pay the deposit of {cur} {amount} to secure your booking {ref} at {property} ({checkin} → {checkout}): {url}","Hola, {guest}: para garantizar tu reserva {ref} en {property} ({checkin} → {checkout}), paga {cur} {amount} aquí: {url}"
 Only available while the payment gateway is in test mode.,Solo disponible mientras la pasarela de pago está en modo de prueba.
 No payment link has been sent for this booking.,No se envió ningún enlace de pago para esta reserva.
 Only a housekeeping supervisor can pass an inspection or verify a clean.,Solo un supervisor de pisos puede aprobar una inspección o verificar una limpieza.
@@ -311,7 +311,7 @@ Idempotency key already used,Clave de idempotencia ya usada
 Every rooming list row needs a guest name.,Cada fila de la lista de habitaciones necesita un nombre de huésped.
 Only a Revenue Manager or Hotel Admin can change a group rate.,Solo un gerente de ingresos o un administrador del hotel puede cambiar una tarifa de grupo.
 Unknown module(s): {0},Módulo(s) desconocido(s): {0}
-A deposit is taken before arrival - this booking is {0}. Take in-house payments on the folio.,La seña se cobra antes de la llegada y esta reserva está {0}. Registre los pagos del huésped alojado en el folio.
+A deposit is taken before arrival - this booking is {0}. Take in-house payments on the folio.,El pago de la reserva se cobra antes de la llegada y esta reserva está {0}. Registre los pagos del huésped alojado en el folio.
 Pick a payment mode: {0}.,Elija un medio de pago: {0}.
 Task {0} is already {1}.,La tarea {0} ya está {1}.
 {0} is not housekeeping staff at this property.,{0} no es personal de pisos en esta propiedad.
@@ -364,12 +364,12 @@ A plate price can't be negative.,El precio por plato no puede ser negativo.
 The service needs a name.,El servicio necesita un nombre.
 Whose function is this? A customer name is required.,¿De quién es este evento? El nombre del cliente es obligatorio.
 This function is closed. Reopen it before editing.,Este evento está cerrado. Reábralo antes de editarlo.
-"Close the function out instead - close-out counts the covers, settles the deposit and then marks it Completed.","Mejor haga el cierre del evento: el cierre cuenta los cubiertos, liquida la seña y luego lo marca como Completado."
+"Close the function out instead - close-out counts the covers, settles the deposit and then marks it Completed.","Mejor haga el cierre del evento: el cierre cuenta los cubiertos, liquida el pago de la reserva y luego lo marca como Completado."
 This function is closed. Reopen it (with a reason) before moving it.,Este evento está cerrado. Reábralo (con un motivo) antes de moverlo.
 That menu belongs to another property.,Ese menú pertenece a otra propiedad.
 That service belongs to another property.,Ese servicio pertenece a otra propiedad.
-The advance and interim add up to more than the bill.,La seña y el pago intermedio suman más que la cuenta.
-Booking advance,Seña de la reserva
+The advance and interim add up to more than the bill.,El pago de la reserva y el pago intermedio suman más que la cuenta.
+Booking advance,Pago de la reserva
 Before the function,Antes del evento
 On completion,Al finalizar
 A receipt has to be a positive amount - use kind 'Refund' to give money back.,Un recibo debe tener un importe positivo: use el tipo 'Refund' para devolver dinero.
@@ -591,9 +591,9 @@ Unknown company {0}.,Empresa desconocida {0}.
 Add at least one stay to the itinerary.,Agregue al menos una estadía al itinerario.
 Itinerary not found.,No se encontró el itinerario.
 Nothing to cancel: no leg of this itinerary is confirmed.,Nada que cancelar: ningún tramo de este itinerario está confirmado.
-No stay on this trip is waiting for an advance. Take in-house payments on the leg's folio.,Ninguna estadía de este viaje espera una seña. Registre los pagos del huésped alojado en el folio del tramo.
-The stays on this trip are in different currencies. Take the advance on each stay instead.,Las estadías de este viaje están en monedas distintas. Cobre la seña en cada estadía.
-Enter the advance amount.,Ingrese el importe de la seña.
+No stay on this trip is waiting for an advance. Take in-house payments on the leg's folio.,Ninguna estadía de este viaje tiene el pago de la reserva pendiente. Registre los pagos del huésped alojado en el folio del tramo.
+The stays on this trip are in different currencies. Take the advance on each stay instead.,Las estadías de este viaje están en monedas distintas. Cobre el pago de la reserva en cada estadía.
+Enter the advance amount.,Ingrese el importe del pago.
 Each stay in an itinerary is at least one night.,Cada estadía de un itinerario dura al menos una noche.
 The booking system was busy. Nothing was booked; please try again.,El sistema de reservas estaba ocupado. No se reservó nada; inténtelo de nuevo.
 This booking already belongs to another trip.,Esta reserva ya pertenece a otro viaje.
@@ -744,7 +744,7 @@ and,y
 The block's 'To' date must be after its 'From' date.,La fecha «Hasta» del bloqueo debe ser posterior a la fecha «Desde».
 Room {0} is not in {1}.,La habitación {0} no está en {1}.
 "Room is booked ({0}, {1}, arriving {2}) during this window. Move or cancel that stay before holding the room.","La habitación está reservada ({0}, {1}, llega el {2}) en ese período. Mueva o cancele esa estadía antes de retener la habitación."
-Advance % at booking is between 25 and 100. Leave it empty to use the property's usual deposit.,La seña % al reservar va de 25 a 100. Déjelo vacío para usar la seña habitual de la propiedad.
+Advance % at booking is between 25 and 100. Leave it empty to use the property's usual deposit.,El % a pagar al reservar va de 25 a 100. Déjelo vacío para usar el porcentaje habitual de la propiedad.
 Step {0} is listed twice.,El paso {0} aparece dos veces.
 The function can't end before it starts.,El evento no puede terminar antes de empezar.
 A discount can't be negative.,Un descuento no puede ser negativo.
@@ -982,7 +982,7 @@ early check-in,check-in anticipado
 late checkout,check-out tardío
 "The guest checked in online. Review what they sent, then confirm.",El huésped hizo el check-in en línea. Revise lo que envió y luego confirme.
 Ask for the guest's name and a government ID.,Pida el nombre del huésped y un documento oficial.
-No fixed deposit %: take an advance amount the guest agrees.,Sin % de seña fijo: cobre un importe de seña que el huésped acepte.
+No fixed deposit %: take an advance amount the guest agrees.,Sin % fijo a pagar al reservar: cobre el importe que el huésped acepte.
 "Review {0} open folio(s). Total charges {1}, paid {2}.","Revise {0} folio(s) abierto(s). Cargos totales {1}, pagado {2}."
 No restaurant or minibar charges on this stay.,No hay cargos de restaurante ni de minibar en esta estadía.
 IDs are on file. Check them against the guest at the desk.,Los documentos están guardados. Contrólelos con el huésped en recepción.
@@ -999,17 +999,17 @@ No discount or voucher lines on the folio.,No hay líneas de descuento ni de val
 ID still needed for: {0}.,Falta el documento de: {0}.
 {0}. Still to pay: {1}.,{0}. Falta pagar: {1}.
 "Pick a clean, empty room of the booked type.",Elija una habitación limpia y vacía del tipo reservado.
-Deposit is taken or waived.,La seña está cobrada o exonerada.
+Deposit is taken or waived.,El pago de la reserva está cobrado o exonerado.
 Confirm you are cancelling {0}.,Confirme que cancela {0}.
 {0} day(s) before arrival: inside the fee window. Estimated fee {1} ({2}).,{0} día(s) antes de la llegada: dentro del plazo con cargo. Cargo estimado {1} ({2}).
 {0} day(s) before arrival: outside the fee window (or no fee). Cancellation is free.,{0} día(s) antes de la llegada: fuera del plazo con cargo (o sin cargo). La cancelación es gratuita.
 Tell the guest cancellation is free under the policy.,"Dígale al huésped que, según la política, la cancelación es gratuita."
 Pick a cancellation reason before confirming.,Elija un motivo de cancelación antes de confirmar.
 Confirm only when the guest agrees. They get a cancellation number and a printable letter.,Confirme solo cuando el huésped esté de acuerdo. Recibe un número de cancelación y una carta para imprimir.
-Policy deposit {0} ({1}% of stay). Still due {2}.,Seña según la política {0} ({1} % de la estadía). Falta {2}.
-Expected deposit {0}. Still due {1}.,Seña esperada {0}. Falta {1}.
-Deposit secured ({0} received).,Seña cubierta ({0} recibidos).
-Deposit not open for collection on this booking.,La seña de esta reserva no está habilitada para cobro.
+Policy deposit {0} ({1}% of stay). Still due {2}.,Pago según la política {0} ({1} % de la estadía). Falta {2}.
+Expected deposit {0}. Still due {1}.,Pago esperado {0}. Falta {1}.
+Deposit secured ({0} received).,Pago de la reserva cubierto ({0} recibidos).
+Deposit not open for collection on this booking.,El pago de esta reserva no está habilitado para cobro.
 Confirm the payment link reached the guest.,Confirme que el enlace de pago le llegó al huésped.
 Property standard is {0}. Pick the agreed time for {1}.,El estándar de la propiedad es {0}. Elija la hora acordada para {1}.
 Confirm the agreed time for {0}.,Confirme la hora acordada para {0}.
@@ -1026,7 +1026,7 @@ Confirm with the guest: {0}.,Confirme con el huésped: {0}.
 Payment link already sent: follow up or record a desk payment of {0}.,El enlace de pago ya se envió: haga el seguimiento o registre un pago en recepción de {0}.
 Confirm the guest has a receipt / link confirmation for {0}.,Confirme que el huésped tiene un recibo / la confirmación del enlace por {0}.
 "After collecting, give a receipt or confirm the link.","Después de cobrar, entregue un recibo o confirme el enlace."
-Deposit is secured: remaining stay balance settles at check-in / check-out.,La seña está cubierta: el saldo restante de la estadía se liquida en el check-in / check-out.
+Deposit is secured: remaining stay balance settles at check-in / check-out.,"El pago de la reserva está cubierto: el saldo restante de la estadía, si lo hay, se liquida en el check-in / check-out."
 "Fee waived (free {0}). Confirm with the guest, then save.",Cargo exonerado ({0} gratis). Confírmelo con el huésped y luego guarde.
 Agree a fee amount with the guest (or waive).,Acuerde un importe de cargo con el huésped (o exonérelo).
 "Save as waived: no folio charge, stay time still updates.",Guardar como exonerado: sin cargo en el folio; la hora de la estadía se actualiza igual.
@@ -1047,7 +1047,7 @@ Bill-to for {0}: {1}. Alcohol always bills the guest.,"Facturar a, para {0}: {1}
 Room {0} is not cleaned yet. Pick a clean room or ask housekeeping first.,La habitación {0} todavía no está limpia. Elija una habitación limpia o consulte antes a pisos.
 Room {0} is ready.,La habitación {0} está lista.
 security deposit {0},depósito de garantía {0}
-advance {0},seña {0}
+advance {0},pago de la reserva {0}
 Collect {0} (or note company billing) before handing keys.,Cobre {0} (o anote la facturación a la empresa) antes de entregar las llaves.
 Hand over keys for room {0}. {1},Entregue las llaves de la habitación {0}. {1}
 "Welcome, please let us know if you need anything.",Bienvenido; avísenos si necesita algo.
@@ -1237,7 +1237,7 @@ The last room number must not be below the first.,El último número de habitaci
 Add at most 500 rooms at a time.,Agregue como máximo 500 habitaciones a la vez.
 Enter the first and last room number as whole numbers.,Ingrese el primer y el último número de habitación como números enteros.
 Room type {0} does not belong to this property.,El tipo de habitación {0} no pertenece a esta propiedad.
-Choose Refund or Keep as forfeited deposit.,Elija Devolver o Retener como seña perdida.
+Choose Refund or Keep as forfeited deposit.,Elija Reembolso o Retener sin devolver.
 This no-show has no credit on its folio.,Este no presentado no tiene saldo a favor en su folio.
 Only a No Show's credit is settled here (this one is {0}).,Aquí solo se liquida el saldo a favor de un no presentado (este está en estado {0}).
 What was proposed can't change. Reject it and record it again.,Lo propuesto no puede cambiar. Rechácelo y vuelva a registrarlo.
@@ -1253,7 +1253,7 @@ Package Nights must be at least 1.,Las noches del paquete deben ser al menos 1.
 Package Rate 2 Pax (Base) must be greater than zero.,La tarifa del paquete para 2 personas (base) debe ser mayor que cero.
 Extra Night Rate % cannot be negative.,El % de la tarifa por noche extra no puede ser negativo.
 Extra Night Fixed Override cannot be negative.,El importe fijo por noche extra no puede ser negativo.
-Advance Deposit % must be between 0 and 100.,El % de seña debe estar entre 0 y 100.
+Advance Deposit % must be between 0 and 100.,El % a pagar al reservar debe estar entre 0 y 100.
 OTA Daily Rate cannot be negative.,La tarifa diaria para OTA no puede ser negativa.
 {0} is sold out for {1}: {2} of {3} sellable rooms sold ({4} out of order or blocked).,{0} está agotado para el {1}: {2} de {3} habitaciones vendibles vendidas ({4} fuera de servicio o bloqueadas).
 "Room type code must use Latin letters or digits (e.g. DLX, RWBT3).","El código del tipo de habitación debe usar letras latinas o dígitos (p. ej. DLX, RWBT3)."

@@ -17,7 +17,18 @@ _REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _EPOCH = datetime.date(1899, 12, 30)
 _EPOCH_1904 = datetime.date(1904, 1, 1)
 
-ROTA = object()  # en `escribe_xlsx`, una pestaña cuyo XML es basura: prueba que la carga no la abre
+ROTA = object()
+
+
+class Porcentaje(float):
+	"""En `escribe_xlsx`, un número con formato de porcentaje (HR-290): `propio` usa uno propio «0 %» como el de la
+	planilla del hotel; si no, el 9 de Excel («0%»). 1 = 100 %."""
+
+	def __new__(cls, valor: float, propio: bool = True):
+		out = super().__new__(cls, valor)
+		out.propio = propio
+		return out
+  # en `escribe_xlsx`, una pestaña cuyo XML es basura: prueba que la carga no la abre
 
 
 def _col(n: int) -> str:
@@ -35,6 +46,7 @@ def escribe_xlsx(ruta, pestanas: dict, fecha1904: bool = False) -> None:
 	index: dict[str, int] = {}
 	epoch = _EPOCH_1904 if fecha1904 else _EPOCH
 	sheets_xml = []
+	hay_estilos = False
 	for filas in pestanas.values():
 		if filas is ROTA:
 			sheets_xml.append("<<esto no es XML")
@@ -46,7 +58,10 @@ def escribe_xlsx(ruta, pestanas: dict, fecha1904: bool = False) -> None:
 				ref = f"{_col(c)}{r}"
 				if valor is None:
 					continue
-				if isinstance(valor, bool):
+				if isinstance(valor, Porcentaje):
+					hay_estilos = True
+					cells.append(f'<c r="{ref}" s="{1 if valor.propio else 2}"><v>{float(valor):g}</v></c>')
+				elif isinstance(valor, bool):
 					cells.append(f'<c r="{ref}" t="b"><v>{int(valor)}</v></c>')
 				elif isinstance(valor, datetime.date):
 					cells.append(f'<c r="{ref}"><v>{(valor - epoch).days}</v></c>')
@@ -87,6 +102,13 @@ def escribe_xlsx(ruta, pestanas: dict, fecha1904: bool = False) -> None:
 		)
 		for i, xml in enumerate(sheets_xml, 1):
 			z.writestr(f"xl/worksheets/sheet{i}.xml", xml)
+		if hay_estilos:
+			z.writestr(
+				"xl/styles.xml",
+				f'<styleSheet xmlns="{_MAIN}"><numFmts count="1"><numFmt numFmtId="167" formatCode="0\\\u00a0%"/>'
+				'</numFmts><cellXfs count="3"><xf numFmtId="0"/><xf numFmtId="167"/><xf numFmtId="9"/></cellXfs>'
+				"</styleSheet>",
+			)
 		z.writestr(
 			"xl/sharedStrings.xml",
 			f'<sst xmlns="{_MAIN}" count="{len(strings)}" uniqueCount="{len(strings)}">'
@@ -136,7 +158,27 @@ def temporadas(precio_doble: float = 1001) -> list[list]:
 	]
 
 
-def pestanas(habitaciones=None, temporadas_=None, extra: dict | None = None) -> dict:
+SENA_CABECERA = ["Pregunta", "Respuesta", "Notas"]
+
+
+def sena() -> list[list]:
+	"""La pestaña «Seña y cancelación» inventada (HR-290): las mismas preguntas que la del hotel, con respuestas de
+	mentira (ni sus horas, ni sus días, ni su retención)."""
+	return [
+		["Seña en temporada alta (del 15-dic al 15-mar)", "Pago total de la estadía", None],
+		["Seña el resto del año", "Pago total de la estadía", None],
+		["Tiempo que se guarda la habitación para pagar la seña", "45 minutos", None],
+		["Hora de entrada (check-in)", "15:30", None],
+		["Hora de salida (check-out)", "10:15", None],
+		["Cancelación gratis hasta cuántos días antes de la llegada", 9, None],
+		["Si cancela después de ese plazo, ¿qué pierde?", Porcentaje(1), None],
+		["Si no llega (no-show), ¿qué se cobra?", "La primera noche", None],
+		["Niños: ¿hasta qué edad no pagan o pagan menos?", "Se cobra por habitación, no por persona.", None],
+		["Otras reglas (mascotas, cama extra, salida tardía…)", "No se aceptan mascotas", None],
+	]
+
+
+def pestanas(habitaciones=None, temporadas_=None, extra: dict | None = None, sena_=None) -> dict:
 	"""Las seis pestañas de la planilla real, con las dos de datos personales ROTAS: abrirlas tumba la prueba."""
 	out = {
 		"Léeme": [["Planilla inventada para pruebas"], ["Precios en dólares."]],
@@ -147,7 +189,12 @@ def pestanas(habitaciones=None, temporadas_=None, extra: dict | None = None) -> 
 			TEM_CABECERA,
 			*(temporadas_ if temporadas_ is not None else temporadas()),
 		],
-		"Seña y cancelación": [["todavía habla de seña"]],
+		"Seña y cancelación": [
+			["3. Seña y cancelación"],
+			["Lo que ya acordamos va escrito en amarillo."],
+			SENA_CABECERA,
+			*(sena_ if sena_ is not None else sena()),
+		],
 		"Reservas desde 15-nov": ROTA,
 		"Personal": ROTA,
 	}

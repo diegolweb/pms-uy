@@ -36,24 +36,28 @@ HOTEL_PHONE = "+000 0000 0227"
 HOTEL_ADDRESS = "Calle UT 227"
 HOTEL_CITY = "Ciudad UT"
 PAY_1 = "7a2b0c11-1111-4222-8333-555555555555"
-# Los textos aprobados de HR-175 que el correo repite, literales (web/content/{es,pt,en}/reservar.md, fuera de
-# «borradores»): el contenedor de Kamra no tiene web/, así que la guarda vive aquí.
+# El aviso del IVA a residentes, el `iva.aviso` de reservar.md (HR-266, D-HR-47: el 10 % se paga al reservar): aprobado
+# con todos los textos el 22-11 (D-HR-48), literal también aquí.
+IVA = {
+	"es": "Los huéspedes residentes en Uruguay deberán abonar el 10% de IVA adicional al momento de la reserva por las "
+	      "noches entre el 16 de noviembre y Semana de Turismo.",
+	"pt": "Os hóspedes residentes no Uruguai deverão pagar 10% de IVA adicional no momento da reserva pelas noites entre "
+	      "16 de novembro e a Semana de Turismo (Semana Santa).",
+	"en": "Guests residing in Uruguay must pay an additional 10% VAT when booking for nights between November 16 and "
+	      "Tourism Week (Holy Week).",
+}
+# Los textos de la web que el correo repite (texts.DE_LA_WEB), literales de web/content/{es,pt,en}/reservar.md: el
+# contenedor de Kamra no tiene web/, así que la guarda vive aquí.
 APPROVED = {
 	"es": {"confirmada": "Reserva confirmada", "referencia": "Referencia", "llegada": "Llegada", "salida": "Salida",
 	       "noches": "Noches", "habitacion": "Habitación", "huespedes": "Huéspedes", "total": "Total",
-	       "pagado": "Pagado", "direccion": "Dirección", "contacto": "Contacto",
-	       "iva": "Los huéspedes residentes en Uruguay deberán abonar el 10% de IVA adicional al momento del check-in "
-	              "entre el 16 de noviembre y Semana de Turismo."},
+	       "pagado": "Pagado", "direccion": "Dirección", "contacto": "Contacto", "iva": IVA["es"]},
 	"pt": {"confirmada": "Reserva confirmada", "referencia": "Referência", "llegada": "Chegada", "salida": "Saída",
 	       "noches": "Noites", "habitacion": "Quarto", "huespedes": "Hóspedes", "total": "Total", "pagado": "Pago",
-	       "direccion": "Endereço", "contacto": "Contato",
-	       "iva": "Os hóspedes residentes no Uruguai deverão pagar 10% de IVA adicional no momento do check-in entre 16 "
-	              "de novembro e a Semana de Turismo (Semana Santa)."},
+	       "direccion": "Endereço", "contacto": "Contato", "iva": IVA["pt"]},
 	"en": {"confirmada": "Booking confirmed", "referencia": "Reference", "llegada": "Arrival", "salida": "Departure",
 	       "noches": "Nights", "habitacion": "Room", "huespedes": "Guests", "total": "Total", "pagado": "Paid",
-	       "direccion": "Address", "contacto": "Contact",
-	       "iva": "Guests residing in Uruguay must pay an additional 10% VAT at check-in between November 16 and Tourism "
-	              "Week (Holy Week)."},
+	       "direccion": "Address", "contacto": "Contact", "iva": IVA["en"]},
 }
 
 
@@ -139,8 +143,19 @@ class TestFormato(unittest.TestCase):
 			for clave, literal in aprobados.items():
 				with self.subTest(idioma=idioma, clave=clave):
 					self.assertEqual(texts.TEXTOS[idioma][clave], literal)
-		self.assertEqual(set(texts.APROBADOS), set(APPROVED["es"]))
-		self.assertEqual(set(texts.BORRADORES), set(texts.TEXTOS["es"]) - set(texts.APROBADOS))
+		self.assertEqual(set(texts.DE_LA_WEB), set(APPROVED["es"]))
+
+	def test_the_vat_notice_is_approved_and_no_longer_sends_to_the_check_in(self):
+		# HR-266 (D-HR-47): el 10 % del residente se paga al reservar, así que el aviso ya no manda a pagarlo en el
+		# check-in; D-HR-48 (22-11): aprobado, como el `iva.aviso` de la web
+		for idioma, literal in IVA.items():
+			with self.subTest(idioma=idioma):
+				self.assertEqual(texts.TEXTOS[idioma]["iva"], literal)
+				self.assertNotIn("check-in", literal)
+		self.assertIn("iva", texts.DE_LA_WEB)
+		self.assertEqual(texts.FUENTES["iva"], "D-HR-48")
+		# HR-282 (D-HR-48): ninguno queda a la espera del fundador
+		self.assertEqual(set(texts.APROBADOS), set(texts.TEXTOS["es"]))
 
 
 # --- el correo (Frappe) --------------------------------------------------------------------------------------------
@@ -302,7 +317,7 @@ class TestConfirmationMail(CobrosCase):
 			with self.subTest(literal=literal):
 				self.assertIn(literal, html)
 		# 2031-04-01 a 04-04: la Semana de Turismo de 2031 acaba el domingo 13 de abril
-		self.assertIn(a["iva"], html)
+		self.assertIn(IVA["pt"], html)
 		self.assertIn(a["confirmada"], mail["text"])
 		self.assertTrue(frappe.db.get_value("Reservation", res, confirmation.SENT_FIELD))
 
@@ -364,7 +379,7 @@ class TestConfirmationMail(CobrosCase):
 				res = self.book("es", check_in=check_in, nights=nights)["reservation"]
 				self.pay(res, payment_id=str(uuid.uuid4()))
 				(mail,) = self.mails(res)
-				self.assertIs(APPROVED["es"]["iva"] in mail["html"], si)
+				self.assertIs(IVA["es"] in mail["html"], si)
 
 	def test_a_partial_payment_shows_the_total_and_what_was_paid(self):
 		res = self.book("es")["reservation"]

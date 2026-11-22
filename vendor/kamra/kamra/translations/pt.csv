@@ -61,9 +61,9 @@ Child ages must be between 0 and 17.,As idades das crianças devem estar entre 0
 Kamra front-end is not built. Run <code>cd apps/kamra/frontend && yarn install && yarn build</code> (Frappe Cloud runs this automatically on deploy).,O front-end do Kamra não está compilado. Execute <code>cd apps/kamra/frontend && yarn install && yarn build</code> (o Frappe Cloud faz isso automaticamente no deploy).
 Set access instructions on the Property first.,Primeiro configure as instruções de acesso na propriedade.
 Cannot release access yet. Failed gates: {0},Ainda não é possível liberar o acesso. Verificações pendentes: {0}
-Enter the deposit amount.,Informe o valor do sinal.
-No deposit is due - enter the amount to request.,Não há sinal pendente: informe o valor a solicitar.
-"Hello {guest}, please pay the deposit of {cur} {amount} to secure your booking {ref} at {property} ({checkin} → {checkout}): {url}","Olá, {guest}! Para garantir sua reserva {ref} em {property} ({checkin} → {checkout}), pague o sinal de {cur} {amount} aqui: {url}"
+Enter the deposit amount.,Informe o valor do pagamento.
+No deposit is due - enter the amount to request.,Não há pagamento pendente: informe o valor a solicitar.
+"Hello {guest}, please pay the deposit of {cur} {amount} to secure your booking {ref} at {property} ({checkin} → {checkout}): {url}","Olá, {guest}! Para garantir sua reserva {ref} em {property} ({checkin} → {checkout}), pague {cur} {amount} aqui: {url}"
 Only available while the payment gateway is in test mode.,Disponível só enquanto o gateway de pagamento está em modo de teste.
 No payment link has been sent for this booking.,Nenhum link de pagamento foi enviado para esta reserva.
 Only a housekeeping supervisor can pass an inspection or verify a clean.,Só um supervisor de governança pode aprovar uma inspeção ou verificar uma limpeza.
@@ -123,7 +123,7 @@ Idempotency key already used,Chave de idempotência já usada
 Every rooming list row needs a guest name.,Cada linha da rooming list precisa do nome de um hóspede.
 Only a Revenue Manager or Hotel Admin can change a group rate.,Só um gerente de receita ou um administrador do hotel pode alterar uma tarifa de grupo.
 Unknown module(s): {0},Módulo(s) desconhecido(s): {0}
-A deposit is taken before arrival - this booking is {0}. Take in-house payments on the folio.,O sinal é cobrado antes da chegada e esta reserva está {0}. Lance os pagamentos do hóspede na casa no fólio.
+A deposit is taken before arrival - this booking is {0}. Take in-house payments on the folio.,O pagamento da reserva é cobrado antes da chegada e esta reserva está {0}. Lance os pagamentos do hóspede na casa no fólio.
 Pick a payment mode: {0}.,Escolha uma forma de pagamento: {0}.
 Task {0} is already {1}.,A tarefa {0} já está {1}.
 {0} is not housekeeping staff at this property.,{0} não é da equipe de governança desta propriedade.

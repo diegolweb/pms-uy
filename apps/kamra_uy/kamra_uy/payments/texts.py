@@ -1,4 +1,4 @@
-"""Los textos de cobros que ve el personal (HR-30), en español neutro. Borradores hasta el OK del fundador.
+"""Los textos de cobros que ve el personal (HR-30), en español neutro. Aprobados con D-HR-48 (22-11).
 
 Sin frappe: los usan también los módulos que se prueban sin él.
 """

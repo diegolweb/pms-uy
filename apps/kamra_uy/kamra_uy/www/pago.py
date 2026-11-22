@@ -4,7 +4,7 @@ No confirma nada por su cuenta (lo confirma el aviso firmado que llega aparte): 
 idioma del navegador (español, portugués de Brasil o inglés; español si no hay otro). Si `external_reference` es el
 enlace de un folio, nombra la propiedad; nunca el huésped ni importes. Sin JavaScript ni recursos externos.
 
-Los textos son borradores hasta el OK del fundador.
+Los textos están aprobados (D-HR-48, 22-11: el fundador aprobó todos los textos).
 """
 
 from __future__ import annotations

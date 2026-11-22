@@ -72,6 +72,22 @@ class CargaCase(AuditTestCase):
 			{"country": "Uruguay", "currency": "USD", "timezone": "America/Montevideo",
 			 "booking_payment_mode": "Full online", "deposit_pct": 100},
 		)
+		# HR-290: la pestaña «Seña y cancelación» inventada de la fábrica
+		cond = frappe.db.get_value(
+			"Property", PROP, ["hold_minutes", "checkin_time", "checkout_time", "free_cancel_days", "cancellation_fee",
+			                   "no_show_charge", "pets_allowed"], as_dict=True,
+		)
+		self.assertEqual(
+			(cond.hold_minutes, str(cond.checkin_time), str(cond.checkout_time), cond.free_cancel_days,
+			 cond.cancellation_fee, cond.no_show_charge, cond.pets_allowed),
+			(45, "15:30:00", "10:15:00", 9, "Full Stay", "First Night", 0),
+		)
+		# la capacidad en personas: niños hasta la capacidad menos 1 y el total hasta la capacidad
+		cap = frappe.db.get_value(
+			"Room Type", {"property": PROP, "room_type_name": "Triple"},
+			["adults_capacity", "children_capacity", "max_total_occupants", "children_within_base_occupancy"], as_dict=True,
+		)
+		self.assertEqual(tuple(cap.values()), (3, 2, 3, 1))
 		triple = frappe.get_all(
 			"Room Type", filters={"property": PROP, "room_type_name": "Triple"},
 			fields=["name", "base_price", "adults_capacity", "base_occupancy"],
@@ -117,6 +133,23 @@ class CargaCase(AuditTestCase):
 		self.assertEqual(q["advance_due"], q["amount_after_tax"])
 		self.assertEqual(q["balance_at_hotel"], 0)
 		self.assertEqual(q["payment_policy"], "Full amount paid online")
+
+	def test_after_the_load_a_triple_takes_three_people_in_any_mix_with_one_adult_and_no_more(self):
+		# HR-290 (el fundador, 22-11): niños hasta la capacidad menos 1 y el total hasta la capacidad, al mismo precio
+		self.corre(aplicar=1)
+		triple = frappe.db.get_value("Room Type", {"property": PROP, "room_type_name": "Triple"})
+
+		def fila(adultos, ninos):
+			filas = public_api.search_stay(PROP, "2030-01-09", "2030-01-12", adults=adultos, children=ninos)
+			(f,) = [f for f in filas if f["room_type"] == triple]
+			return f
+
+		for adultos, ninos in ((3, 0), (2, 1), (1, 2)):
+			f = fila(adultos, ninos)
+			self.assertTrue(f["available"], (adultos, ninos, f.get("reason")))
+			self.assertEqual(f["quote"]["room_total"], fila(3, 0)["quote"]["room_total"], (adultos, ninos))
+		for adultos, ninos in ((3, 1), (2, 2), (1, 3), (4, 0)):
+			self.assertFalse(fila(adultos, ninos)["available"], (adultos, ninos))
 
 	def test_a_planilla_with_errors_writes_nothing(self):
 		tem = fabrica.temporadas()

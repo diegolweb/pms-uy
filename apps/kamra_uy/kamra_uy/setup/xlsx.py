@@ -17,6 +17,33 @@ _PR = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 _REF = re.compile(r"^([A-Z]+)(\d+)$")
 
 
+class Porcentaje(float):
+	"""Un número de una celda con formato de porcentaje (HR-290): 1 = 100 %. Sigue siendo un float."""
+
+
+_PCT_PROPIOS = (9, 10)  # los porcentajes de fábrica de Excel: «0%» y «0.00%»
+
+
+def estilos_porcentaje(z: zipfile.ZipFile) -> set[int]:
+	"""Los índices de estilo de celda (el `s` de cada <c>) cuyo formato es un porcentaje: el 9, el 10 o uno propio con
+	«%» fuera de comillas. Sin styles.xml, ninguno."""
+	if "xl/styles.xml" not in z.namelist():
+		return set()
+	try:
+		raiz = ET.fromstring(z.read("xl/styles.xml"))
+	except ET.ParseError:
+		return set()
+	pct = set(_PCT_PROPIOS)
+	for nf in raiz.iter(f"{_M}numFmt"):
+		codigo = re.sub(r'"[^"]*"|\\.', "", nf.get("formatCode") or "")
+		if "%" in codigo:
+			pct.add(int(nf.get("numFmtId")))
+	xfs = raiz.find(f"{_M}cellXfs")
+	if xfs is None:
+		return set()
+	return {i for i, xf in enumerate(xfs.findall(f"{_M}xf")) if int(xf.get("numFmtId") or 0) in pct}
+
+
 class PlanillaIlegible(Exception):
 	"""El fichero no se puede leer como la planilla: el mensaje va en español, para quien la rellena."""
 
@@ -92,11 +119,12 @@ def lee(ruta, pestanas: list[str]) -> Libro:
 			if c.get("t") == "s" and c.find(f"{_M}v") is not None
 		}
 		cadenas = cadenas_compartidas(z, wanted)
-	filas = {nombre: _filas(raiz, cadenas) for nombre, raiz in raices.items()}
+		pct = estilos_porcentaje(z)
+	filas = {nombre: _filas(raiz, cadenas, pct) for nombre, raiz in raices.items()}
 	return Libro(nombres, fecha1904, filas)
 
 
-def _filas(raiz, cadenas: dict[int, str]) -> list[tuple[int, dict]]:
+def _filas(raiz, cadenas: dict[int, str], pct: set[int] = frozenset()) -> list[tuple[int, dict]]:
 	out = []
 	for row in raiz.iter(f"{_M}row"):
 		celdas = {}
@@ -105,6 +133,8 @@ def _filas(raiz, cadenas: dict[int, str]) -> list[tuple[int, dict]]:
 			if not m:
 				continue
 			valor = _valor(c, cadenas)
+			if pct and isinstance(valor, int | float) and not isinstance(valor, bool) and int(c.get("s") or 0) in pct:
+				valor = Porcentaje(valor)
 			if valor is not None and valor != "":
 				celdas[m.group(1)] = valor
 		if celdas:

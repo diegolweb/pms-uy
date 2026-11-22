@@ -77,3 +77,21 @@ def test_dates_come_back_from_their_serial_with_the_book_epoch(tmp_path, fecha19
 def test_column_letters_beyond_z(tmp_path) -> None:
 	ruta = _libro(tmp_path, {"Uno": [[None] * 27 + ["AB"]]})
 	assert xlsx.lee(ruta, ["Uno"]).filas("Uno") == [(1, {"AB": "AB"})]
+
+
+@pytest.mark.parametrize("propio", [True, False])
+def test_a_number_in_a_percent_cell_is_a_percentage(tmp_path, propio) -> None:
+	# HR-290: la planilla del hotel guarda «100 %» como 1 con un formato propio «0 %»; Excel trae también el 9 («0%»)
+	ruta = tmp_path / "p.xlsx"
+	fabrica.escribe_xlsx(ruta, {"Hoja": [[fabrica.Porcentaje(1, propio=propio), 1, fabrica.Porcentaje(0.25, propio=propio)]]})
+	(_, celdas), = xlsx.lee(ruta, ["Hoja"]).filas("Hoja")
+	assert isinstance(celdas["A"], xlsx.Porcentaje) and celdas["A"] == 1
+	assert not isinstance(celdas["B"], xlsx.Porcentaje) and celdas["B"] == 1
+	assert isinstance(celdas["C"], xlsx.Porcentaje) and celdas["C"] == 0.25
+
+
+def test_a_book_without_styles_has_no_percentages(tmp_path) -> None:
+	ruta = tmp_path / "p.xlsx"
+	fabrica.escribe_xlsx(ruta, {"Hoja": [[1, 0.5]]})
+	(_, celdas), = xlsx.lee(ruta, ["Hoja"]).filas("Hoja")
+	assert not any(isinstance(v, xlsx.Porcentaje) for v in celdas.values())

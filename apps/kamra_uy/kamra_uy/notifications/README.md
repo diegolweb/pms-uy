@@ -36,8 +36,9 @@ la pone HR-32 con `kamra_uy.branding.correo.envolver`; sin marca aplicada, el cu
 
 ## Los textos
 
-Están en `texts.py`. Los APROBADOS son literales de HR-175 (web/content/*/reservar.md). Los BORRADORES (asunto,
-saludo, entrada, horario, ayuda, despedida) esperan el OK del fundador (D-HR-44).
+Están en `texts.py`, todos aprobados y cada uno con su fuente (`FUENTES`). Los `DE_LA_WEB` son literales de
+web/content/*/reservar.md (HR-175; el aviso del IVA, de D-HR-47). Los nuevos del correo (asunto, saludo, entrada,
+horario, ayuda, despedida) los aprobó el fundador con todos los textos el 22-11 (D-HR-48, HR-282).
 
 ## Si no puede salir
 

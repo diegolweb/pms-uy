@@ -1,6 +1,6 @@
 """La planilla del hotel (HR-6) leída y validada para la carga en Kamra (HR-33). Sin frappe.
 
-Hoy se cargan dos pestañas: «Habitaciones» y «Temporadas y precios». Las demás crecen aquí cuando el fundador las
+Hoy se cargan tres pestañas: «Habitaciones», «Temporadas y precios» y «Seña y cancelación» (HR-290). Las demás crecen aquí cuando el fundador las
 rellene (una función `_<pestaña>` y su nombre en PESTANAS); las de datos personales no se abren nunca desde este
 módulo salvo para la carga de su ficha, con su propia revisión. Las columnas se buscan por su cabecera, no por su
 letra: insertar una columna no rompe la carga. Cada error dice pestaña, fila y columna, en español.
@@ -18,7 +18,8 @@ from kamra_uy.setup import xlsx
 
 HABITACIONES = "Habitaciones"
 TEMPORADAS = "Temporadas y precios"
-PESTANAS = (HABITACIONES, TEMPORADAS)
+SENA = "Seña y cancelación"
+PESTANAS = (HABITACIONES, TEMPORADAS, SENA)
 
 _FECHA = re.compile(r"^\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\s*$")
 _FECHA_ISO = re.compile(r"^\s*(\d{4})-(\d{1,2})-(\d{1,2})\s*$")
@@ -82,8 +83,25 @@ class Tipo:
 
 
 @dataclasses.dataclass
+class Condiciones:
+	"""La pestaña «Seña y cancelación» (HR-290). None = en blanco o sin la pregunta: la carga no lo toca. Los cargos, con
+	los valores de Kamra (`Property.cancellation_fee` y `no_show_charge`): «First Night», «Full Stay» o «None»."""
+
+	pago_total: bool | None = None
+	retencion_minutos: int | None = None
+	entrada: str | None = None  # «14:00:00», como un Time de Frappe
+	salida: str | None = None
+	cancelacion_gratis_dias: int | None = None
+	cargo_cancelacion: str | None = None
+	cargo_no_show: str | None = None
+	por_habitacion: bool | None = None  # los niños se cobran por habitación, no por persona
+	mascotas: bool | None = None  # False: no se aceptan
+
+
+@dataclasses.dataclass
 class Planilla:
 	moneda: str | None = None
+	condiciones: Condiciones = dataclasses.field(default_factory=Condiciones)
 	tipos: dict = dataclasses.field(default_factory=dict)
 	habitaciones: list = dataclasses.field(default_factory=list)
 	temporadas: list = dataclasses.field(default_factory=list)
@@ -191,6 +209,9 @@ def analiza(libro: xlsx.Libro) -> Planilla:
 	p = Planilla()
 	hab = _Pestana(HABITACIONES, libro.filas(HABITACIONES), _HAB_REQ, _HAB_OPC, _HAB_VISIBLE, p.errores)
 	tem = _Pestana(TEMPORADAS, libro.filas(TEMPORADAS), _TEM_REQ, {}, _TEM_VISIBLE, p.errores)
+	sen = _Pestana(SENA, libro.filas(SENA), _SEN_REQ, {}, _SEN_VISIBLE, p.errores)
+	if sen.fila_cabecera is not None:
+		_condiciones(sen, p)
 	if hab.fila_cabecera is not None:
 		_habitaciones(hab, p)
 	if tem.fila_cabecera is not None:
@@ -283,17 +304,6 @@ def _habitaciones(pest: _Pestana, p: Planilla) -> None:
 		t.adultos, t.ninos = h.adultos, h.ninos
 		t.habitaciones.append(h)
 		p.habitaciones.append(h)
-	for t in p.tipos.values():
-		if t.habitaciones and t.ninos is None:
-			p.avisos.append(
-				Nota(
-					HABITACIONES,
-					t.habitaciones[0].fila,
-					pest.columnas.get("ninos"),
-					pest.cabeceras.get("ninos"),
-					f"«Niños máx.» en blanco para {t.nombre}: la carga no lo toca (Kamra pone 1 al crear el tipo).",
-				)
-			)
 
 
 def _cuantos(n) -> str:
@@ -482,12 +492,159 @@ def _cuadra_tipos(hab: _Pestana, p: Planilla) -> None:
 			)
 
 
+_SEN_REQ = {"pregunta": "pregunta", "respuesta": "respuesta"}
+_SEN_VISIBLE = {"pregunta": "Pregunta", "respuesta": "Respuesta"}
+
+# las preguntas de «Seña y cancelación», por el comienzo de su texto sin tildes ni mayúsculas, y cómo se nombran en los
+# avisos («la carga no toca …»)
+_PREGUNTAS = (
+	("cobro_alta", "sena en temporada alta", "la seña de temporada alta"),
+	("cobro_resto", "sena el resto", "la seña del resto del año"),
+	("retencion", "tiempo que se guarda", "la retención para pagar"),
+	("entrada", "hora de entrada", "la hora de entrada"),
+	("salida", "hora de salida", "la hora de salida"),
+	("dias", "cancelacion gratis", "la cancelación gratis"),
+	("cancela", "si cancela despues", "lo que pierde quien cancela tarde"),
+	("no_show", "si no llega", "el cargo del no-show"),
+	("ninos", "ninos", "el cobro de los niños"),
+	("otras", "otras reglas", "las mascotas"),
+)
+_HORA = re.compile(r"^\s*(\d{1,2})(?:\s*[:.h]\s*(\d{2}))?\s*(?:h|hs|horas)?\s*$")
+_RETENCION = re.compile(r"^\s*(\d+)\s*(min|mins|minutos?|h|hs|horas?)?\s*$")
+_DIAS = re.compile(r"^\s*(\d+)\s*(dias?)?\s*$")
+_UNA_NOCHE = re.compile(r"^(1 noche|una noche|la primera noche|primera noche|el importe de la primera noche)$")
+_ESTADIA = re.compile(r"^(toda la estadia|la estadia entera|la estadia completa|el total|total|toda la reserva)$")
+_NADA = re.compile(r"^(nada|ninguno|ninguna|no se cobra|sin cargo)$")
+_PCT_TEXTO = re.compile(r"^(\d+(?:[.,]\d+)?)\s*%$")
+_SIN_MASCOTAS = re.compile(r"^(no se aceptan mascotas|no se admiten mascotas|sin mascotas|no se permiten mascotas)$")
+
+
+def _condiciones(pest: _Pestana, p: Planilla) -> None:
+	c = p.condiciones
+	filas: dict[str, tuple[int, object]] = {}
+	for fila, celdas in pest.datos:
+		pregunta = _texto(pest.valor(celdas, "pregunta"))
+		if not pregunta:
+			continue
+		for campo, prefijo, _ in _PREGUNTAS:
+			if _clave(pregunta).startswith(prefijo) and campo not in filas:
+				filas[campo] = (fila, pest.valor(celdas, "respuesta"))
+				break
+	for campo, _, nombre in _PREGUNTAS:
+		if campo not in filas:
+			p.avisos.append(Nota(SENA, None, None, None, f"no encuentro la pregunta de {nombre}: la carga no la toca."))
+			continue
+		fila, bruto = filas[campo]
+		if _texto(bruto) is None:
+			p.avisos.append(pest.nota(fila, "respuesta", f"en blanco: la carga no toca {nombre}."))
+			continue
+		_respuesta(pest, p, c, campo, fila, bruto)
+	if c.pago_total is False:
+		c.pago_total = None
+
+
+def _respuesta(pest: _Pestana, p: Planilla, c: Condiciones, campo: str, fila: int, bruto) -> None:
+	crudo = _texto(bruto)
+	clave = _clave(crudo).rstrip(".")
+
+	def error(mensaje: str) -> None:
+		p.errores.append(pest.nota(fila, "respuesta", mensaje))
+
+	def no_lo_lee(texto: str) -> None:
+		p.avisos.append(pest.nota(fila, "respuesta", f"«{texto}»: la carga no lo lee; ponlo en Kamra si hace falta."))
+
+	if campo in ("cobro_alta", "cobro_resto"):
+		if clave.startswith("pago total") or clave in ("total", "100", "100 %", "100%"):
+			if c.pago_total is not False:
+				c.pago_total = True
+			return
+		c.pago_total = False
+		error(f"«{crudo}»: la carga solo sabe cobrar el total de la estadía al reservar (D-HR-38); para cobrar una seña, "
+		      "pregúntalo antes de cargar.")
+	elif campo == "retencion":
+		m = _RETENCION.match(clave)
+		if not m or int(m.group(1)) < 1:
+			error(f"«{crudo}» no es un tiempo (escríbelo como 120 minutos).")
+			return
+		c.retencion_minutos = int(m.group(1)) * (60 if (m.group(2) or "m").startswith("h") else 1)
+	elif campo in ("entrada", "salida"):
+		hora = _hora(bruto, clave)
+		if hora is None:
+			error(f"«{crudo}» no es una hora (escríbela como 14:00).")
+			return
+		setattr(c, campo, hora)
+	elif campo == "dias":
+		m = _DIAS.match(clave)
+		if not m:
+			error(f"«{crudo}» no es un número de días.")
+			return
+		c.cancelacion_gratis_dias = int(m.group(1))
+	elif campo in ("cancela", "no_show"):
+		cargo = _cargo(bruto, clave)
+		if cargo == "?":
+			error(f"«{crudo}»: ¿una noche o el 100 %? Escribe «100 %», «la primera noche» o «toda la estadía».")
+			return
+		if cargo is None:
+			que = f"{float(bruto) * 100:g} %" if isinstance(bruto, xlsx.Porcentaje) else crudo
+			error(f"«{que}»: Kamra solo sabe cobrar la primera noche, el 100 % (toda la estadía) o nada.")
+			return
+		setattr(c, "cargo_cancelacion" if campo == "cancela" else "cargo_no_show", cargo)
+	elif campo == "ninos":
+		if clave in ("por habitacion", "se cobra por habitacion") or clave.startswith("se cobra por habitacion, no por persona"):
+			c.por_habitacion = True
+		else:
+			no_lo_lee(crudo)
+	elif campo == "otras":
+		resto = []
+		for frase in re.split(r"[.;\n]+", crudo):
+			if not frase.strip():
+				continue
+			if _SIN_MASCOTAS.match(_clave(frase)):
+				c.mascotas = False
+			else:
+				resto.append(frase.strip())
+		if resto:
+			no_lo_lee(". ".join(resto))
+
+
+def _cargo(bruto, clave: str) -> str | None:
+	"""El cargo de Kamra («First Night», «Full Stay» o «None»), "?" si es un número que puede ser noches o porcentaje, o
+	None si Kamra no lo sabe cobrar. El fundador (22-11): «No dice 1, dice 100%»: su celda guarda 1 con formato «0 %»."""
+	if isinstance(bruto, xlsx.Porcentaje):
+		pct = round(float(bruto) * 100, 4)
+	elif isinstance(bruto, int | float) and not isinstance(bruto, bool):
+		pct = {0: 0, 100: 100}.get(bruto, "?")
+	elif _PCT_TEXTO.match(clave):
+		pct = float(_PCT_TEXTO.match(clave).group(1).replace(",", "."))
+	elif clave in ("0", "100"):
+		pct = int(clave)
+	elif re.match(r"^\d+$", clave):
+		return "?"
+	else:
+		return "First Night" if _UNA_NOCHE.match(clave) else "Full Stay" if _ESTADIA.match(clave) else (
+			"None" if _NADA.match(clave) else None)
+	if pct == "?":
+		return "?"
+	return {0: "None", 100: "Full Stay"}.get(pct)
+
+
+def _hora(bruto, clave: str) -> str | None:
+	if isinstance(bruto, int | float) and not isinstance(bruto, bool) and 0 <= bruto < 1:
+		minutos = round(bruto * 24 * 60)
+		return f"{minutos // 60:02d}:{minutos % 60:02d}:00"
+	m = _HORA.match(clave)
+	if not m or int(m.group(1)) > 23 or int(m.group(2) or 0) > 59:
+		return None
+	return f"{int(m.group(1)):02d}:{int(m.group(2) or 0):02d}:00"
+
+
 def main(argv: list[str]) -> int:
 	if len(argv) != 1:
 		print("uso: python3 -m kamra_uy.setup.planilla <planilla.xlsx>", file=sys.stderr)
 		return 2
 	p = lee(argv[0])
 	print(f"moneda: {p.moneda or '?'} · {p.recuento()}")
+	print(f"condiciones: {dataclasses.asdict(p.condiciones)}")
 	for n in p.avisos:
 		print("AVISO", n.texto())
 	for n in p.errores:

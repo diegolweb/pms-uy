@@ -60,7 +60,7 @@ def payment_provider(gateway: str):
 		return mercadopago
 	frappe.throw(f"La pasarela {gateway} no se ofrece en Uruguay.")
 NOTICE_LANGUAGES = ["es", "pt", "en"]
-# borrador para el OK del fundador: hasta el CFE, este papel no debe parecer una factura fiscal
+# aprobado con D-HR-48 (22-11): hasta el CFE, este papel no debe parecer una factura fiscal
 INVOICE_TITLE = "Detalle de cuenta"
 INVOICE_FOOTER = ("Este documento no es un comprobante fiscal. El comprobante fiscal electrónico (CFE) se emite por "
                   "separado.")

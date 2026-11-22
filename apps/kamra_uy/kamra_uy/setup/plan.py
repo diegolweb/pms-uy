@@ -8,6 +8,13 @@ no se borra). Lo de Kamra que la planilla no trae se avisa y no se toca.
 Reglas de cobro (ADDENDUM de KICKOFF-HR-220, 20-11, fundador: «el hotel no cobra reserva, se realiza el pago al
 completo»): la propiedad en «Full online» con deposit_pct 100, y ninguna temporada de la carga con advance_percent,
 porque una temporada con porcentaje manda sobre «Full online» (kamra/public_api.py, `_advance_terms`).
+
+HR-290: la pestaña «Seña y cancelación» pone en la propiedad la retención, las horas de entrada y salida, la cancelación
+gratis, lo que cuesta cancelar tarde o no llegar y las mascotas; lo que está en blanco no se toca. Su cobro tiene que ser
+el total (planilla.py lo valida). La capacidad de cada tipo es de PERSONAS (el fundador, 22-11): adultos hasta la
+capacidad, niños hasta la capacidad menos 1 (siempre un adulto) salvo que «Niños máx.» diga otro número, y el total hasta
+la capacidad (`max_total_occupants`, que Kamra aplica en `pricing.capacity_overflow`). Con «se cobra por habitación», un
+niño o un adulto más no suma nada al precio.
 """
 
 import dataclasses
@@ -35,6 +42,7 @@ class Estado:
 	tipos: list
 	habitaciones: list
 	temporadas: list
+	tramos_cancelacion: int = 0  # filas de Property.cancellation_tiers: si las hay, mandan sobre free_cancel_days
 
 
 @dataclasses.dataclass
@@ -118,11 +126,50 @@ def planea(planilla: Planilla, estado: Estado, propiedad: str | None = None) -> 
 	return pl
 
 
-def _propiedad(pl: Plan) -> None:
-	actual = pl.estado.propiedad
-	deseado = {"country": PAIS, "booking_payment_mode": MODO_DE_COBRO, "deposit_pct": DEPOSITO_PCT}
-	if not actual.get("hold_minutes"):
+def _hora(v) -> str | None:
+	"""«14:00:00» de un Time de Frappe (str «14:00:00» o «9:00:00», timedelta o time)."""
+	if v in (None, ""):
+		return None
+	if isinstance(v, datetime.timedelta):
+		s = int(v.total_seconds())
+		return f"{s // 3600:02d}:{s % 3600 // 60:02d}:{s % 60:02d}"
+	if isinstance(v, datetime.time):
+		return v.strftime("%H:%M:%S")
+	partes = [int(x) for x in str(v).split(".")[0].split(":")] + [0, 0]
+	return f"{partes[0]:02d}:{partes[1]:02d}:{partes[2]:02d}"
+
+
+def _condiciones(pl: Plan) -> dict:
+	c = pl.planilla.condiciones
+	deseado = {}
+	if c.retencion_minutos:
+		deseado["hold_minutes"] = c.retencion_minutos
+	elif not pl.estado.propiedad.get("hold_minutes"):
 		deseado["hold_minutes"] = RETENCION_MINUTOS
+	for campo, valor in (
+		("checkin_time", c.entrada),
+		("checkout_time", c.salida),
+		("free_cancel_days", c.cancelacion_gratis_dias),
+		("cancellation_fee", c.cargo_cancelacion),
+		("no_show_charge", c.cargo_no_show),
+		("pets_allowed", None if c.mascotas is None else int(c.mascotas)),
+	):
+		if valor is not None:
+			deseado[campo] = valor
+	if pl.estado.tramos_cancelacion and c.cancelacion_gratis_dias is not None:
+		n = pl.estado.tramos_cancelacion
+		pl.avisos.append(
+			f"«{pl.propiedad}» tiene {n} tramos de cancelación en Kamra: mandan sobre los {c.cancelacion_gratis_dias} días "
+			"de la planilla; quítalos en Kamra (la carga no los toca)."
+		)
+	return deseado
+
+
+def _propiedad(pl: Plan) -> None:
+	actual = dict(pl.estado.propiedad)
+	for campo in ("checkin_time", "checkout_time"):
+		actual[campo] = _hora(actual.get(campo))
+	deseado = {"country": PAIS, "booking_payment_mode": MODO_DE_COBRO, "deposit_pct": DEPOSITO_PCT, **_condiciones(pl)}
 	if actual.get("timezone") in ZONAS_POR_DEFECTO:
 		deseado["timezone"] = HOTEL_TIMEZONE
 	moneda = pl.planilla.moneda
@@ -154,9 +201,11 @@ def _tipos(pl: Plan) -> dict[str, str | None]:
 			"base_price": t.precio_minimo,
 			"adults_capacity": t.adultos,
 			"base_occupancy": t.adultos,
+			"children_capacity": t.ninos if t.ninos is not None else max(t.adultos - 1, 0),
+			"max_total_occupants": t.adultos,
 		}
-		if t.ninos is not None:
-			deseado["children_capacity"] = t.ninos
+		if pl.planilla.condiciones.por_habitacion:
+			deseado.update(children_within_base_occupancy=1, child_price=0, extra_adult_price=0)
 		actual = por_nombre.get(_clave(t.nombre))
 		if actual is None:
 			code = codigo(t.nombre, usados)
@@ -295,7 +344,7 @@ def _linea(pl: Plan, a: Accion) -> list[str]:
 	if a.doctype == "Room Type":
 		if a.op == "crear":
 			return [f"  + {v['room_type_name']} ({v['room_type_code']}): precio base {_num(v['base_price'])} {moneda}, "
-			        f"{v['adults_capacity']} adultos"]
+			        f"{v['max_total_occupants']} personas (niños hasta {v['children_capacity']})"]
 		return [f"  ~ {a.tipo}: " + ", ".join(f"{k} {_num(a.antes.get(k))} → {_num(x)}" for k, x in v.items())]
 	if a.doctype == "Room":
 		if a.op == "crear":

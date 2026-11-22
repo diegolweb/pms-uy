@@ -1,5 +1,5 @@
-"""Textos del conector fiscal (HR-28). Los que ve un huésped o recepción son BORRADORES hasta el OK del fundador (README.md,
-«Textos para el OK del fundador»); los de las notas de crédito salen en el CFE."""
+"""Textos del conector fiscal (HR-28). Los que ve un huésped o recepción están aprobados: el fundador aprobó todos los
+textos el 22-11 (D-HR-48, HR-282; README.md, «Textos aprobados»). Los de las notas de crédito salen en el CFE."""
 
 # líneas del CFE (las ve el huésped en el comprobante)
 NIGHT = "Alojamiento {date} · {room_type}"
