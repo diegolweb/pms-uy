@@ -1,0 +1,115 @@
+{% extends "templates/web.html" %}
+{% block title %}Facturas pendientes{% endblock %}
+{% block page_content %}
+<style>
+  .fp { font-variant-numeric: tabular-nums; }
+  .fp .item { border: 1px solid #e5e5e5; border-radius: 0.5rem; padding: 0.75rem 1rem; margin: 0.75rem 0; }
+  .fp .item h3 { font-size: 1rem; margin: 0 0 0.25rem; }
+  .fp table { border-collapse: collapse; font-size: 0.9rem; margin: 0.5rem 0; }
+  .fp th, .fp td { padding: 0.2rem 0.5rem; border-bottom: 1px solid #eee; text-align: left; }
+  .fp form { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: end; margin-top: 0.5rem; }
+  .fp label { display: flex; flex-direction: column; font-size: 0.8rem; color: #555; }
+  .fp .warn { background: #fff4d6; border-color: #f2c94c; }
+  .fp .error { color: #b42318; }
+  .fp .ok { color: #067647; font-weight: 600; }
+  .fp .muted { color: #667085; }
+  @media print { .fp form, .fp .no-print { display: none; } }
+</style>
+<div class="fp">
+  <h1>Facturas pendientes{% if property %}: {{ property }}{% endif %}</h1>
+  {% if not property %}
+    {% if choices %}
+      <p>Elija la propiedad:</p>
+      <ul>{% for p in choices %}<li><a href="/facturas?property={{ p | urlencode }}">{{ p }}</a></li>{% endfor %}</ul>
+    {% else %}
+      <p>No hay propiedades de Uruguay que pueda ver.</p>
+    {% endif %}
+  {% else %}
+    <p>Mientras el sistema no esté conectado con Gsoft, estas facturas no salen solas. Hágalas en el portal de Factura
+      Express y registre aquí la serie y el número que le da el portal: así, al conectar Gsoft, no salen dos veces.</p>
+    <form class="no-print" method="get" action="/facturas">
+      <input type="hidden" name="property" value="{{ property }}">
+      <label>Solo las de este día<input type="date" name="fecha" value="{{ day }}"></label>
+      <button type="submit" class="btn btn-default btn-sm">Ver</button>
+      {% if day %}<a href="/facturas?property={{ property | urlencode }}">Ver todas</a>{% endif %}
+      <button type="button" class="btn btn-default btn-sm" onclick="window.print()">Imprimir la lista</button>
+    </form>
+
+    {% if residence_missing %}
+      <div class="item warn" data-testid="fp-residence">
+        <h3>Esperan la residencia del huésped</h3>
+        <p>La factura de estas reservas no sale hasta que se indique si el huésped reside en Uruguay y, si no, su
+          país (en el check-in, paso de datos del huésped):</p>
+        <ul>{% for r in residence_missing %}<li>{{ r }}</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+
+    {% if not items %}
+      <p class="ok" data-testid="fp-empty">No hay facturas pendientes{% if day %} de ese día{% endif %}.</p>
+    {% endif %}
+    {% for it in items %}
+      <div class="item{% if it.overdue %} warn{% endif %}" data-testid="fp-item" data-name="{{ it.name }}">
+        <h3>{{ it.title }} · reserva {{ it.reservation }}{% if it.guest_name %} · {{ it.guest_name }}{% endif %}</h3>
+        <p class="muted">Pedida el {{ it.created }}{% if it.state %} · {{ it.state }}{% endif %}</p>
+        <p>Para: {{ it.buyer.name or "Consumidor final" }}{% if it.buyer.rut %} · RUT {{ it.buyer.rut }}{% endif %}{% if it.buyer.doc_number %} · documento {{ it.buyer.doc_number }}{% if it.buyer.country %} ({{ it.buyer.country }}){% endif %}{% endif %}</p>
+        {% if it.lines %}
+          <table>
+            <thead><tr><th>Concepto</th><th>Importe ({{ it.currency }})</th><th>IVA</th></tr></thead>
+            <tbody>{% for ln in it.lines %}<tr><td>{{ ln.description }}</td><td>{{ ln.amount }}</td><td>{{ ln.rate }} %</td></tr>{% endfor %}</tbody>
+          </table>
+        {% endif %}
+        {% if it.total %}<p><strong>Total: {{ it.currency }} {{ it.total }}</strong></p>{% endif %}
+        {% if it.in_core %}
+          <form class="fp-record" data-name="{{ it.name }}">
+            <label>Dónde se hizo<select name="via">{% for v, label in vias %}<option value="{{ v }}">{{ label }}</option>{% endfor %}</select></label>
+            <label>Tipo<select name="type_code">{% for c in it.codes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select></label>
+            <label>Serie<input name="serie" size="3" maxlength="2" required></label>
+            <label>Número<input name="number" size="8" maxlength="7" inputmode="numeric" required></label>
+            <label>Fecha y hora de emisión<input type="datetime-local" name="issued_at" required></label>
+            <label>Nota<input name="note" size="20"></label>
+            <button type="submit" class="btn btn-primary btn-sm">Registrar</button>
+            <span class="fp-msg" role="status"></span>
+          </form>
+        {% endif %}
+      </div>
+    {% endfor %}
+  {% endif %}
+</div>
+<script>
+  document.querySelectorAll("form.fp-record").forEach(function (form) {
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var msg = form.querySelector(".fp-msg");
+      var button = form.querySelector("button");
+      var body = new URLSearchParams(new FormData(form));
+      body.set("name", form.dataset.name);
+      button.disabled = true;
+      msg.className = "fp-msg";
+      msg.textContent = "Registrando…";
+      fetch("/api/method/kamra_uy.fiscal.api.record_manual", {
+        method: "POST", body: body,
+        headers: { "X-Frappe-CSRF-Token": {{ csrf_token | tojson }}, "Accept": "application/json" }
+      }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+      }).then(function (out) {
+        if (out.ok) {
+          var m = out.data.message || {};
+          msg.className = "fp-msg ok";
+          msg.textContent = "Registrada: serie " + (m.serie || "") + ", número " + (m.number || "") + ".";
+          form.querySelectorAll("input, select, button").forEach(function (el) { el.disabled = true; });
+        } else {
+          var text = "No se pudo registrar.";
+          try { text = JSON.parse(JSON.parse(out.data._server_messages)[0]).message; } catch (e) {}
+          msg.className = "fp-msg error";
+          msg.textContent = text;
+          button.disabled = false;
+        }
+      }).catch(function () {
+        msg.className = "fp-msg error";
+        msg.textContent = "No se pudo registrar: revise la conexión y vuelva a intentarlo.";
+        button.disabled = false;
+      });
+    });
+  });
+</script>
+{% endblock %}

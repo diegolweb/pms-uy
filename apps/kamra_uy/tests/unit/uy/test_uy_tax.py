@@ -137,3 +137,63 @@ def test_the_iva_of_the_nights_is_their_rate_times_the_night() -> None:
     rates = _rates(uy_tax.RESIDENT, "2026-11-15", "2026-11-18")
     assert uy_tax.iva_of_nights(nights, rates) == Decimal("43.00")
     assert uy_tax.iva_of_nights(nights, _rates(uy_tax.NON_RESIDENT, "2026-11-15", "2026-11-18")) == Decimal("0.00")
+
+
+# --- HR-304: la cotización de recepción con la residencia, como la reserva que va a crear ---
+
+def _quote(nightly, room_total=None, advance_pct=30):
+    base = sum(n["rate"] for n in nightly) if room_total is None else room_total
+    return {
+        "nightly": [dict(n, gst_rate=0.0) for n in nightly],
+        "room_total": float(base),
+        "amount_before_tax": float(base),
+        "tax_amount": 0.0,
+        "tax_percent": 0.0,
+        "amount_after_tax": float(base),
+        "advance": {"percent": advance_pct, "season": None, "amount": round(base * advance_pct / 100, 2)},
+        "totals": {"subtotal": float(base), "discount": 0.0, "tax": 0.0, "total": float(base), "deposit_required": 0},
+        "line_items": [{"component": "accommodation", "amount": float(base), "tax_amount": 0.0, "tax_rate": 0.0}],
+    }
+
+
+def test_quote_nights_reparte_el_total_del_plan_como_la_reserva() -> None:
+    nightly = [{"date": "2026-12-01", "rate": 100.0}, {"date": "2026-12-02", "rate": 100.0},
+               {"date": "2026-12-03", "rate": 100.0}]
+    # un plan de tarifa deja el total en 250: cada noche su parte y la última el redondeo (Reservation.quote_night_rows)
+    assert uy_tax.quote_nights(nightly, 250) == {"2026-12-01": Decimal("83.33"), "2026-12-02": Decimal("83.33"),
+                                                 "2026-12-03": Decimal("83.34")}
+    assert uy_tax.quote_nights(nightly, 300) == {d: Decimal("100.00") for d in ("2026-12-01", "2026-12-02",
+                                                                                  "2026-12-03")}
+    assert uy_tax.quote_nights([], 0) == {}
+
+
+def test_quote_with_rates_suma_el_iva_de_cada_noche_y_rehace_totales_y_sena() -> None:
+    q = _quote([{"date": "2026-11-14", "rate": 100.0}, {"date": "2026-11-15", "rate": 100.0},
+                {"date": "2026-11-16", "rate": 100.0}, {"date": "2026-11-17", "rate": 100.0}])
+    rates = uy_tax.booking_room_rates(uy_tax.RESIDENT, "2026-11-14", "2026-11-18")
+    out = uy_tax.quote_with_rates(q, rates)
+    assert [n["gst_rate"] for n in out["nightly"]] == [0.0, 0.0, 10.0, 10.0]
+    assert out["tax_amount"] == 20.0
+    assert out["amount_after_tax"] == 420.0
+    assert out["totals"]["tax"] == 20.0 and out["totals"]["total"] == 420.0
+    assert out["advance"]["amount"] == 126.0
+    assert out["tax_percent"] == 5.0
+    assert out["line_items"][0]["tax_amount"] == 20.0 and out["line_items"][0]["tax_rate"] == 5.0
+    assert q["tax_amount"] == 0.0  # no toca la cotización que le pasan
+
+
+def test_quote_with_rates_del_extranjero_no_cambia_nada() -> None:
+    q = _quote([{"date": "2026-12-01", "rate": 100.0}])
+    out = uy_tax.quote_with_rates(q, uy_tax.booking_room_rates(uy_tax.NON_RESIDENT, "2026-12-01", "2026-12-02"))
+    assert out["tax_amount"] == 0.0 and out["amount_after_tax"] == 100.0 and out["advance"]["amount"] == 30.0
+
+
+def test_quote_with_rates_sin_sena_ni_lineas_ni_noches() -> None:
+    q = _quote([{"date": "2026-12-01", "rate": 100.0}])
+    for key in ("advance", "totals", "line_items"):
+        q.pop(key)
+    out = uy_tax.quote_with_rates(q, {"2026-12-01": Decimal("10")})
+    assert out["amount_after_tax"] == 110.0 and "advance" not in out
+    empty = uy_tax.quote_with_rates({"nightly": [], "room_total": 0, "amount_before_tax": 0, "tax_amount": 0,
+                                     "amount_after_tax": 0}, {})
+    assert empty["tax_percent"] == 0.0

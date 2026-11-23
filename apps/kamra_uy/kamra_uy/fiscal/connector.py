@@ -50,6 +50,11 @@ class FiscalError(Exception):
 	"""Algo que no se arregla reintentando sin que una persona lo mire (moneda, tipo de cambio, 4xx de core)."""
 
 
+class ResidenceMissingError(FiscalError):
+	"""Sin la residencia del huésped no se factura (HR-304): la fila espera, «Pending», hasta que recepción la indique
+	(fiscal.events.on_guest_update la vuelve a procesar)."""
+
+
 # ── propiedad y credenciales ─────────────────────────────────────────────────────────────────────────────────────
 def is_uruguay(property: str | None) -> bool:
 	from kamra.localization import property_country
@@ -78,21 +83,25 @@ def _iso(country: str | None) -> str | None:
 
 
 def guest_inputs(res) -> dict:
-	"""guest (para determineIva), residence_assumed, copy_on_file, buyer (para el CFE)."""
+	"""guest (para determineIva), copy_on_file, buyer (para el CFE). La residencia es la del huésped o, sin ella, la
+	declarada al reservar si reside en Uruguay (`model.invoice_residence`); si no hay, ResidenceMissingError: nunca se
+	supone (HR-304)."""
 	g = frappe._dict()
 	if res.get("guest"):
 		g = frappe.db.get_value("Guest", res.guest, ["full_name", "id_type", "id_number", "residence_country",
 		                                             "id_file"], as_dict=True) or frappe._dict()
-	residence = _iso(g.residence_country)
+	residence = model.invoice_residence(_iso(g.residence_country), res.get("uy_declared_residence"))
+	if not residence:
+		raise ResidenceMissingError(texts.RESIDENCE_MISSING)
 	copy = bool((res.get("id_document") and not res.get("id_document_discarded")) or g.id_file)
-	facts, assumed = model.guest_facts(residence, g.id_type, g.id_number, copy)
+	facts = model.guest_facts(residence, g.id_type, g.id_number, copy)
 	doc = model.document(g.id_type, g.id_number, residence)
 	rut, name = None, g.full_name or res.get("guest_name")
 	if res.get("company"):
 		company = frappe.db.get_value("Corporate Account", res.company, ["company_name", "gstin"], as_dict=True)
 		if company and model.valid_rut("".join(ch for ch in (company.gstin or "") if ch.isdigit())):
 			rut, name = company.gstin, company.company_name
-	return {"guest": facts, "residence_assumed": assumed, "copy_on_file": copy,
+	return {"guest": facts, "copy_on_file": copy,
 	        "buyer": model.buyer(name, doc, rut=rut)}
 
 
@@ -361,7 +370,6 @@ def _run_task(task, res, client, core_property) -> None:
 		n = len(_rows(res.name, kind="Original")) + 1
 		created.append({"kind": "Original", "reference_number": model.reference(res.name, n),
 		                "lines_json": json.dumps(plan["supplement"]),
-		                "residence_assumed": int(inputs["residence_assumed"]),
 		                "request_json": json.dumps(model.cfe_request(
 		                    core_property, task.folio or res.name, model.reference(res.name, n), inputs["buyer"],
 		                    currency, fx_rate(res.property, currency), plan["supplement"], _payments(task.folio),
@@ -379,8 +387,7 @@ def _run_task(task, res, client, core_property) -> None:
 	other = _posted_at_other_rate(folios, desired)
 	frappe.db.set_value(DOCTYPE, task.name, {
 		"status": "Done" if created else "Not needed",
-		"error": texts.POSTED_AT_OTHER_RATE.format(count=other) if other else "",
-		"residence_assumed": int(inputs["residence_assumed"])})
+		"error": texts.POSTED_AT_OTHER_RATE.format(count=other) if other else ""})
 
 
 def _send(row, client) -> dict:
@@ -436,6 +443,11 @@ def process_reservation(reservation: str) -> dict:
 			retry = e.retryable or e.status is None
 			_fail(row, e, "Pending" if retry else "Needs attention")
 			out["pending" if retry else "attention"] += 1
+			break
+		except ResidenceMissingError as e:
+			# espera a la residencia, sin pasar a Finanzas: en cuanto recepción la indica, sale sola
+			_fail(row, e, "Pending")
+			out["pending"] += 1
 			break
 		except (FiscalError, ValueError) as e:
 			_fail(row, e, "Needs attention")

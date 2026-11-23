@@ -1294,3 +1294,4 @@ month-end bills for {0},las facturas de cierre de mes de {0}
 Sent {0} to {1} companies.,Se enviaron {0} a {1} empresas.
 Company emails at {0},Correos a empresas en {0}
 "Not sent, see the Error Log: {0}",No enviados (vea el registro de errores): {0}
+This property does not ask where the guest lives.,Esta propiedad no pregunta dónde reside el huésped.

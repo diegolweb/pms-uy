@@ -31,6 +31,9 @@ interface Locale {
   /** "foreign": a minor's ID is kept only for foreign nationals;
    *  "all": the country's register covers every guest. */
   minor_ids: "foreign" | "all"
+  /** The country taxes a stay by where the guest lives (Uruguay): the desk
+   *  asks it at booking and at check-in. */
+  asks_residence?: boolean
   /** Country integrations this property has - India: Razorpay/Cashfree,
    *  GSTR-1, Kamra Verify. Off until the pack resolves. */
   integrations: Integrations

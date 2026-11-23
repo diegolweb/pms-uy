@@ -482,7 +482,8 @@ def _till(property: str) -> dict:
 
 
 def _flow_payload(res, steps, ctx, guest) -> dict:
-	from kamra.localization import front_desk_vocabulary, pack_for
+	from kamra.localization import front_desk_vocabulary, guest_residence, pack_for
+	residence = guest_residence(pack_for(res.property), res.name)
 	return {
 		"reservation": {
 			"name": res.name, "status": res.status,
@@ -521,7 +522,11 @@ def _flow_payload(res, steps, ctx, guest) -> dict:
 		},
 		"vocabulary": front_desk_vocabulary(pack_for(res.property)),
 		"steps": steps,
-		"missing_required": [s["step_key"] for s in hard_missing(steps)],
+		# where the guest lives, where the country taxes by it: the check-in
+		# cannot go on without it there (the pack refuses it)
+		"residence": residence,
+		"missing_required": [s["step_key"] for s in hard_missing(steps)]
+		+ (["residence"] if residence and residence.get("missing") else []),
 		"pending_backfill": [
 			{"step": s["step_key"], "title": s["title"], "tip": s.get("tip") or ""}
 			for s in soft_pending(steps)],
@@ -606,10 +611,12 @@ def save_guest_details(reservation: str, phone: str | None = None,
                        gender: str | None = None,
                        id_expiry_date: str | None = None,
                        address_line: str | None = None,
-                       city: str | None = None):
+                       city: str | None = None,
+                       residence_country: str | None = None):
 	"""Correct the primary guest's contact and ID details at the desk, or
 	keep what an ID scan read. Only what is passed changes; an ID type must
-	be one the country recognises."""
+	be one the country recognises. residence_country: where the guest lives,
+	where the country taxes by it (kamra.localization)."""
 	res = _res(reservation)
 	_open(res)
 	if not res.guest:
@@ -655,6 +662,9 @@ def save_guest_details(reservation: str, phone: str | None = None,
 		from kamra.savings import log_action
 		log_action("guest_details", "Reservation", res.name, res.property,
 		           rationale=f"Desk updated {changed}")
+	if residence_country is not None:
+		from kamra import localization as loc
+		loc.save_residence_country(loc.pack_for(res.property), res.guest, residence_country)
 	return checkin_flow(reservation)
 
 

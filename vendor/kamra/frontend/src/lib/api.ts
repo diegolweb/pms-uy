@@ -544,6 +544,9 @@ export interface QuoteParams {
   voucher_code?: string
   over_capacity_charge?: number
   pets?: number
+  /** where the guest lives, where the country taxes by it (vocabulary
+   *  asks_residence): "1" lives there, "0" does not */
+  tax_resident?: "1" | "0"
 }
 
 export const getQuote = (params: QuoteParams) =>
@@ -1730,8 +1733,23 @@ export const checkOut = (reservation: string) =>
 export const setHousekeepingStatus = (room: string, status: string) =>
   call("kamra.api.set_housekeeping_status", { room, status })
 
+/** Where the guest lives, where the property's country taxes a stay by it
+ *  (kamra.localization guest_residence). */
+export interface TaxResidence {
+  home_country: string
+  /** what was said at booking */
+  declared: "resident" | "non_resident" | null
+  /** the guest's country of residence, once the desk has it */
+  country: string | null
+  /** still before check-in: the booking can take it */
+  can_declare: boolean
+  /** check-in cannot go on without it */
+  missing: boolean
+}
+
 export interface ReservationDetail {
   name: string
+  residence?: TaxResidence | null
   /** set when the stay is one room of a group booking */
   group: { name: string; group_name: string; rooms: number; to_check_in: number } | null
   status: string

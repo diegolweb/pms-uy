@@ -6805,3 +6805,19 @@ Search again,Search again,,Buscar de nuevo,screens/PublicBooking.tsx,,translated
 This booking link is not valid.,This booking link is not valid.,,Este enlace de reserva no es válido.,screens/PublicBooking.tsx,,translated
 First night,First night,,Una noche,screens/BookingEngine.tsx,,translated
 Used when guests pay one night: the stay's total divided by its nights.,Used when guests pay one night: the stay's total divided by its nights.,,Se usa cuando el huésped paga una noche: el total de la estadía dividido por sus noches.,screens/BookingEngine.tsx,,translated
+Ask whether the guest lives in {country}: the tax on the booking depends on it.,Ask whether the guest lives in {country}: the tax on the booking depends on it.,,Pregunte si el huésped reside en {country}: el impuesto de la reserva depende de eso.,components/BookingDialog.tsx,country,translated
+Does the guest live in {country}?,Does the guest live in {country}?,,¿El huésped reside en {country}?,components/BookingDialog.tsx; components/CheckInDialog.tsx,country,translated
+Lives there,Lives there,,Reside allí,components/BookingDialog.tsx; components/CheckInDialog.tsx,,translated
+Lives abroad,Lives abroad,,Reside en otro país,components/BookingDialog.tsx; components/CheckInDialog.tsx; screens/ReservationDetail.tsx,,translated
+The tax on the room nights depends on it. The ID at check-in confirms it.,The tax on the room nights depends on it. The ID at check-in confirms it.,,De eso depende el impuesto de las noches. El documento lo confirma en el check-in.,components/BookingDialog.tsx,,translated
+Residence,Residence,,Residencia,screens/ReservationDetail.tsx,,translated
+Lives in {country},Lives in {country},,Reside en {country},screens/ReservationDetail.tsx,country,translated
+Said at booking: lives in {country},Said at booking: lives in {country},,Declaró al reservar: reside en {country},screens/ReservationDetail.tsx,country,translated
+Said at booking: lives abroad,Said at booking: lives abroad,,Declaró al reservar: reside en otro país,screens/ReservationDetail.tsx,,translated
+Not asked yet,Not asked yet,,Aún no se preguntó,screens/ReservationDetail.tsx,,translated
+Check-in asks for it: the tax on the bill depends on it.,Check-in asks for it: the tax on the bill depends on it.,,El check-in la pide: de eso depende el impuesto de la factura.,screens/ReservationDetail.tsx,,translated
+Pick the country where the guest lives.,Pick the country where the guest lives.,,Elija el país donde reside el huésped.,components/CheckInDialog.tsx,,translated
+Country of residence,Country of residence,,País de residencia,components/CheckInDialog.tsx,,translated
+Check-in needs it: the tax on the bill depends on it.,Check-in needs it: the tax on the bill depends on it.,,El check-in no se hace sin esto: de eso depende el impuesto de la factura.,components/CheckInDialog.tsx,,translated
+Check it against the ID: the tax on the bill depends on it.,Check it against the ID: the tax on the bill depends on it.,,Compruébelo con el documento: de eso depende el impuesto de la factura.,components/CheckInDialog.tsx,,translated
+Ask where the guest lives (guest details) before check-in.,Ask where the guest lives (guest details) before check-in.,,Pregunte dónde reside el huésped (datos del huésped) antes de hacer el check-in.,components/CheckInDialog.tsx,,translated

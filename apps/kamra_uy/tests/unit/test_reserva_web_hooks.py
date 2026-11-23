@@ -61,8 +61,10 @@ def test_los_campos_se_crean_al_instalar_y_en_cada_migrate() -> None:
 def test_el_iva_de_lo_declarado_va_antes_que_el_del_check_in() -> None:
     # la reserva con residencia declarada lleva el IVA de cada noche desde que se crea; en el check-in manda core
     # (fiscal.events) y, después de guardar, residence apunta en la cuenta la diferencia si el documento no coincide
+    # HR-304: antes de todo, en Uruguay el check-in no se hace sin la residencia (require_at_check_in)
     events = _hooks()["doc_events"]["Reservation"]
-    assert events["validate"] == ["kamra_uy.booking.residence.on_reservation_validate",
+    assert events["validate"] == ["kamra_uy.booking.residence.require_at_check_in",
+                                  "kamra_uy.booking.residence.on_reservation_validate",
                                   "kamra_uy.fiscal.events.on_reservation_validate"]
     assert events["on_update"][-1] == "kamra_uy.booking.residence.on_reservation_update"
 

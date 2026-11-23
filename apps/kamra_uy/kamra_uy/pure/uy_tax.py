@@ -117,3 +117,62 @@ def iva_of_nights(nights: dict, rates: dict) -> Decimal:
 	total = sum((Decimal(str(amount)) * Decimal(str(rates.get(day) or 0)) / 100 for day, amount in nights.items()),
 	            Decimal(0))
 	return total.quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+# ── la cotización de recepción (HR-304) ──────────────────────────────────────────────────────────────────────────
+def _money(value) -> Decimal:
+	return Decimal(str(value or 0)).quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def quote_nights(nightly: list[dict], room_total) -> dict[str, Decimal]:
+	"""{AAAA-MM-DD: importe} de cada noche como la guarda la reserva que se crea con esa cotización
+	(kamra Reservation.quote_night_rows): un plan de tarifa reparte el total de habitación entre las noches y la última
+	se queda el redondeo."""
+	free = sum((Decimal(str(n["rate"])) for n in nightly), Decimal(0))
+	factor = Decimal(str(room_total or 0)) / free if free else Decimal(1)
+	out: dict[str, Decimal] = {}
+	running = Decimal(0)
+	for i, n in enumerate(nightly):
+		amount = _money(Decimal(str(n["rate"])) * factor)
+		if i == len(nightly) - 1 and free:
+			amount = _money(Decimal(str(room_total or 0)) - running)
+		running += amount
+		out[str(n["date"])] = amount
+	return out
+
+
+def quote_with_rates(quote: dict, rates: dict) -> dict:
+	"""La cotización de Kamra (kamra.pricing.quote) con el IVA de cada noche de `rates` ({fecha: tasa}, de
+	booking_room_rates), como lo deja la reserva al crearse (kamra_uy.booking.residence.apply): la diferencia de cada
+	noche, importe × (tasa − la suya) / 100, entra en el IVA, el total, la seña y la línea de la habitación. Devuelve
+	una copia: la cotización que llega no se toca."""
+	out = {**quote, "nightly": [dict(n) for n in quote.get("nightly") or []]}
+	nights = quote_nights(out["nightly"], quote.get("room_total"))
+	delta = Decimal(0)
+	for n in out["nightly"]:
+		rate = rates.get(str(n["date"]))
+		if rate is None:
+			continue
+		delta += nights[str(n["date"])] * (Decimal(str(rate)) - Decimal(str(n.get("gst_rate") or 0))) / 100
+		n["gst_rate"] = float(rate)
+	delta = _money(delta)
+	base = Decimal(str(quote.get("amount_before_tax") or 0))
+	tax = _money(quote.get("tax_amount")) + delta
+	total = _money(base + tax)
+	out.update(tax_amount=float(tax), amount_after_tax=float(total),
+	           tax_percent=round(float(tax / base * 100), 2) if base else 0.0)
+	if quote.get("totals"):
+		out["totals"] = {**quote["totals"], "tax": float(tax), "total": float(total)}
+	if quote.get("advance"):
+		pct = Decimal(str(quote["advance"].get("percent") or 0))
+		out["advance"] = {**quote["advance"], "amount": float(_money(total * pct / 100))}
+	if quote.get("line_items"):
+		items = [dict(item) for item in quote["line_items"]]
+		room = next((item for item in items if item.get("component") == "accommodation"), None)
+		if room is not None:
+			room_tax = _money(room.get("tax_amount")) + delta
+			room_amount = Decimal(str(room.get("amount") or 0))
+			room.update(tax_amount=float(room_tax),
+			            tax_rate=round(float(room_tax / room_amount * 100), 2) if room_amount else 0.0)
+		out["line_items"] = items
+	return out

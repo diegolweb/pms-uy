@@ -59,7 +59,8 @@ scheduler_events = {
 # El IVA del residente al reservar (HR-266, D-HR-47): la reserva web guarda la residencia declarada (before_insert) y
 # lleva desde que se crea el IVA de cada noche que facturará core (validate, antes que el de fiscal, que manda en el
 # check-in); al entrar en casa, si el documento no coincide, la cuenta apunta la diferencia (on_update)
-# (kamra_uy/booking/residence.py).
+# (kamra_uy/booking/residence.py). HR-304: en Uruguay el check-in no se hace sin la residencia del huésped
+# (require_at_check_in, el primero del validate): la factura sale en el check-in y nunca la supone.
 doc_events = {
 	"Reservation": {
 		"before_insert": [
@@ -68,6 +69,7 @@ doc_events = {
 		],
 		"after_insert": "kamra_uy.contingency.alerts.on_reservation_change",
 		"validate": [
+			"kamra_uy.booking.residence.require_at_check_in",
 			"kamra_uy.booking.residence.on_reservation_validate",
 			"kamra_uy.fiscal.events.on_reservation_validate",
 		],

@@ -41,7 +41,9 @@ def invoice_print_block(source_doctype: str, source_name: str, number: str | Non
 	rows = _documents(folio.reservation, folio.name)
 	tasks = frappe.get_all(connector.DOCTYPE, filters={"reservation": folio.reservation, "kind": "Reconcile",
 	                                                   "status": ["in", ["Pending", "Needs attention"]]},
-	                       pluck="name") if folio.reservation else []
+	                       fields=["name", "error"]) if folio.reservation else []
+	# HR-304: el que espera a la residencia del huésped lo dice, no «el servicio no respondió»
+	residence = any((t.error or "") == texts.RESIDENCE_MISSING for t in tasks)
 	if not rows and not tasks:
 		return None
 	rut = _issuer_rut(folio.property)
@@ -54,7 +56,8 @@ def invoice_print_block(source_doctype: str, source_name: str, number: str | Non
 		"documents": documents,
 		"contingency": waiting,
 		"needs_attention": attention,
-		"status_text": model.STATUS_TEXTS["pending"] if tasks or not documents else (
+		"residence_missing": residence,
+		"status_text": texts.RESIDENCE_MISSING if residence else model.STATUS_TEXTS["pending"] if tasks or not documents else (
 			next((d["status_text"] for d in documents if d["status_text"]), "")),
 	}
 
@@ -64,25 +67,27 @@ def invoice_print_block(source_doctype: str, source_name: str, number: str | Non
 def folio_cfe(folio: str):
 	frappe.get_doc("Folio", folio).check_permission("read")
 	return invoice_print_block("Folio", folio) or {"kind": "uy_cfe", "documents": [], "contingency": False,
-	                                              "needs_attention": False, "status_text": ""}
+	                                              "needs_attention": False, "residence_missing": False,
+	                                              "status_text": ""}
 
 
 @frappe.whitelist(methods=["GET"])
 @require_roles(*DESK)
 def preview(reservation: str):
-	"""Qué IVA llevaría cada noche si el check-in fuera ahora (no guarda nada)."""
+	"""Qué IVA llevaría cada noche si el check-in fuera ahora (no guarda nada). Sin la residencia del huésped no hay
+	noches que enseñar: `residence_missing` y el aviso (HR-304: nunca se supone)."""
 	res = frappe.get_doc("Reservation", reservation)
 	res.check_permission("read")
-	out = connector.adjust_iva(res)
-	warnings = []
-	if out["residence_assumed"]:
-		warnings.append(texts.RESIDENCE_MISSING)
-	if not out["copy_on_file"]:
-		warnings.append(texts.COPY_MISSING)
+	try:
+		out = connector.adjust_iva(res)
+	except connector.ResidenceMissingError:
+		return {"nights": [], "residence_country": None, "residence_missing": True, "copy_on_file": None,
+		        "buyer_type": None, "warnings": [texts.RESIDENCE_MISSING]}
+	warnings = [] if out["copy_on_file"] else [texts.COPY_MISSING]
 	return {"nights": [{"date": ln["date"], "kind": ln["kind"], "amount": ln["amount"], "rate": ln["rate"],
 	                    "reason_code": ln["reason_code"], "pending_accountant": ln["pending_accountant"]}
 	                   for ln in out["lines"]],
-	        "residence_country": out["guest"]["residence_country"], "residence_assumed": out["residence_assumed"],
+	        "residence_country": out["guest"]["residence_country"], "residence_missing": False,
 	        "copy_on_file": out["copy_on_file"], "buyer_type": out["buyer"]["type"], "warnings": warnings}
 
 
@@ -113,15 +118,21 @@ def retry(name: str):
 
 
 @frappe.whitelist(methods=["POST"])
-@require_roles(*FINANCE, scope={"name": "UY CFE"})
+@require_roles(*DESK, scope={"name": "UY CFE"})
 def record_manual(name: str, via: str, type_code: int, serie: str, number: str, issued_at: str,
                   cae_id: str | None = None, security_code: str | None = None, note: str | None = None):
-	"""El CFE se hizo a mano (papel o portal de la DGI): core deja de intentarlo y Kamra guarda su serie y número."""
+	"""El CFE se hizo a mano (portal de Factura Express o papel): core deja de intentarlo y Kamra guarda su serie y
+	número. Lo hace recepción desde /facturas (HR-304), para que al conectar Gsoft no salga dos veces."""
 	row = _row(name)
 	if row.kind == "Reconcile" or not row.core_cfe_id:
-		frappe.throw("Este CFE todavía no está en el servicio de facturación.")
-	body = {"via": via, "type_code": int(type_code), "serie": serie, "number": str(number), "issued_at": issued_at}
-	body.update({k: v for k, v in {"cae_id": cae_id, "security_code": security_code, "note": note}.items() if v})
+		frappe.throw(texts.NOT_IN_CORE_YET)
+	if not model.is_pending(row):
+		frappe.throw(texts.ALREADY_ISSUED)
+	try:
+		body = model.manual_issue(row.cfe_type, via, type_code, serie, number, issued_at, note)
+	except ValueError as e:
+		frappe.throw(str(e))
+	body.update({k: v for k, v in {"cae_id": cae_id, "security_code": security_code}.items() if v})
 	_, client = connector.client_for(row.property)
 	cfe = client.post(f"/v1/fiscal/cfe/{row.core_cfe_id}/manual-issue", body,
 	                  idempotency_key=model.idempotency_key(frappe.local.site, f"{name}:manual"))
@@ -129,3 +140,36 @@ def record_manual(name: str, via: str, type_code: int, serie: str, number: str, 
 	frappe.db.set_value(connector.DOCTYPE, name, "request_json",
 	                    json.dumps({**json.loads(row.request_json or "{}"), "manual": body}))
 	return model.cfe_fields(cfe)
+
+
+def pending(property: str, day: str | None = None) -> dict:
+	"""Lo que /facturas enseña de una propiedad (HR-304): los CFE sin emitir (`model.is_pending`; con
+	`day`, solo los pedidos ese día, la lista del día para el portal) con lo que hay que copiar en el portal, y las
+	reservas cuyo comprobante espera a la residencia del huésped."""
+	rows = frappe.get_all(connector.DOCTYPE, filters={"property": property, "kind": ["!=", "Reconcile"]},
+	                      fields=["name", "kind", "status", "core_status", "reservation", "cfe_type", "currency",
+	                              "total", "lines_json", "core_cfe_id", "contingency_since", "overdue", "error",
+	                              "creation", "reference_number", "request_json"],
+	                      order_by="creation asc, name asc")
+	rows = [r for r in rows if model.is_pending(r) and (not day or str(r.creation)[:10] == day)]
+	guests = dict(frappe.get_all("Reservation", filters={"name": ["in", [r.reservation for r in rows] or [""]]},
+	                             fields=["name", "guest_name"], as_list=True))
+	items = []
+	for r in rows:
+		request = json.loads(r.request_json or "{}")
+		items.append({
+			"name": r.name, "reservation": r.reservation, "guest_name": guests.get(r.reservation) or "",
+			"kind": r.kind, "title": model.TYPE_TITLES.get(r.cfe_type or "", texts.TYPE_PENDING),
+			"currency": r.currency or request.get("currency") or "", "total": r.total or "",
+			"created": str(r.creation)[:16], "buyer": request.get("buyer") or {},
+			"lines": [{"description": ln.get("description"), "amount": ln.get("unit_amount") or ln.get("amount"),
+			           "rate": ln.get("rate")}
+			          for ln in json.loads(r.lines_json or "[]")],
+			"in_core": bool(r.core_cfe_id), "overdue": bool(r.overdue),
+			"state": texts.NOT_IN_CORE_YET if not r.core_cfe_id else model.STATUS_TEXTS.get(r.core_status or "", ""),
+			"codes": model.type_codes(r.cfe_type),
+		})
+	waiting = frappe.get_all(connector.DOCTYPE, filters={"property": property, "kind": "Reconcile", "status": "Pending",
+	                                                     "error": texts.RESIDENCE_MISSING},
+	                         fields=["reservation"], distinct=True, pluck="reservation")
+	return {"items": items, "residence_missing": sorted(set(waiting))}

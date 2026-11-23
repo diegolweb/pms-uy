@@ -256,7 +256,69 @@ def front_desk_vocabulary(pack) -> dict:
 		"default_nationality": getattr(pack, "DEFAULT_NATIONALITY", "") or "",
 		"adult_age": adult_age(pack),
 		"minor_ids": minor_ids(pack),
+		"asks_residence": asks_residence(pack),
 	}
+
+
+# ── where the guest lives, for tax ───────────────────────────────────────
+#
+# Some countries tax a stay by where the guest LIVES, not by nationality:
+# in Uruguay a non-resident's room nights carry no VAT, a resident's do in
+# high season. A pack like that asks the desk, and keeps the answer itself
+# (its own fields). It implements all five:
+#
+#   guest_residence(reservation) -> dict | None   what the desk sees:
+#       {"home_country": "Uruguay",
+#        "declared": "resident" | "non_resident" | None,   said at booking
+#        "country": "<Country>" | None,    the guest's country of residence
+#        "can_declare": bool,              still before check-in
+#        "missing": bool}                  check-in cannot go on without it
+#   declare_residence(reservation, resident: bool)    an existing booking
+#   residence_on_new_booking(doc, resident: bool)     a booking being made
+#   quote_residence(quote, resident: bool, inputs) -> quote    (get_quote)
+#   save_residence_country(guest, country)            at check-in
+#
+# A pack without them never asks: the desk screens show nothing.
+
+def asks_residence(pack) -> bool:
+	return callable(getattr(pack, "guest_residence", None))
+
+
+def guest_residence(pack, reservation: str):
+	return pack.guest_residence(reservation) if asks_residence(pack) else None
+
+
+def _resident(value) -> bool | None:
+	""""1" / "0" (or a bool) from the desk; anything else is no answer."""
+	if isinstance(value, bool):
+		return value
+	value = str(value if value is not None else "").strip()
+	return {"1": True, "0": False}.get(value)
+
+
+def declare_residence(pack, reservation: str, tax_resident) -> None:
+	resident = _resident(tax_resident)
+	if not asks_residence(pack) or resident is None:
+		frappe.throw(frappe._("This property does not ask where the guest lives."))
+	pack.declare_residence(reservation, resident)
+
+
+def residence_on_new_booking(pack, doc, tax_resident) -> None:
+	resident = _resident(tax_resident)
+	if asks_residence(pack) and resident is not None:
+		pack.residence_on_new_booking(doc, resident)
+
+
+def quote_residence(pack, quote, tax_resident, inputs: dict):
+	resident = _resident(tax_resident)
+	if not asks_residence(pack) or resident is None:
+		return quote
+	return pack.quote_residence(quote, resident, inputs)
+
+
+def save_residence_country(pack, guest: str, country: str) -> None:
+	if asks_residence(pack) and (country or "").strip():
+		pack.save_residence_country(guest, country)
 
 
 def financial_year_start(pack, d) -> date:

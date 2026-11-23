@@ -151,6 +151,8 @@ export function BookingDialog(props: {
   const [form, setForm] = useState({
     guest_name: props.initial.guest_name ?? "",
     phone: props.initial.phone ?? "",
+    // where the guest lives, where the country taxes by it: "" not asked yet
+    tax_resident: "" as "" | "1" | "0",
     room_type: props.initial.room_type ?? "",
     check_in_date: props.initial.date ?? todayLocal(),
     nights: props.initial.stays ?? 1,
@@ -473,6 +475,7 @@ export function BookingDialog(props: {
         voucher_code: form.voucher_code || undefined,
         over_capacity_charge: extraCharge || undefined,
         pets: form.pets || undefined,
+        tax_resident: form.tax_resident || undefined,
       })
         .then((q) => {
           setQuote(q)
@@ -501,6 +504,7 @@ export function BookingDialog(props: {
     form.over_capacity_charge,
     form.over_capacity_guests,
     form.pets,
+    form.tax_resident,
     checkOut,
   ])
 
@@ -523,13 +527,14 @@ export function BookingDialog(props: {
                 meal_plan: r.meal_plan || undefined,
                 rate_plan: form.rate_plan || undefined,
                 company: form.company || undefined,
+                tax_resident: form.tax_resident || undefined,
               }).catch(() => null)
             : Promise.resolve(null),
         ),
       ).then(setMoreQuotes)
     }, 300)
     return () => clearTimeout(t)
-  }, [moreRooms, form.check_in_date, checkOut, form.rate_plan, form.company])
+  }, [moreRooms, form.check_in_date, checkOut, form.rate_plan, form.company, form.tax_resident])
 
   // walk-in: the actual rooms free tonight, clean ones first
   useEffect(() => {
@@ -588,6 +593,12 @@ export function BookingDialog(props: {
   }
 
   async function submit(waitlist = false) {
+    if (loc.asks_residence && !form.tax_resident) {
+      setError(t("Ask whether the guest lives in {country}: the tax on the booking depends on it.", {
+        country: options?.property?.country ?? "",
+      }))
+      return
+    }
     setBusy(true)
     setError(null)
     try {
@@ -1230,6 +1241,36 @@ export function BookingDialog(props: {
                     />
                   </Field>
                 </div>
+                {loc.asks_residence && !walkIn && (
+                  <Field label={t("Does the guest live in {country}?", { country: options?.property?.country ?? "" })}>
+                    <div className="flex gap-2" role="radiogroup" data-testid="tax-resident">
+                      {(
+                        [
+                          ["1", t("Lives there")],
+                          ["0", t("Lives abroad")],
+                        ] as const
+                      ).map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          role="radio"
+                          aria-checked={form.tax_resident === value}
+                          onClick={() => set("tax_resident", value)}
+                          className={`rounded-lg border px-3 py-1.5 text-sm ${
+                            form.tax_resident === value
+                              ? "border-brand-600 bg-brand-50 font-medium text-brand-800"
+                              : "border-zinc-300 bg-white text-zinc-700"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {t("The tax on the room nights depends on it. The ID at check-in confirms it.")}
+                    </p>
+                  </Field>
+                )}
                 <Field label={t("Others staying (optional)")}>
                   <input
                     className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm"

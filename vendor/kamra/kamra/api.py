@@ -4479,11 +4479,14 @@ def reservation_detail(reservation: str):
 				"group_booking": res.group_booking, "status": "Confirmed"}),
 		}
 
+	from kamra import localization as loc
 	return {
 		"name": res.name,
 		"group": group,
 		"status": res.status,
 		"source": res.source,
+		# where the guest lives, when the country taxes by it (None if not)
+		"residence": loc.guest_residence(loc.pack_for(res.property), res.name),
 		"channel": res.channel,
 		"booking_type": res.booking_type,
 		"property": res.property,
@@ -4567,6 +4570,21 @@ def reservation_detail(reservation: str):
 		},
 		"checkin_backfill": _checkin_backfill(res),
 	}
+
+
+@frappe.whitelist(methods=["POST"])
+@require_roles("Front Desk", "Hotel Admin")
+def declare_residence(reservation: str, tax_resident=None):
+	"""Where the guest lives, said before check-in (a phone booking, or one
+	from an OTA), where the property's country taxes by it: tax_resident "1"
+	lives there, "0" does not. The booking reprices its nights with it."""
+	from kamra import localization as loc
+	prop = frappe.db.get_value("Reservation", reservation, "property")
+	if not prop:
+		frappe.throw(_("Reservation {0} not found.").format(reservation))
+	pack = loc.pack_for(prop)
+	loc.declare_residence(pack, reservation, tax_resident)
+	return loc.guest_residence(pack, reservation)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -6734,10 +6752,13 @@ def get_quote(property: str, room_type: str, check_in_date: str,
               over_capacity_charge: float = 0, pets: int = 0,
               company: str | None = None,
               check_in_time: str | None = None,
-              check_out_time: str | None = None):
+              check_out_time: str | None = None,
+              tax_resident=None):
 	"""Price a stay. With a company and no rate plan, the company's
 	negotiated plan applies - the same plan create_booking stores.
-	check_in_time / check_out_time price an hourly or block day-use plan."""
+	check_in_time / check_out_time price an hourly or block day-use plan.
+	tax_resident ("1" / "0"): where the guest lives, where the country
+	taxes by it (kamra.localization.quote_residence)."""
 	from kamra.booking_refs import (resolve_meal_plan, resolve_rate_plan,
 	                                resolve_room_type)
 	from kamra.pricing import quote
@@ -6757,6 +6778,11 @@ def get_quote(property: str, room_type: str, check_in_date: str,
 	if isinstance(q, dict):
 		q["cancellation"] = cancellation_outlook(
 			property, room_type, check_in_date, check_out_date)
+		from kamra import localization as loc
+		q = loc.quote_residence(loc.pack_for(property), q, tax_resident, {
+			"property": property, "room_type": room_type,
+			"check_in_date": check_in_date, "check_out_date": check_out_date,
+			"company": company or None})
 	return q
 
 
@@ -7123,7 +7149,8 @@ def create_booking(property: str, room_type: str, check_in_date: str,
                    ota_total: float = 0,
                    ota_commission_pct: float | None = None,
                    marketing_consent: int = 0,
-                   market_segment: str | None = None):
+                   market_segment: str | None = None,
+                   tax_resident=None):
 	"""One-call booking: attach to an existing guest profile when given,
 	else reuse a profile whose phone and full name both match (a
 	blacklisted phone always resolves to its profile) / create one.
@@ -7145,7 +7172,11 @@ def create_booking(property: str, room_type: str, check_in_date: str,
 	A stay billed to a company on credit runs the property's credit control
 	(kamra.credit) for its amount: a warning comes back as `credit_warning`;
 	a block refuses (CREDIT_BLOCKED) unless Finance or a Hotel Admin passes
-	`credit_override_reason`, which is logged. Agents can't override."""
+	`credit_override_reason`, which is logged. Agents can't override.
+
+	tax_resident ("1" / "0"): where the guest lives, asked on the phone
+	where the country taxes by it; the booking is priced with it
+	(kamra.localization.residence_on_new_booking)."""
 	from kamra.crs import assert_property_access
 	from kamra.kamra.doctype.reservation.reservation import lock_property_for_inventory
 	from kamra.reservation_state import find_by_idempotency, lock_sius_for_booking
@@ -7404,6 +7435,8 @@ def create_booking(property: str, room_type: str, check_in_date: str,
 	               and credit_policy(property) != "off")
 	# Concurrent bookings race on tabSeries (RES-YYYY-#####); retry instead
 	# of returning HTTP 500 QueryDeadlockError (#344).
+	from kamra import localization as loc
+	loc.residence_on_new_booking(loc.pack_for(property), doc, tax_resident)
 	credit = None
 	for attempt in (1, 2, 3):
 		try:

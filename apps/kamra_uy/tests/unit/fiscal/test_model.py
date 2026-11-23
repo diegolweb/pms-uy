@@ -11,19 +11,32 @@ from kamra_uy.fiscal import model
 
 # ── residencia y documento ────────────────────────────────────────────────────────────────────────────────────────
 def test_a_foreign_resident_with_the_copy_goes_as_non_resident_with_document() -> None:
-    guest, assumed = model.guest_facts("AR", "DNI", "30111222", copy_on_file=True)
+    guest = model.guest_facts("AR", "DNI", "30111222", copy_on_file=True)
     assert guest == {"residence_country": "AR", "document": {"type": "dni", "country": "AR", "copy_on_file": True}}
-    assert assumed is False
 
 
-def test_without_residence_the_guest_is_taken_as_resident_and_it_is_flagged() -> None:
-    guest, assumed = model.guest_facts(None, "Passport", "X123", copy_on_file=True)
-    assert guest["residence_country"] == "UY"
-    assert assumed is True
+@pytest.mark.parametrize("residence", [None, "", "  "])
+def test_without_residence_nothing_is_assumed(residence) -> None:
+    # HR-304: antes se tomaba Uruguay (10 % al extranjero en alta temporada); ahora no se factura sin ella
+    with pytest.raises(model.ResidenceMissing):
+        model.guest_facts(residence, "Passport", "X123", copy_on_file=True)
+
+
+@pytest.mark.parametrize(("country", "declared", "expected"), [
+    ("AR", None, "AR"),
+    ("ar ", "Reside en Uruguay", "AR"),  # el país del huésped (el del documento, en el check-in) manda
+    (None, "Reside en Uruguay", "UY"),  # lo declaró él al reservar: no es suponer
+    ("", "Reside en Uruguay", "UY"),
+    (None, "No reside en Uruguay", None),  # sabemos que no reside, pero no dónde: el check-in pide el país
+    (None, None, None),
+    (None, "", None),
+])
+def test_invoice_residence(country, declared, expected) -> None:
+    assert model.invoice_residence(country, declared) == expected
 
 
 def test_a_guest_without_document_number_goes_without_document() -> None:
-    guest, _ = model.guest_facts("BR", "RG", "", copy_on_file=False)
+    guest = model.guest_facts("BR", "RG", "", copy_on_file=False)
     assert guest == {"residence_country": "BR"}
 
 
@@ -323,3 +336,56 @@ def test_a_cfe_in_contingency_prints_that_it_is_pending() -> None:
 def test_a_credit_note_has_its_own_title() -> None:
     assert model.print_block({**model.cfe_fields(CFE), "cfe_type": "nc-e-ticket"}, None)["title"] == (
         "Nota de crédito de e-Ticket")
+
+
+def test_lo_declarado_es_el_valor_del_campo_de_la_reserva() -> None:
+    from kamra_uy.pure import uy_tax
+
+    assert model.DECLARED_RESIDENT == uy_tax.RESIDENT
+
+
+# ── HR-304: las facturas pendientes que recepción registra a mano (portal de Factura Express o papel) ──────────────
+@pytest.mark.parametrize(("row", "expected"), [
+    ({"kind": "Original", "status": "Sent", "core_status": "contingency"}, True),
+    ({"kind": "Credit note", "status": "Sent", "core_status": "queued"}, True),
+    ({"kind": "Original", "status": "Pending", "core_status": None}, True),  # aún no llegó a core
+    ({"kind": "Original", "status": "Needs attention", "core_status": ""}, True),
+    ({"kind": "Original", "status": "Sent", "core_status": "issued"}, False),
+    ({"kind": "Original", "status": "Sent", "core_status": "rejected"}, False),
+    ({"kind": "Reconcile", "status": "Pending", "core_status": None}, False),
+])
+def test_is_pending(row, expected) -> None:
+    assert model.is_pending(row) is expected
+
+
+def test_type_codes_are_the_electronic_and_the_contingency_one() -> None:
+    assert model.type_codes("e-ticket") == [101, 201]
+    assert model.type_codes("nc-e-factura") == [112, 212]
+    assert model.type_codes(None) == [101, 201, 102, 202, 111, 211, 112, 212]
+
+
+def test_manual_issue_builds_the_body_of_manual_issue() -> None:
+    body = model.manual_issue("e-ticket", via="portal", type_code="201", serie=" a ", number="0001234",
+                              issued_at="2026-12-07T10:30", note="  Portal de Factura Express ")
+    assert body == {"via": "portal", "type_code": 201, "serie": "A", "number": "1234",
+                    "issued_at": "2026-12-07T10:30:00-03:00", "note": "Portal de Factura Express"}
+    assert model.manual_issue("e-factura", via="paper", type_code=111, serie="AB", number="7",
+                              issued_at="2026-12-07T10:30:00-03:00")["issued_at"] == "2026-12-07T10:30:00-03:00"
+
+
+@pytest.mark.parametrize(("fields", "fragment"), [
+    ({"via": "email"}, "portal o papel"),
+    ({"type_code": "111"}, "101 o 201"),
+    ({"type_code": "x"}, "101 o 201"),
+    ({"serie": ""}, "serie"),
+    ({"serie": "A1"}, "serie"),
+    ({"number": ""}, "número"),
+    ({"number": "12a"}, "número"),
+    ({"number": "12345678"}, "número"),
+    ({"issued_at": "07/12/2026"}, "fecha"),
+    ({"issued_at": ""}, "fecha"),
+])
+def test_manual_issue_rejects_what_core_would_not_take(fields, fragment) -> None:
+    base = {"via": "portal", "type_code": "101", "serie": "A", "number": "1", "issued_at": "2026-12-07T10:30"}
+    with pytest.raises(ValueError, match=fragment):
+        model.manual_issue("e-ticket", **{**base, **fields})

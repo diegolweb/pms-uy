@@ -15,7 +15,8 @@ from unittest.mock import patch
 
 import frappe
 from frappe.utils import getdate, nowdate
-from kamra.tests.audit_fixtures import AuditTestCase, d, make_property, make_reservation, make_room, make_room_type
+from kamra.tests.audit_fixtures import (AuditTestCase, d, make_guest, make_property, make_reservation, make_room,
+                                        make_room_type)
 
 from kamra_uy.booking import residence
 from kamra_uy.fiscal import connector
@@ -249,8 +250,10 @@ class TestResidence(AuditTestCase):
 	# --- el check-in: solo la diferencia, si el documento contradice lo declarado ---
 
 	def check_in(self, declared: str, core_rate: float):
-		"""Una reserva web de hoy a pasado mañana con lo declarado; en el check-in, core contesta `core_rate` por noche."""
-		res = make_reservation(PROP, self.rt, d(0), d(2), room=self.room, source="Website",
+		"""Una reserva web de hoy a pasado mañana con lo declarado; en el check-in, core contesta `core_rate` por noche.
+		El huésped tiene el país de residencia que dice su documento (HR-304: sin él no hay check-in)."""
+		guest = make_guest("UT Huésped Residencia", residence_country="Uruguay" if core_rate else "Argentina")
+		res = make_reservation(PROP, self.rt, d(0), d(2), room=self.room, source="Website", guest=guest,
 		                       **{residence.FIELD: declared})
 
 		def fake_core(doc, timeout=None):
@@ -292,3 +295,128 @@ class TestResidence(AuditTestCase):
 		self.assertEqual(len(notes), 1, notes)
 		self.assertIn(residence.REFUND_WORD, notes[0])
 		self.assertIn("20", notes[0])
+
+
+
+class TestResidenceAtTheDesk(AuditTestCase):
+	"""HR-304: recepción ve y marca la residencia (al reservar por teléfono, en una reserva de plataforma y en el
+	check-in), su cotización lleva el 10 % del residente como la web, y el check-in no se hace sin ella."""
+
+	properties = (PROP,)
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		residence.ensure_fields()
+
+	def setUp(self):
+		super().setUp()
+		make_property(PROP, country="Uruguay", currency="USD", uy_iva_room_pct=10, uy_iva_standard_pct=22,
+		              advance_percent=0, registration_fee=0, cleaning_fee=0)
+		self.rt = make_room_type(PROP, "RES", base_price=100, adults_capacity=2)
+		self.room = make_room(PROP, self.rt, "R101")
+		for number in ("R102", "R103"):  # la reserva por teléfono hace tres en las mismas fechas
+			make_room(PROP, self.rt, number)
+		self.high = _future(11, 13)  # 3 noches sin IVA y 3 con él desde el 16 de noviembre
+
+	def quote(self, resident):
+		from kamra import api
+
+		return api.get_quote(property=PROP, room_type=self.rt, check_in_date=str(self.high),
+		                     check_out_date=str(self.high + timedelta(days=6)), adults=2, tax_resident=resident)
+
+	def booking(self, resident, **kw):
+		from kamra import api
+
+		out = api.create_booking(property=PROP, room_type=self.rt, check_in_date=str(self.high),
+		                         check_out_date=str(self.high + timedelta(days=6)), guest_name="UT Teléfono Residencia",
+		                         phone=f"+5989963{uuid.uuid4().int % 10000:04d}", adults=2, tax_resident=resident,
+		                         **kw)
+		return frappe.get_doc("Reservation", out["reservation"])
+
+	def rates(self, res) -> list[float]:
+		return [float(r.gst_rate) for r in sorted(res.night_rates, key=lambda r: str(r.stay_date))]
+
+	# --- la reserva por teléfono ---
+
+	def test_la_cotizacion_de_recepcion_lleva_el_10_del_residente_como_la_web(self):
+		plain, resident, foreign = self.quote(None), self.quote("1"), self.quote("0")
+		self.assertNotIn("residence", plain)
+		self.assertAlmostEqual(float(resident["tax_amount"]) - float(plain["tax_amount"]), 30.0, places=2)
+		self.assertEqual([n["gst_rate"] for n in resident["nightly"]], [0.0, 0.0, 0.0, 10.0, 10.0, 10.0])
+		self.assertEqual(resident["residence"], "resident")
+		self.assertAlmostEqual(float(foreign["amount_after_tax"]), float(plain["amount_after_tax"]), places=2)
+		self.assertEqual(foreign["residence"], "non_resident")
+
+	def test_la_reserva_por_telefono_nace_con_lo_declarado_y_cobra_lo_cotizado(self):
+		res = self.booking("1")
+		self.assertEqual(res.get(residence.FIELD), uy_tax.RESIDENT)
+		self.assertEqual(self.rates(res), [0.0, 0.0, 0.0, 10.0, 10.0, 10.0])
+		self.assertAlmostEqual(float(res.amount_after_tax), float(self.quote("1")["amount_after_tax"]), places=2)
+		self.assertEqual(self.booking("0").get(residence.FIELD), uy_tax.NON_RESIDENT)
+		self.assertFalse(self.booking(None).get(residence.FIELD))
+
+	# --- una reserva ya hecha (la de una plataforma) ---
+
+	def test_recepcion_declara_la_residencia_de_una_reserva_de_plataforma(self):
+		from kamra import api
+
+		res = make_reservation(PROP, self.rt, str(self.high), str(self.high + timedelta(days=6)), room=self.room,
+		                       source="OTA")
+		seen = api.reservation_detail(res.name)["residence"]
+		self.assertEqual(seen, {"home_country": "Uruguay", "declared": None, "country": None, "can_declare": True,
+		                        "missing": True})
+		out = api.declare_residence(res.name, "1")
+		self.assertEqual(out["declared"], "resident")
+		self.assertFalse(out["missing"])
+		self.assertEqual(self.rates(frappe.get_doc("Reservation", res.name)), [0.0, 0.0, 0.0, 10.0, 10.0, 10.0])
+		api.declare_residence(res.name, "0")
+		self.assertEqual(set(self.rates(frappe.get_doc("Reservation", res.name))), {0.0})
+		with self.assertRaises(frappe.ValidationError):
+			api.declare_residence(res.name, "sí")
+
+	def test_con_el_huesped_en_casa_ya_no_se_declara_en_la_reserva(self):
+		from kamra import api
+
+		guest = make_guest("UT En Casa", residence_country="Argentina")
+		res = make_reservation(PROP, self.rt, d(0), d(2), room=self.room, status="Checked In", guest=guest)
+		self.assertFalse(api.reservation_detail(res.name)["residence"]["can_declare"])
+		with self.assertRaises(frappe.ValidationError):
+			api.declare_residence(res.name, "1")
+
+	# --- el check-in ---
+
+	def check_in(self, guest=None, **fields):
+		# una habitación propia en cada llamada: un check-in rechazado deja su reserva en esas fechas
+		room = make_room(PROP, self.rt, f"C{uuid.uuid4().hex[:5]}")
+		res = make_reservation(PROP, self.rt, d(0), d(2), room=room, guest=guest, **fields)
+		res.status = "Checked In"
+		with patch.object(connector, "adjust_iva", return_value={}):
+			res.save(ignore_permissions=True)
+		return res
+
+	def test_sin_residencia_no_hay_check_in(self):
+		for fields in ({}, {residence.FIELD: uy_tax.NON_RESIDENT}):
+			with self.assertRaises(residence.ResidenceRequiredError) as cm:
+				self.check_in(make_guest("UT Sin País"), **fields)
+			self.assertEqual(str(cm.exception), residence.CHECK_IN_NEEDS)
+
+	def test_con_la_residencia_declarada_o_el_pais_del_huesped_si(self):
+		self.assertEqual(self.check_in(make_guest("UT Declaró"), **{residence.FIELD: uy_tax.RESIDENT}).status,
+		                 "Checked In")
+		self.assertEqual(self.check_in(make_guest("UT Con País", residence_country="Brazil")).status, "Checked In")
+
+	def test_el_flujo_del_check_in_la_pide_y_la_guarda_en_el_huesped(self):
+		from kamra import checkin
+
+		guest = make_guest("UT Flujo Residencia")
+		res = make_reservation(PROP, self.rt, d(0), d(2), room=self.room, guest=guest)
+		flow = checkin.checkin_flow(res.name)
+		self.assertIn("residence", flow["missing_required"])
+		self.assertTrue(flow["vocabulary"]["asks_residence"])
+		flow = checkin.save_guest_details(res.name, residence_country="ar")
+		self.assertEqual(frappe.db.get_value("Guest", guest, "residence_country"), "Argentina")
+		self.assertNotIn("residence", flow["missing_required"])
+		self.assertEqual(flow["residence"]["country"], "Argentina")
+		with self.assertRaises(frappe.ValidationError):
+			checkin.save_guest_details(res.name, residence_country="Narnia")

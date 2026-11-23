@@ -74,9 +74,14 @@ def on_invoice_cancelled(doc, method=None):
 
 
 def on_guest_update(doc, method=None):
-	"""Se corrigió la residencia o el documento de un huésped en casa: el IVA de las noches que faltan."""
+	"""Se corrigió la residencia o el documento de un huésped en casa: el IVA de las noches que faltan, y el
+	comprobante que esperaba a la residencia (HR-304) sale ya, sin esperar al barrido."""
 	if not _changed(doc, GUEST_INPUTS):
 		return
 	for name in frappe.get_all("Reservation", filters={"guest": doc.name, "status": "Checked In"}, pluck="name"):
-		if connector.is_uruguay(frappe.db.get_value("Reservation", name, "property")):
-			_safe("ajuste de IVA del huésped", connector.readjust, name)
+		if not connector.is_uruguay(frappe.db.get_value("Reservation", name, "property")):
+			continue
+		_safe("ajuste de IVA del huésped", connector.readjust, name)
+		if frappe.db.exists(connector.DOCTYPE, {"reservation": name, "status": "Pending"}):
+			frappe.enqueue("kamra_uy.fiscal.connector.process_reservation", queue="short", enqueue_after_commit=True,
+			               reservation=name)

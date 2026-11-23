@@ -646,6 +646,48 @@ export default function ReservationDetail({
         )}
       </Card>
 
+      {/* where the guest lives, where the country taxes by it */}
+      {d.residence && (
+        <div className="rounded-xl border border-zinc-200 bg-white p-4" data-testid="tax-residence">
+          <h3 className="text-sm font-semibold text-zinc-800">{translate("Residence")}</h3>
+          <p className="mt-1 text-sm text-zinc-700">
+            {d.residence.country
+              ? translate("Lives in {country}", { country: d.residence.country })
+              : d.residence.declared === "resident"
+                ? translate("Said at booking: lives in {country}", { country: d.residence.home_country })
+                : d.residence.declared === "non_resident"
+                  ? translate("Said at booking: lives abroad")
+                  : translate("Not asked yet")}
+          </p>
+          {d.residence.missing && (
+            <p className="mt-1 text-xs text-amber-800">
+              {translate("Check-in asks for it: the tax on the bill depends on it.")}
+            </p>
+          )}
+          {d.residence.can_declare && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {(
+                [
+                  ["1", translate("Lives in {country}", { country: d.residence.home_country }), "resident"],
+                  ["0", translate("Lives abroad"), "non_resident"],
+                ] as const
+              ).map(([value, label, declared]) => (
+                <Button
+                  key={value}
+                  variant={d.residence?.declared === declared ? "primary" : "outline"}
+                  disabled={busy}
+                  onClick={() =>
+                    act(() => call("kamra.api.declare_residence", { reservation: name, tax_resident: value }))
+                  }
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* per-department instructions (Stay Instruction rows) */}
       <StayInstructions
         reservation={name}

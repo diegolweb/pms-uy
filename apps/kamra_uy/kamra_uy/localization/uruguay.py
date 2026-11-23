@@ -20,6 +20,12 @@ Qué cubre:
   margen, su respaldo manual y su caché de siempre. Qué código, qué lado (TCC/TCV) y qué día usa se configura en
   `site_config.json`, clave `kamra_uy_bcu` = {"codes": {...}, "side": "TCC", "day_offset": 1}, sin tocar código.
 
+- La residencia del huésped en recepción (HR-304; kamra.localization, «where the guest lives»): `guest_residence`,
+  `declare_residence`, `residence_on_new_booking`, `quote_residence` y `save_residence_country`, de
+  kamra_uy.booking.residence. Con ellas Kamra pregunta en la reserva por teléfono si el huésped reside en Uruguay (y
+  cotiza el 10 % del residente como la reserva en línea), lo deja declarar en una reserva ya hecha (la de una
+  plataforma) y pide en el check-in la residencia y el país, sin la cual el check-in no se hace.
+
 Qué NO cubre (otras fichas): el IVA de cada noche, que decide el motor de IVA de core con el país de residencia del
 huésped (`Guest.residence_country`), las fechas y el comprador; el CFE y su envío a DGI. Mercado Pago es la pasarela
 de `PAYMENT_GATEWAYS` (kamra_uy/payments, HR-30).
@@ -178,3 +184,35 @@ def market_rates(home: str) -> tuple[dict, str | None]:
 	except Exception as e:
 		frappe.throw(f"Could not fetch exchange rates ({type(e).__name__}: {e}). {FX_FALLBACK}")
 	return {currency: float(rate) for currency, rate in rates.items()}, (as_of.isoformat() if as_of else None)
+
+
+
+# ── la residencia del huésped en recepción (HR-304) ─────────────────────────────────────────────────────────────
+def guest_residence(reservation: str):
+	from kamra_uy.booking import residence
+
+	return residence.desk_residence(reservation)
+
+
+def declare_residence(reservation: str, resident: bool) -> None:
+	from kamra_uy.booking import residence
+
+	residence.declare(reservation, resident)
+
+
+def residence_on_new_booking(doc, resident: bool) -> None:
+	from kamra_uy.booking import residence
+
+	residence.on_new_booking(doc, resident)
+
+
+def quote_residence(quote: dict, resident: bool, inputs: dict) -> dict:
+	from kamra_uy.booking import residence
+
+	return residence.quote_for(quote, resident, inputs)
+
+
+def save_residence_country(guest: str, country: str) -> None:
+	from kamra_uy.booking import residence
+
+	residence.save_country(guest, country)

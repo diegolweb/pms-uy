@@ -90,16 +90,35 @@ def document(id_type: str | None, id_number: str | None, residence: str | None) 
 	return {"doc_type": doc_type, "country": country, "doc_number": number}
 
 
-def guest_facts(residence: str | None, id_type: str | None, id_number: str | None,
-                copy_on_file: bool) -> tuple[dict, bool]:
-	"""(`guest` de determineIva, si la residencia se supuso). Sin país de residencia se toma Uruguay: sin pruebas de
-	que no reside, no hay exoneración (y queda marcado para que recepción lo corrija)."""
+class ResidenceMissing(ValueError):
+	"""Sin el país de residencia del huésped no se factura (HR-304): nunca se supone."""
+
+
+# lo que el huésped declaró al reservar (kamra_uy.pure.uy_tax.RESIDENT; el valor del campo uy_declared_residence)
+DECLARED_RESIDENT = "Reside en Uruguay"
+
+
+def invoice_residence(country: str | None, declared: str | None) -> str | None:
+	"""El país de residencia (ISO) con que se factura: el del huésped (`Guest.residence_country`, lo que recepción ve en
+	el check-in con el documento); sin él, Uruguay si el huésped declaró al reservar que reside allí (lo dijo él, no se
+	supone). Si no, None: sabemos, como mucho, que no reside, pero no dónde, y el check-in lo pide."""
+	country = (country or "").strip().upper()
+	if country:
+		return country
+	return HOME_COUNTRY if (declared or "").strip() == DECLARED_RESIDENT else None
+
+
+def guest_facts(residence: str | None, id_type: str | None, id_number: str | None, copy_on_file: bool) -> dict:
+	"""`guest` de determineIva. Sin país de residencia, ResidenceMissing: antes se tomaba Uruguay, y un extranjero en
+	alta temporada pagaba el 10 % (HR-304)."""
 	country = (residence or "").strip().upper()
-	guest = {"residence_country": country or HOME_COUNTRY}
-	doc = document(id_type, id_number, country or None)
+	if not country:
+		raise ResidenceMissing("sin país de residencia")
+	guest = {"residence_country": country}
+	doc = document(id_type, id_number, country)
 	if doc:
 		guest["document"] = {"type": doc["doc_type"], "country": doc["country"], "copy_on_file": bool(copy_on_file)}
-	return guest, not country
+	return guest
 
 
 def kind_for(charge_type: str | None) -> str:
@@ -353,3 +372,63 @@ def print_block(fields: dict, issuer_rut: str | None) -> dict:
 		"issuer_rut": issuer_rut,
 		"verify_text": VERIFY_TEXT if issued else "",
 	}
+
+
+# ── las facturas pendientes que recepción registra a mano (HR-304) ─────────────────────────────────────────────────
+# el código de cada tipo (Tabla A; services/core/config/cfe.uy.yaml: cfe_types y contingency_types): el electrónico y
+# el de contingencia, los dos que admite manual-issue
+TYPE_CODES = {"e-ticket": (101, 201), "nc-e-ticket": (102, 202), "e-factura": (111, 211), "nc-e-factura": (112, 212)}
+MANUAL_VIAS = ("portal", "paper")
+# Uruguay no tiene horario de verano desde 2015: lo que recepción escribe es hora de Montevideo
+MONTEVIDEO_OFFSET = "-03:00"
+
+
+def is_pending(row: dict) -> bool:
+	"""Si un CFE (UY CFE, sin las tareas) sigue sin emitir: aún no llegó a core o core lo tiene en cola o en
+	contingencia (sin Gsoft conectado, todos). Lo emitido, por el proveedor o a mano, y lo rechazado no."""
+	if row.get("kind") == "Reconcile":
+		return False
+	if row.get("status") in ("Pending", "Needs attention"):
+		return True
+	return row.get("status") == "Sent" and row.get("core_status") in ("queued", "contingency")
+
+
+def type_codes(cfe_type: str | None) -> list[int]:
+	"""Los códigos con que se puede registrar a mano un CFE de ese tipo; sin tipo (aún no lo eligió core), todos."""
+	if cfe_type in TYPE_CODES:
+		return list(TYPE_CODES[cfe_type])
+	return [code for pair in TYPE_CODES.values() for code in pair]
+
+
+def manual_issue(cfe_type: str | None, via: str, type_code, serie: str, number: str, issued_at: str,
+                 note: str | None = None) -> dict:
+	"""El cuerpo de manual-issue (recordManualCfe) con lo que recepción copia del portal o del papel, comprobado antes
+	de mandarlo: ValueError con el motivo, en el español de recepción."""
+	if via not in MANUAL_VIAS:
+		raise ValueError("Indique si la factura se hizo en el portal o papel.")
+	allowed = type_codes(cfe_type)
+	try:
+		code = int(str(type_code).strip())
+	except ValueError:
+		code = None
+	if code not in allowed:
+		raise ValueError(f"El tipo de comprobante tiene que ser {' o '.join(str(c) for c in allowed)}.")
+	serie = (serie or "").strip().upper()
+	if not re.fullmatch(r"[A-Z]{1,2}", serie):
+		raise ValueError("La serie son una o dos letras, como la da el portal.")
+	number = (number or "").strip()
+	if not re.fullmatch(r"\d{1,7}", number):
+		raise ValueError("El número son hasta 7 cifras, como lo da el portal.")
+	issued = (issued_at or "").strip()
+	if re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", issued):
+		issued += ":00" + MONTEVIDEO_OFFSET
+	try:
+		if "T" not in issued:
+			raise ValueError(issued)
+		_instant(issued)
+	except ValueError:
+		raise ValueError("Indique la fecha y la hora en que se emitió la factura.") from None
+	body = {"via": via, "type_code": code, "serie": serie, "number": str(int(number)), "issued_at": issued}
+	if (note or "").strip():
+		body["note"] = note.strip()[:500]
+	return body

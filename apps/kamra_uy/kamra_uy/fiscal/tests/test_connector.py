@@ -11,6 +11,7 @@ from frappe.utils import add_days
 from kamra.tests.audit_fixtures import (
 	AuditTestCase,
 	d,
+	ensure_user,
 	make_guest,
 	make_reservation,
 	make_room,
@@ -42,6 +43,8 @@ class FakeCore:
 
 	def __init__(self):
 		self.calls, self.cfes, self.by_key, self.down, self.seq = [], {}, {}, False, 0
+		# sin Gsoft conectado (HR-304): core guarda cada CFE en contingencia, sin serie ni número
+		self.contingency = False
 		# la alta temporada (D-HR-40, Decreto 267/001): el consumidor final que no está exento paga el 10 % solo en sus
 		# noches. `season`, las noches de temporada a mano; `seasons`, el calendario de verdad (high_season, HR-235);
 		# sin ninguno de los dos, todas las noches lo son
@@ -83,6 +86,9 @@ class FakeCore:
 		       "cae": "90123456789", "security_code": "aB3dE5", "cae_range": {"from": "1", "to": "1000"},
 		       "cae_expires_on": "2027-12-31", "qr_url": f"https://www.dgi.gub.uy/ctdcfe?n={self.seq}",
 		       "created_at": now, "updated_at": now, "currency": "USD", "total": f"{total:.2f}", **extra}
+		if self.contingency:
+			cfe.update(status="contingency", serie=None, number=None, cae=None, security_code=None, qr_url=None,
+			           contingency_since=now)
 		self.cfes[cfe["cfe_id"]] = cfe
 		return cfe
 
@@ -114,6 +120,10 @@ class FakeCore:
 			original = self.cfes[path.split("/")[4]]
 			total = sum(float(ln["amount"]) for ln in body.get("lines") or []) or float(original["total"])
 			out = self._cfe("credit_note", total, type=f"nc-{original['type']}", references_cfe_id=original["cfe_id"])
+		elif path.endswith("/manual-issue"):
+			out = self.cfes[path.split("/")[4]]
+			out.update(status="issued", issued_via=body["via"], serie=body["serie"], number=body["number"],
+			           issued_at=body["issued_at"], contingency_since=None)
 		elif method == "GET" and path.startswith("/v1/fiscal/cfe/"):
 			return _Resp(200, self.cfes[path.split("/")[4]])
 		else:
@@ -151,6 +161,10 @@ class FiscalCase(AuditTestCase):
 	def documents(self, res, kind=None) -> list:
 		filters = {"reservation": res.name, "kind": kind or ["!=", "Reconcile"]}
 		return frappe.get_all(connector.DOCTYPE, filters=filters, fields=["*"], order_by="creation asc, name asc")
+
+	def waiting(self, res) -> list:
+		return frappe.get_all(connector.DOCTYPE, filters={"reservation": res.name, "kind": "Reconcile",
+		                                                  "status": "Pending"}, fields=["name", "error"])
 
 	def settle_and_close(self, res, nights: int, start: str | None = None) -> str:
 		from kamra.folio import _recalculate, close_folio, post_room_night
@@ -301,6 +315,74 @@ class TestCheckIn(FiscalCase):
 
 
 class TestClosingAndVoiding(FiscalCase):
+	def test_without_the_residence_the_cfe_waits_and_goes_out_once_the_desk_gives_it(self):
+		# HR-304: un huésped en casa sin país de residencia (de antes de HR-304, o borrado después) no se factura como
+		# residente: la tarea espera, el folio lo dice, y sale en cuanto recepción indica el país
+		res = self.stay()
+		frappe.db.set_value("Guest", res.guest, "residence_country", None)  # sin ganchos, como un dato viejo
+		connector.process_reservation(res.name)
+		self.assertEqual(self.core.bodies("/v1/fiscal/cfe"), [])
+		pending = self.waiting(res)
+		self.assertEqual([t.error for t in pending], [texts.RESIDENCE_MISSING])
+		block = api.folio_cfe(connector._guest_folio(res.name))
+		self.assertTrue(block["residence_missing"])
+		self.assertEqual(block["status_text"], texts.RESIDENCE_MISSING)
+		self.assertTrue(api.preview(res.name)["residence_missing"])
+
+		self.enqueue.reset_mock()
+		guest = frappe.get_doc("Guest", res.guest)
+		guest.residence_country = "Argentina"
+		guest.save(ignore_permissions=True)
+		self.assertTrue(any(c.kwargs.get("reservation") == res.name for c in self.enqueue.call_args_list))
+		connector.process_reservation(res.name)
+		self.assertEqual(self.waiting(res), [])
+		self.assertEqual(len(self.core.bodies("/v1/fiscal/cfe")), 1)
+		self.assertFalse(api.folio_cfe(connector._guest_folio(res.name))["residence_missing"])
+
+	def test_without_gsoft_the_desk_sees_the_pending_invoice_and_records_the_one_made_in_the_portal(self):
+		# HR-304: lo que queda en contingencia sale en /facturas con lo que hay que copiar en el portal, y recepción
+		# registra la serie y el número del portal: deja de estar pendiente y core ya no lo emitirá
+		self.core.contingency = True
+		res = self.stay()
+		connector.process_reservation(res.name)
+		[item] = [i for i in api.pending(PROP)["items"] if i["reservation"] == res.name]
+		self.assertTrue(item["in_core"])
+		self.assertEqual(item["codes"], [101, 201])
+		self.assertEqual(item["title"], "e-Ticket")
+		self.assertTrue(item["lines"])
+		self.assertEqual(item["state"], model.STATUS_TEXTS["contingency"])
+		self.assertEqual(api.pending(PROP, "2000-01-01")["items"], [])
+		desk = ensure_user("recepcion-facturas@roosevelt.test", ["Front Desk"])
+		frappe.set_user(desk)  # nosemgrep: frappe-setuser -- test fixture
+		try:
+			out = api.record_manual(item["name"], "portal", 201, "a", "0001234", "2026-12-07T10:30")
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test fixture
+		self.assertEqual((out["serie"], out["number"], out["core_status"]), ("A", "1234", "issued"))
+		core_id = frappe.db.get_value(connector.DOCTYPE, item["name"], "core_cfe_id")
+		[body] = self.core.bodies(f"/v1/fiscal/cfe/{core_id}/manual-issue")
+		self.assertEqual(body, {"via": "portal", "type_code": 201, "serie": "A", "number": "1234",
+		                        "issued_at": "2026-12-07T10:30:00-03:00"})
+		self.assertNotIn(res.name, [i["reservation"] for i in api.pending(PROP)["items"]])
+		with self.assertRaises(frappe.ValidationError):
+			api.record_manual(item["name"], "portal", 201, "A", "1235", "2026-12-07T10:31")
+		with self.assertRaises(frappe.ValidationError):
+			api.record_manual(item["name"], "fax", 201, "A", "1235", "2026-12-07T10:31")
+
+	def test_the_page_of_pending_invoices_is_for_hotel_staff(self):
+		from kamra_uy.www import facturas as page
+
+		ctx = page.get_context(frappe._dict())
+		self.assertIn(PROP, ctx.choices + [ctx.property])
+		nobody = ensure_user("sin-rol-facturas@roosevelt.test", ["Housekeeping"])
+		for user in (nobody, "Guest"):
+			frappe.set_user(user)  # nosemgrep: frappe-setuser -- test fixture
+			try:
+				with self.assertRaises(frappe.PermissionError):
+					page.get_context(frappe._dict())
+			finally:
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test fixture
+
 	def test_closing_what_was_billed_at_check_in_issues_nothing_more(self):
 		res = self.stay()
 		connector.process_reservation(res.name)

@@ -10,8 +10,8 @@ import {
   Star,
   Wifi,
 } from "lucide-react"
-import { call } from "../lib/api"
-import { serverError } from "../lib/resource"
+import { call, type TaxResidence } from "../lib/api"
+import { listResource, serverError } from "../lib/resource"
 import { toFullPath } from "../lib/routing"
 import { fmtMoney, sellsAlcohol } from "../lib/money"
 import { useT, t as translateUI, useUILanguage } from "../lib/i18n"
@@ -98,6 +98,9 @@ interface Flow {
   steps: Step[]
   /** Hard blockers only (room). */
   missing_required: string[]
+  /** where the guest lives, where the country taxes by it; "residence" in
+   *  missing_required while check-in cannot go on without it */
+  residence?: TaxResidence | null
   /** Soft-required steps still open — warn, allow check-in, backfill later. */
   pending_backfill: { step: string; title: string; tip: string }[]
   rooms: Room[]
@@ -317,6 +320,13 @@ export default function CheckInDialog(props: {
   // per-step drafts
   const [details, setDetails] = useState({ phone: "", email: "", nationality: "", id_type: "", id_number: "" })
   const [detailsDirty, setDetailsDirty] = useState(false)
+  // where the guest lives: "home" (the property's country) or "abroad" + country
+  const [residence, setResidence] = useState<{ where: "" | "home" | "abroad"; country: string }>({
+    where: "",
+    country: "",
+  })
+  const [residenceDirty, setResidenceDirty] = useState(false)
+  const [countries, setCountries] = useState<string[]>([])
   // what an ID scan read beyond the form's fields; saved with the details
   const [scanned, setScanned] = useState<IdRead | null>(null)
   const [payer, setPayer] = useState("")
@@ -352,6 +362,15 @@ export default function CheckInDialog(props: {
         id_type: f.guest.id_type ?? "",
         id_number: "",
       })
+      const r = f.residence
+      setResidence(
+        !r
+          ? { where: "", country: "" }
+          : r.country
+            ? { where: r.country === r.home_country ? "home" : "abroad", country: r.country === r.home_country ? "" : r.country }
+            : { where: r.declared === "resident" ? "home" : r.declared === "non_resident" ? "abroad" : "", country: "" },
+      )
+      setResidenceDirty(false)
       setPayer((f.records.billing_check as { payer?: string } | undefined)?.payer ?? f.billing.payer)
       setKeyCount(f.keys.count || Math.max(1, Math.min(f.reservation.adults || 1, 4)))
       setKeyCards(f.keys.cards || "")
@@ -393,7 +412,17 @@ export default function CheckInDialog(props: {
     [flowSteps, nav, flow],
   )
   const step = flow?.steps.find((s) => s.step_key === nav.current) ?? null
-  const roomReady = !!flow && !flow.missing_required.length
+  const roomReady = !!flow && !flow.missing_required.some((k) => k !== "residence")
+  const residenceMissing = !!flow?.missing_required.includes("residence")
+
+  // the country list for "lives abroad", once, where the country asks it
+  const asksResidence = !!flow?.residence
+  useEffect(() => {
+    if (!asksResidence) return
+    listResource("Country", { fields: ["name"], orderBy: "name asc", limit: 500 })
+      .then((rows) => setCountries(rows.map((row) => row.name)))
+      .catch(() => setCountries([]))
+  }, [asksResidence])
 
   // open on the first visible step still to do (room first when missing)
   const started = useRef(false)
@@ -425,6 +454,10 @@ export default function CheckInDialog(props: {
 
   async function saveDetails() {
     if (!detailsDirty) return true
+    if (residenceDirty && residence.where === "abroad" && !residence.country.trim()) {
+      setError(t("Pick the country where the guest lives."))
+      return false
+    }
     const f = await run<Flow>("kamra.checkin.save_guest_details", {
       phone: details.phone,
       email: details.email,
@@ -436,9 +469,16 @@ export default function CheckInDialog(props: {
       id_expiry_date: scanned?.id_expiry_date ?? undefined,
       address_line: scanned?.address || undefined,
       city: scanned?.city || undefined,
+      residence_country:
+        residenceDirty && flow?.residence
+          ? residence.where === "home"
+            ? flow.residence.home_country
+            : residence.country.trim() || undefined
+          : undefined,
     }, false)
     if (f) {
       setDetailsDirty(false)
+      setResidenceDirty(false)
       setScanned(null)
       setDetails((d) => ({ ...d, id_number: "" }))
     }
@@ -743,6 +783,73 @@ export default function CheckInDialog(props: {
                   }
                 />
               </dl>
+              {flow.residence && (
+                <div
+                  className={cn(
+                    "rounded-xl border p-3",
+                    residenceMissing ? "border-amber-300 bg-amber-50" : "border-zinc-200",
+                  )}
+                  data-testid="checkin-residence"
+                >
+                  <span className="mb-1 block text-xs font-medium text-zinc-500">
+                    {t("Does the guest live in {country}?", { country: flow.residence.home_country })}
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2" role="radiogroup">
+                    {(
+                      [
+                        ["home", t("Lives there")],
+                        ["abroad", t("Lives abroad")],
+                      ] as const
+                    ).map(([where, label]) => (
+                      <button
+                        key={where}
+                        type="button"
+                        role="radio"
+                        aria-checked={residence.where === where}
+                        onClick={() => {
+                          setResidence((r) => ({ ...r, where }))
+                          setResidenceDirty(true)
+                          setDetailsDirty(true)
+                        }}
+                        className={cn(
+                          "rounded-lg border px-3 py-1.5 text-sm",
+                          residence.where === where
+                            ? "border-brand-600 bg-brand-50 font-medium text-brand-800"
+                            : "border-zinc-300 bg-white text-zinc-700",
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                    {residence.where === "abroad" && (
+                      <>
+                        <input
+                          className={inputCls}
+                          list="checkin-residence-countries"
+                          aria-label={t("Country of residence")}
+                          placeholder={t("Country of residence")}
+                          value={residence.country}
+                          onChange={(e) => {
+                            setResidence((r) => ({ ...r, country: e.target.value }))
+                            setResidenceDirty(true)
+                            setDetailsDirty(true)
+                          }}
+                        />
+                        <datalist id="checkin-residence-countries">
+                          {countries.map((c) => (
+                            <option key={c} value={c} />
+                          ))}
+                        </datalist>
+                      </>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {residenceMissing
+                      ? t("Check-in needs it: the tax on the bill depends on it.")
+                      : t("Check it against the ID: the tax on the bill depends on it.")}
+                  </p>
+                </div>
+              )}
               <div className="grid gap-3 sm:grid-cols-2">
                 {(
                   [
@@ -1199,7 +1306,9 @@ export default function CheckInDialog(props: {
               </ul>
               {flow.missing_required.length > 0 ? (
                 <p className="text-sm font-medium text-rose-700">
-                  {t("Assign a room before check-in.")}
+                  {roomReady
+                    ? t("Ask where the guest lives (guest details) before check-in.")
+                    : t("Assign a room before check-in.")}
                 </p>
               ) : softPending > 0 ? (
                 <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

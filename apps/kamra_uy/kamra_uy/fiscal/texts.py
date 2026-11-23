@@ -17,7 +17,14 @@ NOT_CONFIGURED = ("La facturación electrónica no está configurada para esta p
                   "facturación en Payment Gateway Settings).")
 NO_FX = "No hay tipo de cambio del peso uruguayo para hoy: cárguelo en Finanzas, Tipos de cambio."
 BAD_CURRENCY = "La moneda {currency} no se puede facturar con CFE (solo UYU o USD)."
-RESIDENCE_MISSING = ("Falta el país de residencia del huésped: se factura como residente (IVA de alojamiento). "
-                     "Cárguelo antes del check-in si el huésped no reside en Uruguay.")
+# HR-304: sin la residencia no se factura (nunca se supone); el comprobante espera y sale solo en cuanto se indica
+RESIDENCE_MISSING = ("Falta la residencia del huésped: indique en el check-in si reside en Uruguay y, si no, su país. "
+                     "El comprobante fiscal sale en cuanto esté.")
 COPY_MISSING = ("Falta la copia del documento del huésped: sin ella no corresponde el IVA 0 de no residente.")
 POSTED_AT_OTHER_RATE = "El folio tiene {count} cargos con otro IVA que el del CFE: revíselos con Finanzas."
+
+# /facturas (HR-304)
+NOT_IN_CORE_YET = ("Este comprobante todavía no llegó al servicio de facturación: se podrá registrar cuando llegue (se "
+                   "reintenta solo).")
+ALREADY_ISSUED = "Este comprobante ya está emitido: no hay nada que registrar."
+TYPE_PENDING = "Comprobante (tipo por decidir)"

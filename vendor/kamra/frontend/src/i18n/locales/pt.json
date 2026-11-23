@@ -6678,5 +6678,21 @@
   "Fix Night Audit blockers": "Corrigir bloqueios do Fechamento de Dia",
   "Showing the latest {n}. Pick From and To dates to see others.": "Mostrando as {n} mais recentes. Escolha as datas De e Até para ver outras.",
   "Showing the {n} biggest balances. The ledger total above includes every folio.": "Mostrando os {n} maiores saldos. O total do livro acima inclui todos os fólios.",
-  "Not sent. The reason is on the page behind this one.": "Não enviado. O motivo aparece na página por trás desta."
+  "Not sent. The reason is on the page behind this one.": "Não enviado. O motivo aparece na página por trás desta.",
+  "Ask whether the guest lives in {country}: the tax on the booking depends on it.": "Pergunte se o hóspede reside em {country}: o imposto da reserva depende disso.",
+  "Does the guest live in {country}?": "O hóspede reside em {country}?",
+  "Lives there": "Reside lá",
+  "Lives abroad": "Reside em outro país",
+  "The tax on the room nights depends on it. The ID at check-in confirms it.": "Disso depende o imposto das diárias. O documento confirma no check-in.",
+  "Residence": "Residência",
+  "Lives in {country}": "Reside em {country}",
+  "Said at booking: lives in {country}": "Declarou ao reservar: reside em {country}",
+  "Said at booking: lives abroad": "Declarou ao reservar: reside em outro país",
+  "Not asked yet": "Ainda não perguntado",
+  "Check-in asks for it: the tax on the bill depends on it.": "O check-in pede essa informação: o imposto da fatura depende disso.",
+  "Pick the country where the guest lives.": "Escolha o país onde o hóspede reside.",
+  "Country of residence": "País de residência",
+  "Check-in needs it: the tax on the bill depends on it.": "O check-in não é feito sem isso: o imposto da fatura depende disso.",
+  "Check it against the ID: the tax on the bill depends on it.": "Confira com o documento: o imposto da fatura depende disso.",
+  "Ask where the guest lives (guest details) before check-in.": "Pergunte onde o hóspede reside (dados do hóspede) antes do check-in."
 }

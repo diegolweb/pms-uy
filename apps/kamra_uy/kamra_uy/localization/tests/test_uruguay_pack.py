@@ -18,6 +18,7 @@ from kamra.tests.audit_fixtures import (
 	AuditTestCase,
 	d,
 	guest_folio,
+	make_guest,
 	make_property,
 	make_reservation,
 	make_room,
@@ -212,7 +213,10 @@ def _hook_before_hr239(property, room_type_doc, nightly_rate) -> Decimal:
 
 	def _stay(self):
 		rt = make_room_type(PROP_UY, "STD", base_price=3000)
-		res = make_reservation(PROP_UY, rt, d(-1), d(1), status="Checked In", room=make_room(PROP_UY, rt, "UY101"))
+		# en Uruguay no hay check-in sin la residencia del huésped (HR-304): la factura depende de ella
+		guest = make_guest("UT Huésped AR", residence_country="Argentina")
+		res = make_reservation(PROP_UY, rt, d(-1), d(1), status="Checked In", guest=guest,
+		                       room=make_room(PROP_UY, rt, "UY101"))
 		return guest_folio(res.name)
 
 	def test_the_bill_names_iva_and_rut_and_never_gst(self):
