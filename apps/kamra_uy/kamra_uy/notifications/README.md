@@ -32,7 +32,9 @@ sin ese, español.
   (`kamra.api._cancellation_terms`): gratis hasta `free_cancel_days` días antes de la llegada y, después, lo de
   `cancellation_fee` («Full Stay», el 100 % de la estadía; «First Night», la primera noche); con 0 días o sin cargo,
   gratis hasta el día de la llegada. Y si no llega, lo de `no_show_charge` (o que no se cobra nada). Si la Property tiene
-  tramos (`cancellation_tiers`), Kamra cobra por ellos y la ventana no se dice (los tramos en el correo: HR-301); si una
+  tramos (`cancellation_tiers`), Kamra cobra por ellos y no por la ventana: el correo dice cada banda (HR-301), de
+  lejos a cerca de la llegada («7 días o más antes: no se cobra nada…», «De 3 a 6 días antes: se cobra el 50% de la
+  estadía.», «Menos de 3 días antes: …»), con lo que cobra `kamra.api.cancellation_tier_for` cada día; si una
   noche cae en una temporada o un paquete `non_refundable`, dice que la reserva no es reembolsable. Con los de la
   planilla del hotel (5 días, «Full Stay» y «Full Stay») dice lo mismo que web/content/*/condiciones.md: la guarda es
   `apps/kamra_uy/tests/unit/test_correo_cancelacion.py`, que lee el fichero de la web.

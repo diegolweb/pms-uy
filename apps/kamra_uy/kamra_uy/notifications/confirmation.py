@@ -11,7 +11,7 @@ La página de confirmada de la web promete «Te enviamos la confirmación por em
   el pago y confirma con kamra.api._confirm_status—, encola UN correo al correo del huésped, en el idioma guardado (sin
   él, el de la propiedad, `booking_language`; sin ese, español). Lleva la referencia, las fechas, las noches, la
   habitación, los huéspedes, el total pagado, el horario de check-in y check-out, la cancelación (HR-291:
-  kamra_uy.notifications.cancelacion, con los campos de la Property), la dirección y el contacto de la propiedad y, si alguna noche cae en la alta temporada (kamra_uy.pure.turismo, D-HR-40), el aviso del IVA a residentes.
+  kamra_uy.notifications.cancelacion, con los campos de la Property, y sus tramos si los tiene: HR-301), la dirección y el contacto de la propiedad y, si alguna noche cae en la alta temporada (kamra_uy.pure.turismo, D-HR-40), el aviso del IVA a residentes.
   La identidad (logo, letra, colores, pie) se la pone HR-32 (kamra_uy.branding.correo.envolver).
 
 Un solo correo por reserva: lo marca `uy_confirmation_mail_on` al encolarlo; otro aviso del mismo pago, otro pago, otro
@@ -176,11 +176,15 @@ def _cancelacion(res, prop) -> dict:
 	temporada o un paquete `non_refundable` (kamra.pricing.stay_season_rules, la misma llamada) manda sobre los dos."""
 	from kamra.pricing import stay_season_rules
 
-	tramos = frappe.db.exists("Cancellation Tier", {"parenttype": "Property", "parentfield": "cancellation_tiers",
-	                                                "parent": res.property})
+	# la misma consulta que kamra.api.cancellation_tier_for (los tres filtros y su orden): cancelacion.rangos la recorre
+	tramos = frappe.get_all(
+		"Cancellation Tier",
+		filters={"parenttype": "Property", "parentfield": "cancellation_tiers", "parent": res.property},
+		fields=["days_before", "charge_pct"], order_by="days_before desc")
 	reglas = stay_season_rules(res.property, res.check_in_date, res.check_out_date, res.room_type)
 	return {"dias": prop.free_cancel_days, "cargo": prop.cancellation_fee, "no_show": prop.no_show_charge,
-	        "tramos": bool(tramos), "no_reembolsable": bool(reglas["non_refundable"])}
+	        "tramos": [{"days_before": t.days_before, "charge_pct": t.charge_pct} for t in tramos],
+	        "no_reembolsable": bool(reglas["non_refundable"])}
 
 
 # --- el cuerpo ---------------------------------------------------------------------------------------------------
@@ -206,7 +210,8 @@ def render(datos: dict, idioma: str) -> tuple[str, str]:
 		(t["huespedes"], str(datos["huespedes"])),
 	]
 	# como la página de confirmada: «Total US$ 390 · Pagado», o el total y lo pagado si no se pagó todo
-	if datos["pagado"] >= datos["total"] - 0.005:
+	pagado_todo = datos["pagado"] >= datos["total"] - 0.005
+	if pagado_todo:
 		filas.append((t["total"], f"{total} · {t['pagado']}"))
 	else:
 		filas += [(t["total"], total), (t["pagado"], formato.importe(datos["pagado"], datos["moneda"], idioma))]
@@ -218,6 +223,10 @@ def render(datos: dict, idioma: str) -> tuple[str, str]:
 		'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" '
 		'style="border-collapse:collapse;margin:16px 0 24px 0;">' + "".join(_fila(*f) for f in filas) + "</table>",
 	]
+	# el correo es el aviso del pago, no un comprobante fiscal (23-11, el fundador): la factura, siempre en el check-in;
+	# que lo pagado es el total, solo si se pagó todo (la misma condición que la fila «Total · Pagado»)
+	pago = [t["pagado_total"]] if pagado_todo else []
+	partes.append(f"<p data-factura>{escape(' '.join([*pago, t['factura']]))}</p>")
 	if aviso_iva_residentes(datos["llegada"], datos["salida"]):
 		partes.append(f'<p data-aviso="iva">{escape(t["iva"])}</p>')
 	if datos["entrada"] and datos["salida_hora"]:

@@ -8,6 +8,7 @@ import LinkedRecords from "../components/LinkedRecords"
 import AllowanceRequests from "../components/AllowanceRequests"
 import FolioDiscount from "../components/FolioDiscount"
 import ChangeCompany from "../components/ChangeCompany"
+import FiscalDocuments, { type FiscalDocumentsData } from "../components/FiscalDocuments"
 import { loadLocale, sellsAlcohol, taxRates, fmtAmount } from "../lib/money"
 import { serverError } from "../lib/resource"
 import { useCashierAuth } from "../lib/cashierAuth"
@@ -121,6 +122,9 @@ interface InvoiceData {
     icv: number
     status: string
   } | null
+  /** The tax receipt someone else issues (Uruguay's CFE), open or settled:
+   *  the desk's card, never the printed block above. null elsewhere. */
+  fiscal_documents?: FiscalDocumentsData | null
   document: {
     title: string
     title_local?: string | null
@@ -807,6 +811,8 @@ export default function FolioView() {
           <LinkedRecords doctype="Reservation" name={stay.reservation} />
         </div>
       )}
+
+      {data.fiscal_documents && <FiscalDocuments data={data.fiscal_documents} />}
 
       {pinStatus?.required ? (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-2 text-sm print:hidden">

@@ -3540,6 +3540,9 @@ def folio_invoice(folio: str):
 		"allocations": _folio_allocations(doc.name),
 		"bill_to": bill_to,
 		"statutory": statutory,
+		# the tax receipt someone else issues (Uruguay's CFE), open or settled -
+		# the desk's card, not the printed block above
+		"fiscal_documents": loc.folio_fiscal_documents(pack, doc.name),
 		"document": {
 			# a bill before settlement is provisional and must say so - the
 			# invoice number only exists once the folio closes
@@ -8973,12 +8976,14 @@ def property_locale(property: str):
 	localization pack. Drives the frontend's money formatting and tax dropdowns
 	so no screen hardcodes ₹ or GST %. `integrations` says which country
 	integrations (gateways, tax return, ID checks) this property has."""
-	from kamra.localization import front_desk_vocabulary, integrations, pack_for
+	from kamra.localization import desk_pages, front_desk_vocabulary, integrations, pack_for
 	from kamra.settings import get_setting
 	prop = frappe.get_cached_doc("Property", property)
 	pack = pack_for(property)
 	return {**pack.locale(prop), **front_desk_vocabulary(pack),
 	        "integrations": integrations(pack),
+	        # the pack's own pages the desk opens from the menu
+	        "desk_pages": desk_pages(pack, property),
 	        # the rate the server puts on any food & beverage charge, whatever
 	        # rate the caller picked (_resolve_charge_gst) - so the folio's
 	        # charge form shows the rate that will apply instead of a choice

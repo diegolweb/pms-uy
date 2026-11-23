@@ -6821,3 +6821,7 @@ Country of residence,Country of residence,,País de residencia,components/CheckI
 Check-in needs it: the tax on the bill depends on it.,Check-in needs it: the tax on the bill depends on it.,,El check-in no se hace sin esto: de eso depende el impuesto de la factura.,components/CheckInDialog.tsx,,translated
 Check it against the ID: the tax on the bill depends on it.,Check it against the ID: the tax on the bill depends on it.,,Compruébelo con el documento: de eso depende el impuesto de la factura.,components/CheckInDialog.tsx,,translated
 Ask where the guest lives (guest details) before check-in.,Ask where the guest lives (guest details) before check-in.,,Pregunte dónde reside el huésped (datos del huésped) antes de hacer el check-in.,components/CheckInDialog.tsx,,translated
+Tax receipt,Tax receipt,,Comprobante fiscal,components/FiscalDocuments.tsx,,translated
+In contingency,In contingency,,En contingencia,components/FiscalDocuments.tsx,,translated
+Issued,Issued,,Emitido,components/FiscalDocuments.tsx,,translated
+Open the PDF,Open the PDF,,Abrir el PDF,components/FiscalDocuments.tsx,,translated

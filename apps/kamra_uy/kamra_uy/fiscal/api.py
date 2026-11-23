@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import quote
 
 import frappe
 
@@ -60,6 +61,33 @@ def invoice_print_block(source_doctype: str, source_name: str, number: str | Non
 		"status_text": texts.RESIDENCE_MISSING if residence else model.STATUS_TEXTS["pending"] if tasks or not documents else (
 			next((d["status_text"] for d in documents if d["status_text"]), "")),
 	}
+
+
+def pending_url(property: str) -> str:
+	"""/facturas de esa propiedad (www/facturas.py)."""
+	return f"/facturas?property={quote(property)}"
+
+
+def folio_fiscal_documents(folio: str) -> dict | None:
+	"""La tarjeta del CFE en el folio de recepción (HR-307), con la firma de `folio_fiscal_documents` de los paquetes
+	de Kamra (kamra.localization), que la pinta aparte de la factura impresa: estado, tipo, serie y número, y el aviso
+	de la residencia (`model.desk_block`). Sin CFE ni tarea de la reserva, None."""
+	row = frappe.db.get_value("Folio", folio, ["name", "reservation", "property"], as_dict=True)
+	if not row:
+		return None
+	tasks = frappe.get_all(connector.DOCTYPE, filters={"reservation": row.reservation, "kind": "Reconcile",
+	                                                   "status": ["in", ["Pending", "Needs attention"]]},
+	                       fields=["status", "error"]) if row.reservation else []
+	return model.desk_block(_documents(row.reservation, row.name), tasks, pending_url(row.property))
+
+
+def desk_pages(property: str) -> list[dict]:
+	"""Lo que recepción abre desde el menú de Kamra (`desk_pages` de kamra.localization): /facturas, con los roles
+	que la página deja entrar (www/facturas.py)."""
+	from kamra.authz import ADMIN
+
+	roles = list(dict.fromkeys(DESK + tuple(ADMIN)))
+	return [{"label": model.PENDING_PAGE, "url": pending_url(property), "roles": roles}]
 
 
 @frappe.whitelist(methods=["GET"])

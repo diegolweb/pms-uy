@@ -25,6 +25,10 @@ Qué cubre:
   kamra_uy.booking.residence. Con ellas Kamra pregunta en la reserva por teléfono si el huésped reside en Uruguay (y
   cotiza el 10 % del residente como la reserva en línea), lo deja declarar en una reserva ya hecha (la de una
   plataforma) y pide en el check-in la residencia y el país, sin la cual el check-in no se hace.
+- El CFE en el folio y /facturas desde el menú (HR-307; kamra.localization, «the folio's tax receipt»):
+  `folio_fiscal_documents` da la tarjeta del CFE de la reserva (pendiente, en contingencia o emitido con su serie y
+  número, y el aviso de la residencia), que el folio pinta aparte de la factura impresa, y `desk_pages` pone «Facturas
+  pendientes» en el menú de recepción. De kamra_uy.fiscal.api.
 
 Qué NO cubre (otras fichas): el IVA de cada noche, que decide el motor de IVA de core con el país de residencia del
 huésped (`Guest.residence_country`), las fechas y el comprador; el CFE y su envío a DGI. Mercado Pago es la pasarela
@@ -216,3 +220,16 @@ def save_residence_country(guest: str, country: str) -> None:
 	from kamra_uy.booking import residence
 
 	residence.save_country(guest, country)
+
+
+# ── el CFE en el folio y /facturas desde el menú (HR-307) ──────────────────────────────────────────────────────────
+def folio_fiscal_documents(folio: str):
+	from kamra_uy.fiscal import api
+
+	return api.folio_fiscal_documents(folio)
+
+
+def desk_pages(property: str) -> list:
+	from kamra_uy.fiscal import api
+
+	return api.desk_pages(property)

@@ -16,6 +16,8 @@ import re
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 
+from kamra_uy.fiscal import texts
+
 CENT = Decimal("0.01")
 TOLERANCE = Decimal("0.005")
 HOME_COUNTRY = "UY"
@@ -371,6 +373,79 @@ def print_block(fields: dict, issuer_rut: str | None) -> dict:
 		"cae": cae,
 		"issuer_rut": issuer_rut,
 		"verify_text": VERIFY_TEXT if issued else "",
+	}
+
+
+# ── el CFE en el folio de recepción (HR-307) ──────────────────────────────────────────────────────────────────────
+# lo que el paquete de Uruguay da a kamra.localization.folio_fiscal_documents: la tarjeta del folio, abierto o
+# cerrado (el CFE sale en el check-in), con los estados de Kamra: pending, contingency, issued y attention
+DESK_TITLE = "Comprobante fiscal (CFE)"
+PENDING_PAGE = "Facturas pendientes"
+SERIE_NUMBER = "Serie {serie}, número {number}"
+NEEDS_ATTENTION = "El comprobante fiscal quedó para revisar: avise a Finanzas."
+# en contingencia, recepción lee lo que se hace (respuesta del fundador, 23-11): esperar al proveedor
+DESK_CONTINGENCY = "Comprobante fiscal pendiente: se emite cuando vuelva el proveedor de facturas."
+
+
+def desk_state(row: dict) -> str:
+	"""El estado de un CFE (UY CFE, sin las tareas) para recepción. Lo que no se conoce es «pending»: nunca «issued»."""
+	if row.get("status") == "Needs attention":
+		return "attention"
+	if row.get("status") == "Sent":
+		return {"issued": "issued", "contingency": "contingency", "rejected": "attention"}.get(
+			row.get("core_status") or "", "pending")
+	return "pending"
+
+
+def _desk_text(row: dict, state: str) -> str:
+	if state == "attention":
+		return STATUS_TEXTS["rejected"] if row.get("core_status") == "rejected" else NEEDS_ATTENTION
+	if state == "pending":
+		return STATUS_TEXTS["queued"] if row.get("status") == "Sent" else STATUS_TEXTS["pending"]
+	if state == "contingency":
+		return DESK_CONTINGENCY
+	return STATUS_TEXTS.get(state, "")
+
+
+def desk_block(rows: list[dict], tasks: list[dict], pending_url: str) -> dict | None:
+	"""La tarjeta del CFE en el folio. `rows`: los UY CFE de la reserva (sin las tareas); `tasks`: sus tareas
+	(Reconcile) que siguen «Pending» o «Needs attention». Sin nada de eso, None (no hay tarjeta). Mientras algo no esté
+	emitido, el enlace a /facturas (`pending_url`), donde recepción lo registra o ve qué espera."""
+	if not rows and not tasks:
+		return None
+	documents = []
+	for row in rows:
+		state = desk_state(row)
+		issued = state == "issued"
+		number = SERIE_NUMBER.format(serie=row["serie"], number=row["number"]) if (
+			issued and row.get("serie") and row.get("number")) else None
+		documents.append({
+			"label": TYPE_TITLES.get(row.get("cfe_type") or "", texts.TYPE_PENDING),
+			"state": state,
+			"number": number,
+			"text": "" if issued else _desk_text(row, state),
+			"url": (row.get("pdf_url") or None) if issued else None,
+			"date": str(row["issued_at"])[:10] if issued and row.get("issued_at") else None,
+		})
+	residence = any((t.get("error") or "") == texts.RESIDENCE_MISSING for t in tasks)
+	states = {d["state"] for d in documents}
+	if residence:
+		state = "pending"
+	elif "attention" in states or any(t.get("status") == "Needs attention" for t in tasks):
+		state = "attention"
+	elif "contingency" in states:
+		state = "contingency"
+	elif "pending" in states or tasks:
+		state = "pending"
+	else:
+		state = "issued"
+	return {
+		"title": DESK_TITLE,
+		"state": state,
+		"text": STATUS_TEXTS["pending"] if not documents and not residence else "",
+		"notice": texts.RESIDENCE_MISSING if residence else "",
+		"documents": documents,
+		"link": None if state == "issued" else {"label": PENDING_PAGE, "url": pending_url},
 	}
 
 

@@ -47,6 +47,11 @@ CFE nuevo. Las filas de una reserva se procesan en orden y se para en la primera
 `process_now`, `retry` y `record_manual`. `api.invoice_print_block` tiene la firma de `invoice_print_block` de los
 paquetes de Kamra: el paquete de Uruguay la puede exponer tal cual cuando la factura impresa pinte el bloque.
 
+En la pantalla de recepción (HR-307), el paquete de Uruguay expone `api.folio_fiscal_documents` (la tarjeta del CFE en
+el folio: `model.desk_block`, con los estados de Kamra «pending», «contingency», «issued» y «attention», la serie y el
+número, el PDF y el aviso de la residencia) y `api.desk_pages` («Facturas pendientes» en el menú de recepción). La
+factura impresa de Kamra no cambia: sigue siendo el «Detalle de cuenta», que no es el comprobante fiscal.
+
 ## Textos aprobados
 
 Los de `texts.py` y los de `model.py` (`CONSUMER_NAME`, `ADJUSTMENT_TEXT`, `VERIFY_TEXT`, `TYPE_TITLES`,

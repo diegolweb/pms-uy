@@ -391,6 +391,22 @@ class TestConfirmationMail(CobrosCase):
 		self.assertNotIn(f"{formato.importe(total, 'USD', 'es')} · {a['pagado']}", mail["html"])
 		self.assertIn(formato.importe(total, "USD", "es"), mail["html"])
 		self.assertIn(formato.importe(100, "USD", "es"), mail["html"])
+		# sin pagar todo, no dice que se pagó el total; lo de la factura, siempre (23-11, el fundador)
+		t = texts.TEXTOS["es"]
+		self.assertNotIn(t["pagado_total"], mail["html"])
+		self.assertIn(f'>{t["factura"]}<', mail["html"])
+
+	def test_a_full_payment_says_so_and_that_the_invoice_comes_at_check_in(self):
+		# el correo es el aviso del pago, no un comprobante fiscal: la factura se hace siempre en el check-in
+		for idioma, check_in in (("es", 20), ("pt", 30), ("en", 40)):
+			with self.subTest(idioma=idioma):
+				res = self.book(idioma, check_in=check_in)["reservation"]
+				self.pay(res, payment_id=str(uuid.uuid4()))
+				(mail,) = self.mails(res)
+				t = texts.TEXTOS[idioma]
+				self.assertIn(f'>{t["pagado_total"]} {t["factura"]}<', mail["html"])
+				# el texto plano puede partir la línea: se compara con los espacios normalizados
+				self.assertIn(f'{t["pagado_total"]} {t["factura"]}', " ".join(mail["text"].split()))
 
 	def test_no_card_data_anywhere(self):
 		res = self.book("en")["reservation"]
@@ -452,7 +468,7 @@ class TestConfirmationMail(CobrosCase):
 		for secret in (GUEST_MAIL, PAY_1, "UT Ana"):
 			self.assertNotIn(secret, logs[0].error or "")
 
-	# --- la cancelación (HR-291) ---
+	# --- la cancelación (HR-291) y sus tramos (HR-301) ---
 
 	def cancellation_mail(self, lang: str, **policy) -> str:
 		"""El HTML del correo de una reserva web pagada, con la política de cancelación `policy` en la Property."""
@@ -461,6 +477,7 @@ class TestConfirmationMail(CobrosCase):
 		res = self.book(lang)["reservation"]
 		self.pay(res)
 		(mail,) = self.mails(res)
+		self.mailed = res
 		return mail["html"]
 
 	def test_the_mail_tells_the_cancellation_of_the_hotel_like_its_conditions_page(self):
@@ -495,13 +512,59 @@ class TestConfirmationMail(CobrosCase):
 		self.assertIn("Se você não chegar e não nos avisar, é cobrada a primeira noite.", html)
 		self.assertNotIn("Você pode cancelar sem custo", html)
 
-	def test_with_cancellation_tiers_the_free_window_is_not_promised(self):
-		# Kamra cobra por los tramos y no por free_cancel_days (kamra.api.cancellation_tier_for): la ventana sería falsa
+	def tiers(self, *bands):
 		prop = frappe.get_doc("Property", PROP)
-		prop.append("cancellation_tiers", {"days_before": 7, "charge_pct": 0, "label": "UT gratis"})
-		prop.append("cancellation_tiers", {"days_before": 0, "charge_pct": 50, "label": "UT la mitad"})
+		for days, pct in bands:
+			prop.append("cancellation_tiers", {"days_before": days, "charge_pct": pct, "label": f"UT {days}/{pct}"})
 		prop.save(ignore_permissions=True)
-		html = self.cancellation_mail("es", free_cancel_days=5, cancellation_fee="Full Stay", no_show_charge="Full Stay")
-		self.assertIn(">Cancelación<", html)
-		self.assertIn("Si no llegas y no nos avisas, se cobra el 100% de la estadía y no hay devolución.", html)
+
+	def test_with_cancellation_tiers_the_mail_tells_each_band_instead_of_the_free_window(self):
+		# Kamra cobra por los tramos y no por free_cancel_days (kamra.api._cancellation_terms, HR-301)
+		self.tiers((7, 0), (3, 50), (0, 100))
+		html = self.cancellation_mail("es", free_cancel_days=5, cancellation_fee="Full Stay", no_show_charge="First Night")
+		for literal in (">Cancelación<",
+		                "Lo que se cobra si cancelas depende de cuántos días antes de la llegada lo hagas:",
+		                "7 días o más antes: no se cobra nada y te devolvemos el total.",
+		                "De 3 a 6 días antes: se cobra el 50% de la estadía.",
+		                "Menos de 3 días antes: se cobra el 100% de la estadía y no hay devolución.",
+		                "Si no llegas y no nos avisas, se cobra la primera noche."):
+			with self.subTest(literal=literal):
+				self.assertIn(literal, html)
 		self.assertNotIn("Puedes cancelar sin costo", html)
+
+	def test_the_bands_of_the_mail_are_what_kamra_charges_each_day(self):
+		from kamra.api import cancellation_tier_for
+
+		from kamra_uy.notifications import cancelacion
+
+		# en desorden, con la más baja por encima de cero y dos seguidas que cobran lo mismo
+		self.tiers((2, 50), (21, 0), (10, 25), (5, 50))
+		html = self.cancellation_mail("en", free_cancel_days=5, cancellation_fee="First Night", no_show_charge="None")
+		for literal in ("21 days or more before: nothing is charged and we refund the full amount.",
+		                "10 to 20 days before: 25% of the stay is charged.",
+		                "Less than 10 days before: 50% of the stay is charged.",
+		                "If you do not arrive and do not let us know, nothing is charged."):
+			with self.subTest(literal=literal):
+				self.assertIn(literal, html)
+		# las filas que lleva el correo (confirmation._cancelacion, lo que pinta render)
+		datos = confirmation._cancelacion(frappe.get_doc("Reservation", self.mailed), frappe.get_doc("Property", PROP))
+		rangos = cancelacion.rangos(datos["tramos"])
+		for days in range(0, 30):
+			(pct,) = [p for desde, hasta, p in rangos if desde <= days and (hasta is None or days <= hasta)]
+			with self.subTest(days=days):
+				self.assertEqual(pct, cancellation_tier_for(PROP, days)["charge_pct"])
+
+	def test_a_single_band_charges_the_same_at_any_time(self):
+		self.tiers((3, 50))
+		html = self.cancellation_mail("pt", free_cancel_days=5, cancellation_fee="Full Stay", no_show_charge="Full Stay")
+		self.assertIn("Se você cancelar, a qualquer momento, é cobrado 50% da estadia.", html)
+		self.assertNotIn("depende de quantos dias", html)
+
+	def test_a_non_refundable_stay_wins_over_the_tiers(self):
+		frappe.get_doc({"doctype": "Season", "property": PROP, "season_name": "UT Sin devolución 2", "start_date": d(20),
+		                "end_date": d(22), "adjustment_type": "Percent", "adjustment_value": 0,
+		                "non_refundable": 1}).insert(ignore_permissions=True)
+		self.tiers((7, 0), (0, 50))
+		html = self.cancellation_mail("es", free_cancel_days=5, cancellation_fee="Full Stay", no_show_charge="Full Stay")
+		self.assertIn("Esta reserva no es reembolsable: si cancelas, se cobra el 100% de la estadía", html)
+		self.assertNotIn("depende de cuántos días", html)

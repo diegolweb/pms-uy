@@ -9,7 +9,15 @@ from pathlib import Path
 from kamra_uy.notifications import texts
 
 PAQUETE = Path(__file__).resolve().parents[2] / "kamra_uy"
-NUEVOS_DEL_CORREO = ("asunto", "saludo", "intro", "horario", "ayuda", "despedida")
+NUEVOS_DEL_CORREO = ("asunto", "saludo", "intro", "horario", "ayuda", "despedida", "pagado_total", "factura")
+
+# 23-11, lo pidió el fundador: el correo es el aviso del pago, no un comprobante fiscal; la factura se hace siempre en el
+# check-in. «pagado_total» solo sale si se pagó todo (confirmation.render); «factura», siempre.
+PAGO_Y_FACTURA = {
+	"es": ("Pagaste el total de tu estadía.", "La factura te la entregamos en el check-in."),
+	"pt": ("Você pagou o total da sua estadia.", "A fatura é entregue no check-in."),
+	"en": ("You have paid the full amount of your stay.", "We will give you the invoice at check-in."),
+}
 
 
 def test_ningun_texto_del_correo_queda_pendiente() -> None:
@@ -42,3 +50,10 @@ def test_ningun_fichero_de_kamra_uy_marca_un_texto_como_pendiente_del_fundador()
 			if marca.search(linea):
 				malos.append(f"{f.relative_to(PAQUETE)}:{n}: {linea.strip()}")
 	assert malos == []
+
+
+def test_el_correo_dice_que_la_factura_se_entrega_en_el_check_in() -> None:
+	for idioma, (pagado_total, factura) in PAGO_Y_FACTURA.items():
+		assert texts.TEXTOS[idioma]["pagado_total"] == pagado_total, idioma
+		assert texts.TEXTOS[idioma]["factura"] == factura, idioma
+		assert texts.FUENTES["pagado_total"] == texts.FUENTES["factura"] == "D-HR-48"

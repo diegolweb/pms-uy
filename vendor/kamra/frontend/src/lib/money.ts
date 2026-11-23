@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react"
 import { call, getCurrentProperty } from "./api"
 import { adoptGuestLanguage } from "./dir"
+import type { DeskPage } from "./apps"
 
 interface Locale {
   currency_symbol: string
@@ -34,6 +35,9 @@ interface Locale {
   /** The country taxes a stay by where the guest lives (Uruguay): the desk
    *  asks it at booking and at check-in. */
   asks_residence?: boolean
+  /** The country pack's own pages the desk opens from the menu (Uruguay:
+   *  the pending invoices, /facturas). Shown at the end of Front Desk. */
+  desk_pages?: DeskPage[]
   /** Country integrations this property has - India: Razorpay/Cashfree,
    *  GSTR-1, Kamra Verify. Off until the pack resolves. */
   integrations: Integrations

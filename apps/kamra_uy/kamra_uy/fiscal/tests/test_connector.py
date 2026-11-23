@@ -5,9 +5,11 @@ aviso cfe.updated, bloque CFE del folio y el descuento de la estancia repartido 
 import json
 import uuid
 from unittest.mock import patch
+from urllib.parse import quote
 
 import frappe
 from frappe.utils import add_days
+from kamra import api as kamra_api
 from kamra.tests.audit_fixtures import (
 	AuditTestCase,
 	d,
@@ -421,6 +423,76 @@ class TestClosingAndVoiding(FiscalCase):
 		original, credit = self.documents(res)
 		self.assertEqual((original.kind, credit.kind, credit.reason), ("Original", "Credit note",
 		                                                              texts.REASON_CHECK_IN_UNDONE))
+
+
+class TestTheCfeOnTheFolio(FiscalCase):
+	"""HR-307: recepción ve el CFE de la reserva en su folio (kamra.api.folio_invoice, `fiscal_documents`), pendiente,
+	en contingencia o emitido con su serie y número, y el aviso de la residencia; y llega a /facturas desde el menú
+	(kamra.api.property_locale, `desk_pages`) y desde la propia tarjeta mientras algo no esté emitido."""
+
+	PAGE = "/facturas?property=" + quote(PROP)
+
+	def card(self, res) -> dict | None:
+		return kamra_api.folio_invoice(connector._guest_folio(res.name))["fiscal_documents"]
+
+	def test_the_issued_cfe_shows_with_its_type_series_and_number_before_the_bill_is_settled(self):
+		res = self.stay()
+		connector.process_reservation(res.name)
+		[cfe] = self.documents(res)
+		bill = kamra_api.folio_invoice(connector._guest_folio(res.name))
+		card = bill["fiscal_documents"]
+		self.assertEqual((card["title"], card["state"], card["notice"], card["link"]),
+		                 (model.DESK_TITLE, "issued", "", None))
+		[doc] = card["documents"]
+		self.assertEqual((doc["label"], doc["state"], doc["number"]),
+		                 ("e-Ticket", "issued", f"Serie A, número {cfe.number}"))
+		# la factura de Kamra sigue siendo provisional y no lleva bloque impreso: el CFE no es el de ZATCA
+		self.assertIsNone(bill["statutory"])
+		self.assertFalse(bill["document"]["is_final"])
+
+	def test_a_cfe_in_contingency_shows_as_such_and_leads_to_the_pending_invoices_until_it_is_recorded(self):
+		self.core.contingency = True
+		res = self.stay()
+		connector.process_reservation(res.name)
+		card = self.card(res)
+		self.assertEqual(card["state"], "contingency")
+		[doc] = card["documents"]
+		self.assertEqual((doc["state"], doc["number"], doc["text"]), ("contingency", None, model.DESK_CONTINGENCY))
+		self.assertEqual(card["link"], {"label": model.PENDING_PAGE, "url": self.PAGE})
+
+		[item] = [i for i in api.pending(PROP)["items"] if i["reservation"] == res.name]
+		api.record_manual(item["name"], "portal", 201, "A", "0001234", "2026-12-07T10:30")
+		card = self.card(res)
+		self.assertEqual((card["state"], card["link"]), ("issued", None))
+		self.assertEqual(card["documents"][0]["number"], "Serie A, número 1234")
+
+	def test_a_core_that_does_not_answer_leaves_the_cfe_pending(self):
+		self.core.down = True
+		res = self.stay()
+		connector.process_reservation(res.name)
+		card = self.card(res)
+		self.assertEqual((card["state"], card["notice"]), ("pending", ""))
+		self.assertEqual(card["link"], {"label": model.PENDING_PAGE, "url": self.PAGE})
+
+	def test_without_the_residence_the_folio_says_what_to_do(self):
+		res = self.stay()
+		frappe.db.set_value("Guest", res.guest, "residence_country", None)  # sin ganchos, como un dato viejo
+		connector.process_reservation(res.name)
+		card = self.card(res)
+		self.assertEqual((card["state"], card["notice"], card["documents"]), ("pending", texts.RESIDENCE_MISSING, []))
+		self.assertEqual(card["link"], {"label": model.PENDING_PAGE, "url": self.PAGE})
+
+	def test_a_booking_not_checked_in_has_no_card(self):
+		res = make_reservation(PROP, self.rt, d(1), d(3), room=self.room)
+		folio = connector._guest_folio(res.name)
+		if folio:
+			self.assertIsNone(kamra_api.folio_invoice(folio)["fiscal_documents"])
+		self.assertIsNone(api.folio_fiscal_documents("FOLIO-QUE-NO-EXISTE"))
+
+	def test_the_menu_takes_the_desk_to_the_pending_invoices(self):
+		self.assertEqual(kamra_api.property_locale(PROP)["desk_pages"], [
+			{"label": model.PENDING_PAGE, "url": self.PAGE,
+			 "roles": ["Front Desk", "Finance", "Hotel Admin", "System Manager", "Administrator"]}])
 
 
 class TestDiscountByNight(FiscalCase):

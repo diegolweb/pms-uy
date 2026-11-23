@@ -37,6 +37,7 @@ import {
   Printer,
   Plus,
   Receipt,
+  FileText,
   ScrollText,
   Settings as SettingsIcon,
   Shirt,
@@ -77,6 +78,7 @@ import {
 import { useEffect, useState } from "react"
 
 import { call } from "./api"
+import { locale } from "./money"
 
 /** "Night audit" is what most hotels call End of Day; EOD is what they type. */
 const EOD_KEYWORDS = ["End of day", "EOD", "Close the day", "Roll the date"]
@@ -448,8 +450,36 @@ export function appForPath(pathname: string, among: AppDef[] = APPS, keep?: stri
  *  property must actually run it. Roles alone were never enough - Front
  *  Desk unlocks both F&B and Banquets, so a serviced-apartment operator
  *  had no way to not see them. */
-export function visibleApps(roles: string[], modules?: string[]): AppDef[] {
-  return APPS.filter(
+/** A page of the property's country pack (kamra.localization.desk_pages):
+ *  Uruguay's pending invoices. It lives outside this app - a link, opened in
+ *  a new tab. */
+export interface DeskPage {
+  label: string
+  url: string
+  roles?: string[]
+}
+
+/** The apps with the pack's pages at the end of Front Desk, before its
+ *  Settings. The registry itself is never changed. */
+export function withDeskPages(apps: AppDef[], pages?: DeskPage[]): AppDef[] {
+  if (!pages?.length) return apps
+  const extra: AppNavItem[] = pages.map((p) => ({
+    href: p.url, label: p.label, icon: FileText,
+    ...(p.roles?.length ? { roles: p.roles } : {}),
+  }))
+  return apps.map((app) => {
+    if (app.id !== "front-desk") return app
+    const settings = app.items.findIndex((i) => i.to?.startsWith("/settings/"))
+    const at = settings < 0 ? app.items.length : settings
+    return { ...app, items: [...app.items.slice(0, at), ...extra, ...app.items.slice(at)] }
+  })
+}
+
+/** The apps these roles may open, with the property's pack pages (from its
+ *  locale unless given) - the sidebar and the command palette read this. */
+export function visibleApps(roles: string[], modules?: string[],
+  deskPages: DeskPage[] | undefined = locale().desk_pages): AppDef[] {
+  return withDeskPages(APPS, deskPages).filter(
     (a) =>
       a.roles.some((r) => roles.includes(r)) &&
       (!modules?.length || modules.includes(a.id)),

@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from kamra_uy.fiscal import model
+from kamra_uy.fiscal import model, texts
 
 
 # ── residencia y documento ────────────────────────────────────────────────────────────────────────────────────────
@@ -389,3 +389,90 @@ def test_manual_issue_rejects_what_core_would_not_take(fields, fragment) -> None
     base = {"via": "portal", "type_code": "101", "serie": "A", "number": "1", "issued_at": "2026-12-07T10:30"}
     with pytest.raises(ValueError, match=fragment):
         model.manual_issue("e-ticket", **{**base, **fields})
+
+
+# ── el CFE en el folio de recepción (HR-307; kamra.localization.folio_fiscal_documents) ─────────────────────────────
+PAGE = "/facturas?property=Hotel%20Roosevelt"
+ISSUED_ROW = {"kind": "Original", "status": "Sent", "core_status": "issued", "cfe_type": "e-ticket", "serie": "A",
+              "number": "1234", "pdf_url": "https://example.org/cfe/A-1234.pdf",
+              "issued_at": "2026-12-07T15:00:05-03:00"}
+
+
+@pytest.mark.parametrize(("row", "state"), [
+    ({"status": "Pending"}, "pending"),  # aún no llegó a core
+    ({"status": "Sent", "core_status": "queued"}, "pending"),
+    ({"status": "Sent", "core_status": "contingency"}, "contingency"),
+    ({"status": "Sent", "core_status": "issued"}, "issued"),
+    ({"status": "Sent", "core_status": "rejected"}, "attention"),
+    ({"status": "Needs attention"}, "attention"),
+    ({"status": "Sent", "core_status": "otro"}, "pending"),  # lo que no se conoce nunca es «emitido»
+])
+def test_desk_state(row, state) -> None:
+    assert model.desk_state(row) == state
+
+
+def test_nothing_asked_yet_is_no_card() -> None:
+    assert model.desk_block([], [], PAGE) is None
+
+
+def test_an_issued_cfe_shows_its_type_series_number_and_pdf_and_no_link() -> None:
+    block = model.desk_block([ISSUED_ROW], [], PAGE)
+    assert block == {
+        "title": model.DESK_TITLE, "state": "issued", "text": "", "notice": "",
+        "documents": [{"label": "e-Ticket", "state": "issued", "number": "Serie A, número 1234", "text": "",
+                       "url": "https://example.org/cfe/A-1234.pdf", "date": "2026-12-07"}],
+        "link": None,
+    }
+
+
+def test_a_cfe_in_contingency_has_no_number_and_leads_to_the_pending_invoices() -> None:
+    row = {**ISSUED_ROW, "core_status": "contingency", "serie": None, "number": None, "pdf_url": None,
+           "issued_at": None}
+    block = model.desk_block([row], [], PAGE)
+    assert block["state"] == "contingency"
+    [doc] = block["documents"]
+    assert (doc["number"], doc["url"], doc["date"]) == (None, None, None)
+    assert doc["text"] == model.DESK_CONTINGENCY
+    assert block["link"] == {"label": model.PENDING_PAGE, "url": PAGE}
+
+
+def test_a_cfe_not_in_core_yet_says_it_is_retried_and_names_no_type_until_core_picks_it() -> None:
+    block = model.desk_block([{"kind": "Original", "status": "Pending", "cfe_type": None}], [], PAGE)
+    assert block["state"] == "pending"
+    [doc] = block["documents"]
+    assert doc["label"] == texts.TYPE_PENDING
+    assert doc["text"] == model.STATUS_TEXTS["pending"]
+
+
+def test_a_stay_whose_cfe_is_still_being_worked_out_is_pending() -> None:
+    # la tarea del check-in aún no dio ningún CFE: no hay documentos, pero sí el estado
+    block = model.desk_block([], [{"status": "Pending", "error": ""}], PAGE)
+    assert (block["state"], block["documents"], block["notice"]) == ("pending", [], "")
+    assert block["text"] == model.STATUS_TEXTS["pending"]
+    assert block["link"] == {"label": model.PENDING_PAGE, "url": PAGE}
+
+
+def test_without_the_residence_the_notice_says_what_to_do() -> None:
+    block = model.desk_block([], [{"status": "Pending", "error": texts.RESIDENCE_MISSING}], PAGE)
+    assert (block["state"], block["notice"], block["text"]) == ("pending", texts.RESIDENCE_MISSING, "")
+    assert block["link"] == {"label": model.PENDING_PAGE, "url": PAGE}
+
+
+def test_what_needs_finance_says_so_and_wins_over_the_rest() -> None:
+    contingency = {**ISSUED_ROW, "core_status": "contingency"}
+    rejected = {**ISSUED_ROW, "core_status": "rejected"}
+    block = model.desk_block([ISSUED_ROW, contingency, rejected], [], PAGE)
+    assert block["state"] == "attention"
+    assert [d["state"] for d in block["documents"]] == ["issued", "contingency", "attention"]
+    assert block["documents"][2]["text"] == model.STATUS_TEXTS["rejected"]
+    attention = model.desk_block([{"kind": "Original", "status": "Needs attention", "cfe_type": "e-ticket"}], [],
+                                 PAGE)
+    assert attention["documents"][0]["text"] == model.NEEDS_ATTENTION
+    assert model.desk_block([ISSUED_ROW], [{"status": "Needs attention", "error": "x"}], PAGE)["state"] == "attention"
+
+
+def test_an_issued_stay_with_a_pending_adjustment_is_pending_not_issued() -> None:
+    adjustment = {"kind": "Original", "status": "Pending", "cfe_type": "e-ticket"}
+    assert model.desk_block([ISSUED_ROW, adjustment], [], PAGE)["state"] == "pending"
+    assert model.desk_block([ISSUED_ROW, {**ISSUED_ROW, "cfe_type": "nc-e-ticket"}], [], PAGE)["documents"][1][
+        "label"] == "Nota de crédito de e-Ticket"

@@ -21,11 +21,12 @@ RESPONSE_KEYS: dict[str, tuple[str, ...]] = {
 	"api.folio_invoice": (
 		"folio", "property", "guest", "stay", "bill_to", "document", "lines",
 		"summary_by_head", "tax_summary", "gst_summary", "statutory",
+		"fiscal_documents",
 	),
 	"api.property_locale": (
 		"currency", "currency_symbol", "locale", "tax_label", "tax_id_label",
 		"tax_rates", "payment_modes", "integrations", "fnb_tax_rate",
-		"sells_alcohol",
+		"sells_alcohol", "desk_pages",
 	),
 	"cashier.list_sessions": ("sessions", "business_date"),
 	"cashier.session_report": (

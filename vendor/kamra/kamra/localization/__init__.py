@@ -624,3 +624,86 @@ def invoice_print_block(pack, source_doctype: str, source_name: str,
 	bilingual title) - None where nothing is required."""
 	return _hook(pack, "invoice_print_block", source_doctype, source_name,
 	             number)
+
+
+# ── the folio's tax receipt, where someone else issues it ────────────────
+#
+# In some countries the receipt the tax office counts is not the hotel's
+# bill: Uruguay's CFE is issued by an e-invoicing provider at check-in, and
+# it can wait (no answer yet, contingency, the guest's residence missing).
+# A pack like that implements
+#
+#   folio_fiscal_documents(folio) -> dict | None
+#       {"title": "<what the receipt is called>",
+#        "state": "pending" | "contingency" | "issued" | "attention",
+#        "text": "<the state in words>", "notice": "<what the desk must do>",
+#        "documents": [{"label": "<its type>", "state": <as above>,
+#                       "number": "<series and number>" | None,
+#                       "text": str, "url": "<its PDF>" | None, "date": str | None}],
+#        "link": {"label": str, "url": str} | None}   the pack's own page for it
+#
+# and the folio shows it in a card of its own, open or settled, on screen.
+# It is never the printed block of invoice_print_block (ZATCA's QR), which
+# stays where it is. A state the desk does not know reads as "pending" -
+# never as issued. A pack may also give the desk pages of its own, for the
+# menu:
+#
+#   desk_pages(property) -> [{"label": str, "url": str, "roles": [str]}]
+#
+# Links go to this site ("/...") or over https; anything else is dropped.
+
+FISCAL_STATES = ("pending", "contingency", "issued", "attention")
+
+
+def _fiscal_state(value) -> str:
+	return value if value in FISCAL_STATES else "pending"
+
+
+def _safe_url(value) -> str | None:
+	url = str(value or "").strip()
+	if (url.startswith("/") and not url.startswith("//")) or url.startswith("https://"):
+		return url
+	return None
+
+
+def _text(value) -> str:
+	return str(value or "").strip()
+
+
+def folio_fiscal_documents(pack, folio: str):
+	raw = _hook(pack, "folio_fiscal_documents", folio)
+	if not raw:
+		return None
+	link = raw.get("link") or {}
+	link_url = _safe_url(link.get("url"))
+	return {
+		"title": _text(raw.get("title")),
+		"state": _fiscal_state(raw.get("state")),
+		"text": _text(raw.get("text")),
+		"notice": _text(raw.get("notice")),
+		"documents": [{
+			"label": _text(doc.get("label")),
+			"state": _fiscal_state(doc.get("state")),
+			"number": _text(doc.get("number")) or None,
+			"text": _text(doc.get("text")),
+			"url": _safe_url(doc.get("url")),
+			"date": _text(doc.get("date")) or None,
+		} for doc in raw.get("documents") or []],
+		"link": {"label": _text(link.get("label")), "url": link_url}
+		if link_url and _text(link.get("label")) else None,
+	}
+
+
+def desk_pages(pack, property: str) -> list[dict]:
+	fn = getattr(pack, "desk_pages", None)
+	if not callable(fn):
+		return []
+	try:
+		pages = fn(property) or []
+	except Exception:
+		frappe.log_error(title="localization: desk_pages failed",
+		                 message=frappe.get_traceback())
+		return []
+	return [{"label": _text(p.get("label")), "url": _safe_url(p.get("url")),
+	         "roles": [str(r) for r in p.get("roles") or []]}
+	        for p in pages if _text(p.get("label")) and _safe_url(p.get("url"))]

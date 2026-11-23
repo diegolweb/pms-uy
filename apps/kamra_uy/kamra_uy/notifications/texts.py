@@ -6,8 +6,9 @@ FUENTES:
   página de confirmada (fuente «HR-175») y el aviso del IVA a residentes, que con D-HR-47 (HR-266: el 10 % se paga al
   reservar) es el `iva.aviso` nuevo de reservar.md (fuente «D-HR-48»). Si cambian allí, cambian aquí (la guarda es
   kamra_uy/tests/test_confirmation_mail.py).
-- Los nuevos del correo (asunto, saludo, entrada, horario, ayuda, despedida): fuente «D-HR-48». Lo que no le guste al
-  fundador se cambia después.
+- Los nuevos del correo (asunto, saludo, entrada, horario, ayuda, despedida, y pagado_total y factura, que pidió el
+  fundador el 23-11: el correo es el aviso del pago y la factura se entrega en el check-in): fuente «D-HR-48». Lo que
+  no le guste al fundador se cambia después.
 
 Aquí no va ningún dato del hotel (kamra_uy se publica como AGPL): el nombre, la dirección y el contacto salen de la
 Property. Español neutro, portugués de Brasil con «você», inglés internacional; «check-in» y «check-out» se quedan así.
@@ -42,6 +43,9 @@ TEXTOS = {
 		"horario": "Check-in desde las {entrada} · Check-out hasta las {salida}",
 		"ayuda": "Si necesitas cambiar algo de tu reserva, escríbenos.",
 		"despedida": "Te esperamos en {hotel}.",
+		# el aviso del pago no es un comprobante fiscal (23-11, el fundador): «pagado_total» solo si se pagó todo
+		"pagado_total": "Pagaste el total de tu estadía.",
+		"factura": "La factura te la entregamos en el check-in.",
 	},
 	"pt": {
 		"confirmada": "Reserva confirmada",
@@ -63,6 +67,8 @@ TEXTOS = {
 		"horario": "Check-in a partir das {entrada} · Check-out até as {salida}",
 		"ayuda": "Se você precisar alterar algo na sua reserva, fale com a gente.",
 		"despedida": "Esperamos você no {hotel}.",
+		"pagado_total": "Você pagou o total da sua estadia.",
+		"factura": "A fatura é entregue no check-in.",
 	},
 	"en": {
 		"confirmada": "Booking confirmed",
@@ -84,6 +90,8 @@ TEXTOS = {
 		"horario": "Check-in from {entrada} · Check-out by {salida}",
 		"ayuda": "If you need to change anything in your booking, get in touch.",
 		"despedida": "We look forward to welcoming you at {hotel}.",
+		"pagado_total": "You have paid the full amount of your stay.",
+		"factura": "We will give you the invoice at check-in.",
 	},
 }
 
@@ -113,6 +121,17 @@ CANCELACION = {
 		"no_show_full_stay": "Si no llegas y no nos avisas, se cobra el 100% de la estadía y no hay devolución.",
 		"no_show_first_night": "Si no llegas y no nos avisas, se cobra la primera noche.",
 		"no_show_none": "Si no llegas y no nos avisas, no se cobra nada.",
+		# los tramos de Property.cancellation_tiers (HR-301): {dias} = «7 días», {cobro} = uno de los cobro_*
+		"tramos_intro": "Lo que se cobra si cancelas depende de cuántos días antes de la llegada lo hagas:",
+		"tramo_desde": "{dias} o más antes: {cobro}.",
+		"tramo_entre": "De {desde} a {hasta} antes: {cobro}.",
+		"tramo_exacto": "{dias} antes: {cobro}.",
+		"tramo_menos": "Menos de {dias} antes: {cobro}.",
+		"tramo_llegada": "El día de la llegada: {cobro}.",
+		"tramo_siempre": "Si cancelas, en cualquier momento, {cobro}.",
+		"cobro_nada": "no se cobra nada y te devolvemos el total",
+		"cobro_parte": "se cobra el {pct} de la estadía",
+		"cobro_total": "se cobra el {pct} de la estadía y no hay devolución",
 	},
 	"pt": {
 		"titulo": "Cancelamento",
@@ -127,6 +146,16 @@ CANCELACION = {
 		"no_show_full_stay": "Se você não chegar e não nos avisar, é cobrado 100% da estadia e não há devolução.",
 		"no_show_first_night": "Se você não chegar e não nos avisar, é cobrada a primeira noite.",
 		"no_show_none": "Se você não chegar e não nos avisar, nada é cobrado.",
+		"tramos_intro": "O valor cobrado se você cancelar depende de quantos dias antes da chegada você cancelar:",
+		"tramo_desde": "{dias} ou mais antes: {cobro}.",
+		"tramo_entre": "De {desde} a {hasta} antes: {cobro}.",
+		"tramo_exacto": "{dias} antes: {cobro}.",
+		"tramo_menos": "Menos de {dias} antes: {cobro}.",
+		"tramo_llegada": "No dia da chegada: {cobro}.",
+		"tramo_siempre": "Se você cancelar, a qualquer momento, {cobro}.",
+		"cobro_nada": "nada é cobrado e devolvemos o valor total",
+		"cobro_parte": "é cobrado {pct} da estadia",
+		"cobro_total": "é cobrado {pct} da estadia e não há devolução",
 	},
 	"en": {
 		"titulo": "Cancellation",
@@ -142,6 +171,16 @@ CANCELACION = {
 		                     "refund.",
 		"no_show_first_night": "If you do not arrive and do not let us know, the first night is charged.",
 		"no_show_none": "If you do not arrive and do not let us know, nothing is charged.",
+		"tramos_intro": "What you are charged if you cancel depends on how many days before arrival you do it:",
+		"tramo_desde": "{dias} or more before: {cobro}.",
+		"tramo_entre": "{desde} to {hasta} before: {cobro}.",
+		"tramo_exacto": "{dias} before: {cobro}.",
+		"tramo_menos": "Less than {dias} before: {cobro}.",
+		"tramo_llegada": "On the day of arrival: {cobro}.",
+		"tramo_siempre": "If you cancel, at any time, {cobro}.",
+		"cobro_nada": "nothing is charged and we refund the full amount",
+		"cobro_parte": "{pct} of the stay is charged",
+		"cobro_total": "{pct} of the stay is charged and there is no refund",
 	},
 }
 

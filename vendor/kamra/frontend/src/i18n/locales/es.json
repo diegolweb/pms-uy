@@ -6796,5 +6796,9 @@
   "Country of residence": "País de residencia",
   "Check-in needs it: the tax on the bill depends on it.": "El check-in no se hace sin esto: de eso depende el impuesto de la factura.",
   "Check it against the ID: the tax on the bill depends on it.": "Compruébelo con el documento: de eso depende el impuesto de la factura.",
-  "Ask where the guest lives (guest details) before check-in.": "Pregunte dónde reside el huésped (datos del huésped) antes de hacer el check-in."
+  "Ask where the guest lives (guest details) before check-in.": "Pregunte dónde reside el huésped (datos del huésped) antes de hacer el check-in.",
+  "Tax receipt": "Comprobante fiscal",
+  "In contingency": "En contingencia",
+  "Issued": "Emitido",
+  "Open the PDF": "Abrir el PDF"
 }
