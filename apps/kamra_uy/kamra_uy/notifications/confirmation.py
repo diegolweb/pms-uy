@@ -10,8 +10,8 @@ La página de confirmada de la web promete «Te enviamos la confirmación por em
   con dinero cobrado (`advance_paid` > 0) —el aviso `payment.approved` de core, kamra_uy.payments.webhook, que asienta
   el pago y confirma con kamra.api._confirm_status—, encola UN correo al correo del huésped, en el idioma guardado (sin
   él, el de la propiedad, `booking_language`; sin ese, español). Lleva la referencia, las fechas, las noches, la
-  habitación, los huéspedes, el total pagado, el horario de check-in y check-out, la dirección y el contacto de la
-  propiedad y, si alguna noche cae en la alta temporada (kamra_uy.pure.turismo, D-HR-40), el aviso del IVA a residentes.
+  habitación, los huéspedes, el total pagado, el horario de check-in y check-out, la cancelación (HR-291:
+  kamra_uy.notifications.cancelacion, con los campos de la Property), la dirección y el contacto de la propiedad y, si alguna noche cae en la alta temporada (kamra_uy.pure.turismo, D-HR-40), el aviso del IVA a residentes.
   La identidad (logo, letra, colores, pie) se la pone HR-32 (kamra_uy.branding.correo.envolver).
 
 Un solo correo por reserva: lo marca `uy_confirmation_mail_on` al encolarlo; otro aviso del mismo pago, otro pago, otro
@@ -32,7 +32,7 @@ import frappe
 from frappe.utils import cint, date_diff, flt, now_datetime
 
 from kamra_uy.branding import correo, marca
-from kamra_uy.notifications import formato
+from kamra_uy.notifications import cancelacion, formato
 from kamra_uy.notifications.texts import TEXTOS
 from kamra_uy.pure.turismo import aviso_iva_residentes
 
@@ -143,7 +143,7 @@ def compose(res) -> dict | None:
 	prop = frappe.db.get_value(
 		"Property", res.property,
 		["property_name", "address_line", "city", "phone", "email", "currency", "checkin_time", "checkout_time",
-		 "booking_language"], as_dict=True)
+		 "booking_language", "free_cancel_days", "cancellation_fee", "no_show_charge"], as_dict=True)
 	idioma = marca.idioma(res.get(LANGUAGE_FIELD) or prop.booking_language)
 	datos = {
 		"hotel": prop.property_name or res.property,
@@ -163,10 +163,24 @@ def compose(res) -> dict | None:
 		"direccion": ", ".join(x.strip() for x in (prop.address_line, prop.city) if x and x.strip()),
 		"telefono": (prop.phone or "").strip(),
 		"correo": (prop.email or "").strip(),
+		"cancelacion": _cancelacion(res, prop),
 	}
 	subject, html = render(datos, idioma)
 	return {"to": to, "subject": subject, "message": correo.envolver(html, idioma), "reply_to": datos["correo"] or None,
 	        "idioma": idioma}
+
+
+def _cancelacion(res, prop) -> dict:
+	"""La política de cancelación de `res` con los campos de su Property, como la cobra Kamra
+	(kamra.api._cancellation_terms): los tramos de la Property mandan sobre `free_cancel_days`, y una noche en una
+	temporada o un paquete `non_refundable` (kamra.pricing.stay_season_rules, la misma llamada) manda sobre los dos."""
+	from kamra.pricing import stay_season_rules
+
+	tramos = frappe.db.exists("Cancellation Tier", {"parenttype": "Property", "parentfield": "cancellation_tiers",
+	                                                "parent": res.property})
+	reglas = stay_season_rules(res.property, res.check_in_date, res.check_out_date, res.room_type)
+	return {"dias": prop.free_cancel_days, "cargo": prop.cancellation_fee, "no_show": prop.no_show_charge,
+	        "tramos": bool(tramos), "no_reembolsable": bool(reglas["non_refundable"])}
 
 
 # --- el cuerpo ---------------------------------------------------------------------------------------------------
@@ -208,6 +222,12 @@ def render(datos: dict, idioma: str) -> tuple[str, str]:
 		partes.append(f'<p data-aviso="iva">{escape(t["iva"])}</p>')
 	if datos["entrada"] and datos["salida_hora"]:
 		partes.append(f"<p>{escape(t['horario'].format(entrada=datos['entrada'], salida=datos['salida_hora']))}</p>")
+	if datos.get("cancelacion"):
+		c = datos["cancelacion"]
+		titulo, textos = cancelacion.parrafos(idioma, c["dias"], c["cargo"], c["no_show"], tramos=c["tramos"],
+		                                      no_reembolsable=c["no_reembolsable"])
+		partes.append(f'<h2 style="margin:24px 0 4px 0;font-size:18px;line-height:24px;">{escape(titulo)}</h2>'
+		              + "".join(f'<p data-cancelacion style="margin:0 0 8px 0;">{escape(x)}</p>' for x in textos))
 	if datos["direccion"]:
 		partes.append(f'<h2 style="margin:24px 0 4px 0;font-size:18px;line-height:24px;">{escape(t["direccion"])}</h2>'
 		              f'<p style="margin:0;">{escape(datos["direccion"])}</p>')

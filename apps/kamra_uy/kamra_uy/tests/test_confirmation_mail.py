@@ -451,3 +451,57 @@ class TestConfirmationMail(CobrosCase):
 		self.assertEqual((logs[0].reference_doctype, logs[0].reference_name), ("Reservation", res))
 		for secret in (GUEST_MAIL, PAY_1, "UT Ana"):
 			self.assertNotIn(secret, logs[0].error or "")
+
+	# --- la cancelación (HR-291) ---
+
+	def cancellation_mail(self, lang: str, **policy) -> str:
+		"""El HTML del correo de una reserva web pagada, con la política de cancelación `policy` en la Property."""
+		frappe.db.set_value("Property", PROP, policy)
+		frappe.clear_document_cache("Property", PROP)
+		res = self.book(lang)["reservation"]
+		self.pay(res)
+		(mail,) = self.mails(res)
+		return mail["html"]
+
+	def test_the_mail_tells_the_cancellation_of_the_hotel_like_its_conditions_page(self):
+		# la planilla del 22-11 (HR-290): 5 días, y el 100 % al cancelar tarde o al no llegar. Literales de la Sección 1
+		# de web/content/es/condiciones.md (la guarda contra el fichero vive en tests/unit/test_correo_cancelacion.py:
+		# el contenedor de Kamra no tiene web/)
+		html = self.cancellation_mail("es", free_cancel_days=5, cancellation_fee="Full Stay", no_show_charge="Full Stay")
+		for literal in (">Cancelación<",
+		                "Puedes cancelar sin costo hasta 5 días antes de la llegada: te devolvemos el total. Si cancelas "
+		                "después, se cobra el 100% de la estadía y no hay devolución.",
+		                "Si no llegas y no nos avisas, se cobra el 100% de la estadía y no hay devolución."):
+			with self.subTest(literal=literal):
+				self.assertIn(literal, html)
+
+	def test_the_cancellation_follows_the_property_fields(self):
+		html = self.cancellation_mail("en", free_cancel_days=2, cancellation_fee="First Night", no_show_charge="None")
+		for literal in (">Cancellation<",
+		                "You can cancel free of charge up to 2 days before arrival: we refund the full amount. If you "
+		                "cancel later, the first night is charged.",
+		                "If you do not arrive and do not let us know, nothing is charged."):
+			with self.subTest(literal=literal):
+				self.assertIn(literal, html)
+		self.assertNotIn("100% of the stay", html)  # «Full Stay» no está (el HTML lleva width="100%")
+
+	def test_a_non_refundable_stay_says_so_instead_of_the_free_window(self):
+		frappe.get_doc({"doctype": "Season", "property": PROP, "season_name": "UT Sin devolución", "start_date": d(20),
+		                "end_date": d(22), "adjustment_type": "Percent", "adjustment_value": 0,
+		                "non_refundable": 1}).insert(ignore_permissions=True)
+		html = self.cancellation_mail("pt", free_cancel_days=5, cancellation_fee="First Night",
+		                              no_show_charge="First Night")
+		self.assertIn("Esta reserva não é reembolsável: se cancelar, é cobrado 100% da estadia e não há devolução.", html)
+		self.assertIn("Se você não chegar e não nos avisar, é cobrada a primeira noite.", html)
+		self.assertNotIn("Você pode cancelar sem custo", html)
+
+	def test_with_cancellation_tiers_the_free_window_is_not_promised(self):
+		# Kamra cobra por los tramos y no por free_cancel_days (kamra.api.cancellation_tier_for): la ventana sería falsa
+		prop = frappe.get_doc("Property", PROP)
+		prop.append("cancellation_tiers", {"days_before": 7, "charge_pct": 0, "label": "UT gratis"})
+		prop.append("cancellation_tiers", {"days_before": 0, "charge_pct": 50, "label": "UT la mitad"})
+		prop.save(ignore_permissions=True)
+		html = self.cancellation_mail("es", free_cancel_days=5, cancellation_fee="Full Stay", no_show_charge="Full Stay")
+		self.assertIn(">Cancelación<", html)
+		self.assertIn("Si no llegas y no nos avisas, se cobra el 100% de la estadía y no hay devolución.", html)
+		self.assertNotIn("Puedes cancelar sin costo", html)

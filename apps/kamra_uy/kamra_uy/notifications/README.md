@@ -28,6 +28,14 @@ sin ese, español.
   (`formato.py` = `importe` y `fechaCorta` de web/src/booking/reglas.ts).
 - El aviso del IVA a residentes si **alguna noche** cae entre el 16 de noviembre y el domingo de Pascua siguiente
   (`kamra_uy.pure.turismo`, D-HR-40, los mismos vectores que la web).
+- La cancelación (HR-291, `cancelacion.py`), con los campos de la Property y lo que Kamra cobra de verdad
+  (`kamra.api._cancellation_terms`): gratis hasta `free_cancel_days` días antes de la llegada y, después, lo de
+  `cancellation_fee` («Full Stay», el 100 % de la estadía; «First Night», la primera noche); con 0 días o sin cargo,
+  gratis hasta el día de la llegada. Y si no llega, lo de `no_show_charge` (o que no se cobra nada). Si la Property tiene
+  tramos (`cancellation_tiers`), Kamra cobra por ellos y la ventana no se dice (los tramos en el correo: HR-301); si una
+  noche cae en una temporada o un paquete `non_refundable`, dice que la reserva no es reembolsable. Con los de la
+  planilla del hotel (5 días, «Full Stay» y «Full Stay») dice lo mismo que web/content/*/condiciones.md: la guarda es
+  `apps/kamra_uy/tests/unit/test_correo_cancelacion.py`, que lee el fichero de la web.
 - El horario de check-in y check-out, la dirección y el contacto de la Property. Responder va al correo de la Property
   (Reply-To).
 

@@ -92,6 +92,59 @@ TEXTOS = {
 FUENTES = {k: "HR-175" if k in DE_LA_WEB and k != "iva" else "D-HR-48" for k in TEXTOS["es"]}
 APROBADOS = tuple(FUENTES)  # todos: con D-HR-48 ya no hay lista de los que esperan al fundador
 
+# La cancelación (HR-291): la arma kamra_uy.notifications.cancelacion con los campos de la Property
+# (`free_cancel_days`, `cancellation_fee`, `no_show_charge`), sin cifras fijas: `{dias}` es «5 días» o «1 día» (`dias` o `dia`, el singular). Los de
+# CANCELACION_DE_LA_WEB, con 5 días y «Full Stay», son literales de la Sección 1 de web/content/{es,pt,en}/condiciones.md
+# (el titular h2 «Cancelación» y sus dos textos; la guarda es kamra_uy/tests/unit/test_correo_cancelacion.py); los
+# demás son los otros valores de Kamra, nuevos del correo. Todos aprobados con D-HR-48.
+CANCELACION_DE_LA_WEB = ("titulo", "gratis_hasta", "despues_full_stay", "no_show_full_stay")
+
+CANCELACION = {
+	"es": {
+		"titulo": "Cancelación",
+		"dia": "{n} día",
+		"dias": "{n} días",
+		"gratis_hasta": "Puedes cancelar sin costo hasta {dias} antes de la llegada: te devolvemos el total.",
+		"gratis_hasta_la_llegada": "Puedes cancelar sin costo hasta el día de la llegada: te devolvemos el total.",
+		"despues_full_stay": "Si cancelas después, se cobra el 100% de la estadía y no hay devolución.",
+		"despues_first_night": "Si cancelas después, se cobra la primera noche.",
+		"no_reembolsable": "Esta reserva no es reembolsable: si cancelas, se cobra el 100% de la estadía y no hay "
+		                   "devolución.",
+		"no_show_full_stay": "Si no llegas y no nos avisas, se cobra el 100% de la estadía y no hay devolución.",
+		"no_show_first_night": "Si no llegas y no nos avisas, se cobra la primera noche.",
+		"no_show_none": "Si no llegas y no nos avisas, no se cobra nada.",
+	},
+	"pt": {
+		"titulo": "Cancelamento",
+		"dia": "{n} dia",
+		"dias": "{n} dias",
+		"gratis_hasta": "Você pode cancelar sem custo até {dias} antes da chegada: devolvemos o valor total.",
+		"gratis_hasta_la_llegada": "Você pode cancelar sem custo até o dia da chegada: devolvemos o valor total.",
+		"despues_full_stay": "Se cancelar depois, é cobrado 100% da estadia e não há devolução.",
+		"despues_first_night": "Se cancelar depois, é cobrada a primeira noite.",
+		"no_reembolsable": "Esta reserva não é reembolsável: se cancelar, é cobrado 100% da estadia e não há "
+		                   "devolução.",
+		"no_show_full_stay": "Se você não chegar e não nos avisar, é cobrado 100% da estadia e não há devolução.",
+		"no_show_first_night": "Se você não chegar e não nos avisar, é cobrada a primeira noite.",
+		"no_show_none": "Se você não chegar e não nos avisar, nada é cobrado.",
+	},
+	"en": {
+		"titulo": "Cancellation",
+		"dia": "{n} day",
+		"dias": "{n} days",
+		"gratis_hasta": "You can cancel free of charge up to {dias} before arrival: we refund the full amount.",
+		"gratis_hasta_la_llegada": "You can cancel free of charge until the day of arrival: we refund the full amount.",
+		"despues_full_stay": "If you cancel later, 100% of the stay is charged and there is no refund.",
+		"despues_first_night": "If you cancel later, the first night is charged.",
+		"no_reembolsable": "This booking is non-refundable: if you cancel, 100% of the stay is charged and there is "
+		                   "no refund.",
+		"no_show_full_stay": "If you do not arrive and do not let us know, 100% of the stay is charged and there is no "
+		                     "refund.",
+		"no_show_first_night": "If you do not arrive and do not let us know, the first night is charged.",
+		"no_show_none": "If you do not arrive and do not let us know, nothing is charged.",
+	},
+}
+
 # Los días (de domingo a sábado) y los meses de las fechas, los mismos que `fechas.dias` y `fechas.meses` de
 # web/content/*/reservar.md y DIAS/MESES de web/src/booking/reglas.ts (aprobados con D-HR-48): «Vie 8 ene 2027».
 DIAS = {
