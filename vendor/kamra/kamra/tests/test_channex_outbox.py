@@ -86,7 +86,7 @@ class FakeChannex:
 		self.headers: dict = {}
 		self.tasks = 0
 		self.property = {"id": "cx-test", "title": "Hotel Test", "currency": "USD",
-		                 "timezone": "America/Montevideo"}
+		                 "timezone": "America/Guayaquil"}
 		self.room_types: list[dict] = []
 		self.rate_plans: list[dict] = []
 
@@ -203,7 +203,7 @@ class ChannexAriAdapterTestCase(UnitTestCase):
 			details = channex.fetch_property_details(_conn())
 		self.assertEqual([c[1] for c in fake.calls].count("rate_plans"), 2)
 		self.assertEqual(details["hotel_id"], "cx-test")
-		self.assertEqual((details["currency"], details["timezone"]), ("USD", "America/Montevideo"))
+		self.assertEqual((details["currency"], details["timezone"]), ("USD", "America/Guayaquil"))
 		self.assertTrue(details["per_rate_plan"])
 		rooms = {r["room_id"]: r for r in details["rooms"]}
 		self.assertEqual(rooms["rt1"]["count_of_rooms"], 1)
@@ -263,7 +263,7 @@ class ChannexAriAdapterTestCase(UnitTestCase):
 
 
 class _AriFixture:
-	"""A Uruguay/USD property: Twin (8 rooms) and Double (4), the plans BAR
+	"""An Ecuador/USD property: Twin (8 rooms) and Double (4), the plans BAR
 	(no Rate Plan: the base price) and BB (Rate Plan Amount +20), a Channex
 	connection cx-test and its 4 mappings."""
 
@@ -272,7 +272,7 @@ class _AriFixture:
 		frappe.local.lang = "en"
 		tag = frappe.generate_hash(length=6).upper()
 		self.property = frappe.get_doc({"doctype": "Property",
-			"property_name": "TEST ARI " + tag, "country": "Uruguay",
+			"property_name": "TEST ARI " + tag, "country": "Ecuador",
 			"currency": "USD"}).insert(ignore_permissions=True).name
 		self.twin = self._room_type("TWN" + tag, "Twin", 100, 8)
 		self.double = self._room_type("DBL" + tag, "Double", 120, 4)
@@ -1084,7 +1084,7 @@ class ChannexAriImportTestCase(_AriFixture, IntegrationTestCase):
 	def setUp(self):
 		super().setUp()
 		frappe.db.delete("Channel Room Mapping", {"connection": self.conn.name})
-		frappe.db.set_value("Property", self.property, "timezone", "America/Montevideo")
+		frappe.db.set_value("Property", self.property, "timezone", "America/Guayaquil")
 		bb_code = frappe.db.get_value("Rate Plan", self.bb, "code")
 		self.fake.room_types = [
 			{"type": "room_type", "id": "rt-twin", "attributes": {"title": "Twin", "count_of_rooms": 8}},
@@ -1137,7 +1137,7 @@ class ChannexAriImportTestCase(_AriFixture, IntegrationTestCase):
 		codes = [w["code"] for w in self.run_import()["warnings"]]
 		self.assertEqual(sorted(codes), ["count_of_rooms", "currency", "fixed_amount", "timezone"])
 		frappe.db.set_value("Rate Plan", self.bb, "modifier_type", "Percent")
-		self.fake.property.update(currency="USD", timezone="America/Montevideo")
+		self.fake.property.update(currency="USD", timezone="America/Guayaquil")
 		self.fake.room_types[0]["attributes"]["count_of_rooms"] = 8
 		self.fake.rate_plans[2] = self._plan(2, "BAR", "rt-double")
 		self.assertEqual(self.run_import()["warnings"], [])

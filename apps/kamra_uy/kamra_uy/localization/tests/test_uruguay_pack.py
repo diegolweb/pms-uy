@@ -160,6 +160,26 @@ class TestTheQuoteHasNoIva(AuditTestCase):
 				self.assertGreater(now, 0)
 				self.assertEqual(now, before)
 
+	def test_the_levy_setting_of_kamra_2_8_changes_nothing_in_uruguay(self):
+		"""HR-319 (Kamra #664): «Displayed rates include the levy» solo actúa con una tasa (levy) por encima de 0, y
+		Uruguay no tiene: encendido, la cotización, el precio que va al channel manager y los decimales de la noche
+		reservada (2) quedan como están, con el IVA fuera del precio."""
+		from kamra.channel_ari import _plan_night_rate
+		from kamra.pricing import quote, room_net_rate, room_rate_digits
+
+		make_uy_property()
+		off = quote(PROP_UY, self.rt, self.check_in, self.check_out, adults=2)
+		ari_off = _plan_night_rate(PROP_UY, self.rt, None, self.check_in)
+		make_uy_property(rates_include_levy=1)
+		on = quote(PROP_UY, self.rt, self.check_in, self.check_out, adults=2)
+		self.assertEqual([(n["rate"], n["gst_rate"]) for n in on["nightly"]],
+		                 [(n["rate"], n["gst_rate"]) for n in off["nightly"]])
+		self.assertEqual((on["room_total"], on["amount_after_tax"]), (off["room_total"], off["amount_after_tax"]))
+		self.assertEqual(_plan_night_rate(PROP_UY, self.rt, None, self.check_in), ari_off)
+		self.assertEqual(room_rate_digits(PROP_UY), 2)
+		self.assertEqual(room_net_rate(PROP_UY, frappe.get_doc("Room Type", self.rt), 230),
+		                 (Decimal("230"), Decimal("0")))
+
 
 def _hook_before_hr239(property, room_type_doc, nightly_rate) -> Decimal:
 	"""`calculate_room_tax` antes de HR-239: la tasa de habitación (10) para todos al cotizar."""

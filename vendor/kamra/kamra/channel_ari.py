@@ -99,7 +99,7 @@ def _plan_night_rate(property: str, room_type: str, rate_plan: str | None, d,
 	adults = adults or frappe.db.get_value("Room Type", room_type, "base_occupancy") or 2
 	try:
 		q = quote(property, room_type, str(d), str(add_days(d, 1)), adults=int(adults),
-		          children=0, rate_plan=rate_plan or None)
+		          children=0, rate_plan=rate_plan or None, check_restrictions=False)
 		total = Decimal(str(q["room_total"])).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 	except Exception:
 		return None
@@ -110,6 +110,20 @@ def _plan_night_rate(property: str, room_type: str, rate_plan: str | None, d,
 # `min_stay` shortcut: a property with min_stay_type "both" refuses it).
 RULE_FIELDS = ("min_stay_arrival", "min_stay_through", "max_stay",
                "closed_to_arrival", "closed_to_departure")
+
+
+def _with_rate_restrictions(rules: dict | None, extra: dict) -> dict:
+	"""A day's stay rules (pricing.stay_rules_by_day) tightened by the day's
+	Rate Restrictions (pricing.day_restrictions): the higher arrival minimum,
+	the lower maximum that is not 0, and the flags OR-ed (HR-319)."""
+	out = dict(rules or {f: 0 if f.startswith(("min", "max")) else False for f in RULE_FIELDS})
+	out["min_stay_arrival"] = max(int(out.get("min_stay_arrival") or 1), int(extra["min_nights"] or 0), 1)
+	out.setdefault("min_stay_through", 1)
+	maxes = [int(v) for v in (out.get("max_stay"), extra["max_nights"]) if int(v or 0)]
+	out["max_stay"] = min(maxes, default=0)
+	for flag in ("closed_to_arrival", "closed_to_departure", "stop_sell"):
+		out[flag] = bool(out.get(flag)) or bool(extra[flag])
+	return out
 
 
 def _occupancy_rates(property: str, m, d, occupancies: list[int]) -> list[dict] | None:
@@ -128,8 +142,19 @@ def _restriction_day(price: Decimal | list | None, rules: dict | None = None) ->
 	"""The one place a day's restriction values are put together: the price
 	- rate, or rates (one per occupancy) for a plan priced per person; none
 	when the day has no price -, the stay rules of `rules` (a
-	pricing.stay_rules_by_day day) and stop_sell - the rule's, or a day
-	without a price."""
+	pricing.stay_rules_by_day day, with the Rate Restrictions folded in by
+	_with_rate_restrictions) and stop_sell - the rule's, or a day without a
+	price. A day of pricing.day_restrictions alone (upstream's shape, with
+	min_nights) gives upstream's cell, as Kamra 2.8.1 builds it."""
+	if rules is not None and "min_nights" in rules:
+		out = {"stop_sell": True} if price is None else {
+			"rates" if isinstance(price, list) else "rate": price, "stop_sell": False}
+		out["stop_sell"] = out["stop_sell"] or bool(rules["stop_sell"])
+		out.update(min_stay_arrival=max(int(rules["min_nights"] or 0), 1),
+		           max_stay=rules["max_nights"],
+		           closed_to_arrival=rules["closed_to_arrival"],
+		           closed_to_departure=rules["closed_to_departure"])
+		return out
 	out = {f: rules[f] for f in RULE_FIELDS} if rules else {}
 	if price is not None:
 		out["rates" if isinstance(price, list) else "rate"] = price
@@ -156,18 +181,29 @@ def restriction_cells(conn, date_from, date_to,
 		return {}
 	start, end = window
 	days = date_diff(end, start) + 1
+	# ponytail: a property that never made a Rate Restriction sends none, so
+	# rules a hotel keeps in the channel manager itself are not overwritten
+	uses_rules = bool(frappe.db.exists("Rate Restriction", {"property": conn.property}))
+	from kamra.pricing import day_restrictions, restriction_rules
 	out: dict[str, dict[str, dict]] = {}
 	for m in _mappings(conn.name):
 		if not m.external_rate_id:
 			continue
 		rules = stay_rules_by_day(conn.property, m.room_type, m.rate_plan, start, end)
+		# upstream's Rate Restrictions (#530) on top of the hotel's stay rules (HR-17): the strictest of the two,
+		# so a rule that refuses a direct booking also reaches Channex (HR-319)
+		rate_rules = restriction_rules(conn.property, m.room_type, m.rate_plan, start, end) \
+			if uses_rules else None
 		plan = out.setdefault(str(m.external_rate_id), {})
 		per_person = (occupancies or {}).get(str(m.external_rate_id))
 		for i in range(days):
 			d = getdate(add_days(start, i))
 			price = (_occupancy_rates(conn.property, m, d, per_person) if per_person
 			         else _plan_night_rate(conn.property, m.room_type, m.rate_plan, d))
-			plan[str(d)] = _restriction_day(price, rules.get(str(d)))
+			day = rules.get(str(d))
+			if rate_rules is not None:
+				day = _with_rate_restrictions(day, day_restrictions(rate_rules, d))
+			plan[str(d)] = _restriction_day(price, day)
 	return out
 
 
@@ -771,7 +807,7 @@ def _source(doc, method) -> tuple[str, str | None, str | None, str] | None:
 	None when it moves nothing ARI."""
 	before = doc.get_doc_before_save() if method == "on_update" else None
 	dt = doc.doctype
-	if dt == "Season":
+	if dt in ("Season", "Rate Restriction"):
 		w = _window(_dates(doc.start_date, before and before.start_date),
 		            _dates(doc.end_date, before and before.end_date))
 		return (doc.property, *w, "restrictions") if w else None

@@ -99,13 +99,14 @@ its own property.
 | `folio.charge_voided` | A charge line is voided off an open folio. Carries the line as it was and the reason. |
 | `folio.discount_applied` | A discount, promo code or allowance posts to a folio. One event per line (a discount over several tax rates posts several lines). An allowance waiting for approval sends `approval.requested` first and this one once it is approved. |
 | `folio.refunded` | Money is refunded on a folio: an over-payment, an advance or a security deposit. |
-| `rate.overridden` | A rate is typed in by hand: a stay's nightly rate on a room move (`scope: "stay"`), or a room type's rate for dates set by a Revenue Manager (`scope: "room_type"`). |
+| `rate.overridden` | A rate is typed in by hand: a stay's nightly rate on a room move (`scope: "stay"`), or a room type's rate for dates set by a Revenue Manager (`scope: "room_type"`), or the nights a Revenue Manager priced one by one on a new booking (`scope: "night"`). |
 | `approval.requested` | An allowance or discount above the approval line waits for a manager. |
 | `approval.decided` | A manager approves or rejects it. `status` is `Approved` or `Rejected`. |
 | `deposit.received` | An advance or a security deposit is taken. |
 | `deposit.refunded` | An advance still held for an arrival, or a security deposit, is refunded. `folio.refunded` fires for the same refund too. |
 | `ar.bill_created` | A bill moves to a company's city ledger account: a checkout to the company or a direct AR invoice. |
 | `ar.payment_recorded` | A company's payment is recorded on its account, with what it paid. |
+| `ar.payment_reversed` | A company's payment is reversed (a bounced cheque, money put on the wrong account). The bills it paid are owed again (`reopened`). |
 | `cashier.session_closed` | A cashier counts the drawer and closes the till. |
 | `group.block_released` | A group's cutoff passes and its unpicked rooms go back on sale. |
 
@@ -183,6 +184,13 @@ For `deposit.received`, `payment.kind` is `Advance` or `Security Deposit`.
 ```
 
 ```json
+{"scope": "night", "reservation": "RES-2026-00043", "room_type": "Kamra Demo Palace-DLX",
+ "room": "Kamra Demo Palace-204", "start_date": "2026-12-01", "end_date": "2026-12-03",
+ "nights": [{"date": "2026-12-01", "price": 120.0}], "amount_after_tax": 230.0,
+ "reason": null, "currency": "INR"}
+```
+
+```json
 {"scope": "room_type", "season": "SEAS-00031", "room_type": "Kamra Demo Palace-DLX",
  "rate": 6200.0, "start_date": "2026-12-24", "end_date": "2026-12-31",
  "days_of_week": null, "reason": "Holiday demand", "currency": "INR"}
@@ -219,6 +227,18 @@ On `approval.requested`, `status` is `Pending` and the decision fields are null.
  "applied": [{"folio": "FOL-2026-00311", "amount": 11800.0},
              {"folio": "FOL-2026-00290", "amount": 8200.0}],
  "unapplied": 0.0, "account_balance": 25200.0, "currency": "INR"}
+```
+
+`ar.payment_reversed`
+
+```json
+{"account": "CLA-00004", "company": "Acme Travel", "payment": "CLE-2026-00123",
+ "reversal": "CLE-2026-00131", "posting_date": "2026-11-09",
+ "reference": "UTR 88231", "reason": "REV-BOUNCE: Cheque returned unpaid",
+ "amount": 20000.0,
+ "reopened": [{"folio": "FOL-2026-00311", "amount": 11800.0},
+              {"folio": "FOL-2026-00290", "amount": 8200.0}],
+ "unapplied_removed": 0.0, "account_balance": 45200.0, "currency": "INR"}
 ```
 
 `cashier.session_closed`

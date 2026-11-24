@@ -48,7 +48,7 @@ MAX_MANIFEST_BYTES = 64 * 1024
 # staff roles that may read a property's profile; every read scope's
 # service account carries one of them (scope_roles)
 READ_ROLES = ("Front Desk", "Finance", "Revenue Manager", "Night Auditor",
-              "Housekeeping", "Kamra Agent")
+              "Housekeeping", "Kamra Agent", "Kamra Service Account")
 
 
 # --- trust ------------------------------------------------------------------------
@@ -454,6 +454,7 @@ def my_apps() -> list[dict]:
 def property_profile(property: str) -> dict:
 	"""Read-only branding and locale for one property: name, logo, address,
 	tax ID, currency, language, time zone, check-in and check-out times."""
+	from kamra.languages import resolve_saved
 	from kamra.localization import pack_for
 
 	prop = frappe.get_cached_doc("Property", property)
@@ -471,7 +472,10 @@ def property_profile(property: str) -> dict:
 		"tax_id_label": loc.get("tax_id_label"),
 		"currency": loc.get("currency") or prop.currency,
 		"locale": loc.get("locale"),
-		"language": prop.booking_language or (prop.locale or loc.get("locale") or "en").split("-")[0],
+		"language": resolve_saved(
+			prop.booking_language,
+			(prop.locale or loc.get("locale") or "en").split("-")[0],
+		),
 		"timezone": prop.timezone or frappe.utils.get_system_timezone(),
 		"checkin_time": str(prop.checkin_time) if prop.checkin_time else None,
 		"checkout_time": str(prop.checkout_time) if prop.checkout_time else None,

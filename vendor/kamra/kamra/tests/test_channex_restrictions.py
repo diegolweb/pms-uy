@@ -86,6 +86,30 @@ class ChannexRestrictionsTestCase(_AriWorkerMixin, _BarPlanFixture, IntegrationT
 			"closed_to_arrival": True, "closed_to_departure": True, "stop_sell": True}])
 		self.assertFalse(any("min_stay" in v for call in self.posts() for v in call))
 
+	# ------------------------------------------- Kamra 2.8's Rate Restrictions
+	def test_a_rate_restriction_reaches_channex_with_the_stay_rules_strictest_wins(self):
+		"""Kamra 2.8's own Rate Restrictions (#530) refuse a direct booking, so
+		they go out too, folded into the stay rules of the same day: the higher
+		arrival minimum, the lower maximum, the flags OR-ed (HR-319). A day
+		with only one of the two carries that one."""
+		self.save(self.row(self.twin, self.bar, 6, 7, min_stay_arrival=2, max_stay=5,
+			closed_to_departure=1))
+		frappe.get_doc({"doctype": "Rate Restriction", "property": self.property,
+			"restriction_name": "HR-319 " + frappe.generate_hash(length=6), "room_type": self.twin,
+			"rate_plan": self.bar, "start_date": day(7), "end_date": day(8), "min_nights": 3,
+			"max_nights": 4, "closed_to_arrival": 1}).insert(ignore_permissions=True)
+		cells = self.ari.restriction_cells(self.conn, day(6), day(8))["rp-twin-bar"]
+		rules = {n: {k: cells[day(n)][k] for k in RULE_FIELDS} for n in (6, 7, 8)}
+		self.assertEqual(rules[6], {"min_stay_arrival": 2, "min_stay_through": 1, "max_stay": 5,
+			"closed_to_arrival": False, "closed_to_departure": True, "stop_sell": False})
+		self.assertEqual(rules[7], {"min_stay_arrival": 3, "min_stay_through": 1, "max_stay": 4,
+			"closed_to_arrival": True, "closed_to_departure": True, "stop_sell": False})
+		self.assertEqual(rules[8], {"min_stay_arrival": 3, "min_stay_through": 1, "max_stay": 4,
+			"closed_to_arrival": True, "closed_to_departure": False, "stop_sell": False})
+		# the price is still the night's: a restriction never zeroes the rate it sends
+		self.assertEqual(cells[day(7)]["rate"], self.ari._plan_night_rate(
+			self.property, self.twin, self.bar, getdate(day(7))))
+
 	# ------------------------------------------------- certification 5 to 8
 	def test_cert_05_min_stay_one_call(self):
 		"""Case 5 · Min Stay: a minimum stay on three plans and days (Twin BAR

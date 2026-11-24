@@ -7,7 +7,7 @@
   "field_name": "mode",
   "property": "options",
   "property_type": "Text",
-  "value": "Cash\nForeign Cash\nCard\nUPI\nBank Transfer\nOTA Prepaid\nCompany Credit\nPayment Link\nTarjeta local\nTarjeta extranjera",
+  "value": "Cash\nForeign Cash\nCard\nUPI\nQRIS\nBank Transfer\nOTA Prepaid\nCompany Credit\nPayment Link\nTarjeta local\nTarjeta extranjera",
   "module": "Kamra UY"
  },
  {
@@ -18,7 +18,7 @@
   "field_name": "mode",
   "property": "options",
   "property_type": "Text",
-  "value": "Cash\nForeign Cash\nCard\nUPI\nBank Transfer\nOTA Prepaid\nCompany Credit\nPayment Link\nOther\nTarjeta local\nTarjeta extranjera",
+  "value": "Cash\nForeign Cash\nCard\nUPI\nQRIS\nBank Transfer\nOTA Prepaid\nCompany Credit\nPayment Link\nOther\nTarjeta local\nTarjeta extranjera",
   "module": "Kamra UY"
  },
  {
@@ -29,7 +29,7 @@
   "field_name": "payment_mode",
   "property": "options",
   "property_type": "Text",
-  "value": "\nCash\nCard\nUPI\nTarjeta local\nTarjeta extranjera",
+  "value": "\nCash\nCard\nUPI\nQRIS\nBank Transfer\nTarjeta local\nTarjeta extranjera",
   "module": "Kamra UY"
  },
  {
@@ -40,7 +40,7 @@
   "field_name": "mode",
   "property": "options",
   "property_type": "Text",
-  "value": "Cash\nCard\nUPI\nBank Transfer\nCheque\nOther\nTarjeta local\nTarjeta extranjera",
+  "value": "Cash\nCard\nUPI\nQRIS\nBank Transfer\nCheque\nOther\nPayment Link\nTarjeta local\nTarjeta extranjera",
   "module": "Kamra UY"
  },
  {

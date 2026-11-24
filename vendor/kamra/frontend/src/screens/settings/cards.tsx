@@ -8,8 +8,8 @@ import {
   updateResource,
 } from "../../lib/resource"
 import { getTheme, setTheme, type Theme } from "../../lib/theme"
-import { getLang, setLang, LANGS, type Lang } from "../../lib/dir"
-import { useT, t as translateUI, useUILanguage } from "../../lib/i18n"
+import { getLang, setLang, langDef, type Lang } from "../../lib/dir"
+import { useOfferedLanguages, useT, t as translateUI, useUILanguage } from "../../lib/i18n"
 import { probeSocket } from "../../lib/realtime"
 import { Button } from "../../components/ui/button"
 import ImageField from "../../components/ImageField"
@@ -949,6 +949,7 @@ export function AgentAccessCard() {
 
 export function AppearanceCard() {
   const { t } = useT()
+  const langs = useOfferedLanguages()
   const [theme, setThemeState] = useState<Theme>(getTheme())
   const [lang, setLangState] = useState<Lang>(getLang())
   const selectCls =
@@ -989,7 +990,7 @@ export function AppearanceCard() {
               setLangState(l)
             }}
           >
-            {LANGS.map((l) => (
+            {langs.map((l) => (
               <option key={l.code} value={l.code}>
                 {l.nativeLabel}
                 {l.code !== "en" ? ` (${l.englishLabel})` : ""}
@@ -997,8 +998,8 @@ export function AppearanceCard() {
             ))}
           </select>
           <span className="text-xs text-zinc-400">
-            {lang === "ar"
-              ? t("Arabic switches the interface to right-to-left")
+            {langDef(lang).dir === "rtl"
+              ? t("This language switches the interface to right-to-left.")
               : t("Language applies to this browser only")}
           </span>
         </label>

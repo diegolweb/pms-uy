@@ -394,6 +394,7 @@ class Reservation(Document):
 		self.validate_type_capacity()
 		self.validate_cancellation_path()
 		self.apply_negotiated_rate_plan()
+		self.keep_hand_set_nights()
 		self.apply_pricing()
 		self.stamp_room_assignment()
 
@@ -469,6 +470,12 @@ class Reservation(Document):
 					rules["minimum_nights"]),
 				title=_("Minimum stay"),
 			)
+		# Rate Restrictions (#530), checked when what is sold changes (the
+		# returns above: never for a channel booking, only for a new stay or
+		# new dates). Upstream's own rules refuse the desk too (HR-319).
+		from kamra.pricing import assert_stay_restrictions
+		assert_stay_restrictions(self.property, self.room_type, self.rate_plan,
+		                         self.check_in_date, self.check_out_date)
 		broken = _closed_stay_rules(rules, nights, self.check_in_date, self.check_out_date)
 		if not broken:
 			return
@@ -500,6 +507,17 @@ class Reservation(Document):
 			self.channel or "OTA", ", ".join(broken))
 		if line not in (self.special_requests or ""):
 			self.special_requests = "\n".join(s for s in (self.special_requests, line) if s)
+
+		# Rate Restrictions (#530), checked when what is sold changes. A
+		# channel booking is never refused here: the channel manager applied
+		# the same restrictions (they go out with ARI), and refusing an OTA
+		# booking loses it.
+		if self.get("source") != "OTA" and (self.is_new() or any(
+				self.has_value_changed(f) for f in (
+					"check_in_date", "check_out_date", "room_type", "rate_plan"))):
+			from kamra.pricing import assert_stay_restrictions
+			assert_stay_restrictions(self.property, self.room_type, self.rate_plan,
+			                         self.check_in_date, self.check_out_date)
 
 	def validate_status_transition(self):
 		if self.is_new():
@@ -686,17 +704,61 @@ class Reservation(Document):
 		# same rule: only when set, so existing rate-lock keys stay put
 		if flt(self.get("agreed_rate")) > 0:
 			inputs["agreed_rate"] = flt(self.get("agreed_rate"))
+		# nights the desk priced by hand: only when there are some, so every
+		# other booking's rate-lock key stays the same
+		hand = self.hand_set_prices()
+		if hand:
+			inputs["night_prices"] = hand
 		# Day-use times only enter the lock key when the stay is same-day:
 		# overnight ETA/ETD is display-only and must not re-price.
 		if cint(self.get("is_day_use")) or (
 				self.check_in_date and self.check_out_date
 				and getdate(self.check_in_date) == getdate(self.check_out_date)):
+			# HH:MM whether the time came from the desk ("08:00:00") or
+			# from the database (a timedelta), so the key does not change
+			# when a saved booking is read back
 			from kamra.day_use import hhmm
-			if self.get("planned_check_in_time"):
-				inputs["check_in_time"] = hhmm(self.planned_check_in_time)
-			if self.get("planned_check_out_time"):
-				inputs["check_out_time"] = hhmm(self.planned_check_out_time)
+			# only a real HH:MM enters the key; None would change it
+			check_in = hhmm(self.get("planned_check_in_time"))
+			check_out = hhmm(self.get("planned_check_out_time"))
+			if check_in:
+				inputs["check_in_time"] = check_in
+			if check_out:
+				inputs["check_out_time"] = check_out
 		return inputs
+
+	def hand_set_prices(self) -> list[dict]:
+		"""The nights the desk priced by hand that are still inside the stay,
+		as the {date, price} list the quote takes (price as the desk typed it)."""
+		if not self.check_in_date or not self.check_out_date:
+			return []
+		first, last = getdate(self.check_in_date), getdate(self.check_out_date)
+		rows = [{"date": str(getdate(r.stay_date)), "price": flt(r.hand_price)}
+		        for r in self.get("night_rates") or []
+		        if flt(r.get("hand_price")) > 0
+		        and first <= getdate(r.stay_date) < last]
+		return sorted(rows, key=lambda r: r["date"])
+
+	def keep_hand_set_nights(self):
+		"""Prices the nights a desk typed (night_rates rows carrying a
+		hand_price, auto_price off): on the first save, quoted with those
+		nights; after a date, room-type or party change, the typed nights
+		still in the stay are kept and Kamra prices the others. With none
+		left the booking goes back to auto pricing."""
+		if self.get("auto_price") or not self.room_type:
+			return
+		if not any(flt(r.get("hand_price")) > 0 for r in self.get("night_rates") or []):
+			return  # priced by hand as a whole (OTA total, desk amount)
+		inputs = self.quote_inputs()
+		key = self.rate_lock_key_for(inputs)
+		if self.get("rate_lock_key") == key:
+			return
+		if not inputs.get("night_prices"):
+			if self.is_new():
+				frappe.throw(_("None of the nights with a typed price is in this stay."))
+			self.auto_price = 1  # apply_pricing re-quotes and re-locks it
+			return
+		self.apply_quote(self.requote(), key)
 
 	@staticmethod
 	def rate_lock_key_for(inputs: dict) -> str:
@@ -710,8 +772,11 @@ class Reservation(Document):
 		in the house's occupancy. Used by the save path and the amendment
 		previews, so a preview and the save that follows agree."""
 		from kamra.pricing import quote
+		# restrictions are checked in validate_minimum_nights, which knows
+		# whether the stay changed and whether it came from a channel
 		return quote(**self.quote_inputs(),
 		             check_voucher_limits=check_voucher_limits,
+		             check_restrictions=False,
 		             exclude_reservation=None if self.is_new() else self.name)
 
 	def apply_pricing(self):
@@ -741,6 +806,11 @@ class Reservation(Document):
 			check_voucher_limits=bool(
 				self.is_new() or self.has_value_changed("voucher")),
 		)
+		self.apply_quote(q, key)
+
+	def apply_quote(self, q: dict, key: str | None):
+		"""Put a quote on the booking: its amounts, the immutable snapshot and
+		the locked nightly rates, under the lock key of the inputs it priced."""
 		self.amount_before_tax = q["amount_before_tax"]
 		self.tax_amount = q["tax_amount"]
 		self.amount_after_tax = q["amount_after_tax"]
@@ -794,11 +864,15 @@ class Reservation(Document):
 				["price_per_adult", "price_per_child"], as_dict=True) or {}
 			meal = ((self.adults or 1) * float(mp.get("price_per_adult") or 0)
 			        + (self.children or 0) * float(mp.get("price_per_child") or 0))
+		# a price shown with tax / the levy inside it is split by division; the
+		# pieces only add back up to the shown price at 6 decimals
+		from kamra.pricing import room_rate_digits
+		digits = room_rate_digits(self.property)
 		rows, running = [], 0.0
 		for i, n in enumerate(nightly):
-			rate = round(float(n["rate"]) * factor, 2)
+			rate = round(float(n["rate"]) * factor, digits)
 			if i == len(nightly) - 1 and plan_free:
-				rate = round(room_total - running, 2)
+				rate = round(room_total - running, digits)
 			running += rate
 			rows.append({
 				"stay_date": n["date"],
@@ -806,6 +880,8 @@ class Reservation(Document):
 				"gst_rate": float(n.get("gst_rate") or 0),
 				"meal_amount": meal,
 				"demand_premium_pct": float(n.get("demand_premium_pct") or 0),
+				# what the desk typed for the night (0: Kamra priced it)
+				"hand_price": float(n.get("typed_price") or 0),
 			})
 		return rows
 
@@ -831,8 +907,17 @@ class Reservation(Document):
 		if self.is_new() or not rows:
 			return out
 		from kamra.folio import charged_nights
-		charged = charged_nights(self.name)
-		if not charged:
+		from kamra.pricing import room_rate_digits
+		digits = room_rate_digits(self.property)
+		charged = charged_nights(self.name, digits)
+		# an early arrival (api.check_in) keeps the nights the stay was booked
+		# for at their booked rate; only the added nights take the new quote
+		booked = {}
+		if self.flags.get("keep_booked_nights"):
+			for r in self.get("night_rates") or []:  # still the booked rows here
+				if str(r.stay_date) not in charged:
+					booked[str(r.stay_date)] = r
+		if not charged and not booked:
 			return out
 		from kamra.settings import get_setting
 		policy = get_setting(self.property, "charged_night_rate_change")
@@ -841,30 +926,42 @@ class Reservation(Document):
 		levy_pct = flt(prop.get("room_levy_percent")) / 100
 		levy_taxed = cint(prop.get("room_levy_taxable")
 		                  if prop.get("room_levy_taxable") is not None else 1)
+		# the reversal is the exact charged rate; the replacement and the
+		# credit have to use the same decimals or the difference comes back
+		money = f",.{digits}f"
 		for row in rows:
-			c = charged.get(str(row["stay_date"]))
+			night = str(row["stay_date"])
+			c = charged.get(night)
+			b = booked.get(night)
+			if b:
+				# a booked night is held like a kept charged night, with no folio
+				bb, bg = flt(b.rate), flt(b.gst_rate)
+				c = {"base": bb, "gst_rate": bg, "levy_base": bb * levy_pct,
+				     "levy_tax": bb * levy_pct * bg / 100 if levy_taxed else 0}
+				row["demand_premium_pct"] = flt(b.demand_premium_pct)
 			if not c:
 				continue
-			night = str(row["stay_date"])
 			new, new_gst = flt(row["rate"]), flt(row["gst_rate"])
 			base, gst = c["base"], c["gst_rate"]
 			changed = abs(new - base) >= 0.01 or (correct and abs(new_gst - gst) >= 0.01)
 			action = "kept" if changed else "same"
-			if changed and correct:
+			if b:
+				pass  # never corrected or credited: nothing of it is on a folio
+			elif changed and correct:
 				out["lines"] += [
 					{"night": night, "folio": c["folio"], "amount": -base,
 					 "gst_rate": gst,
-					 "description": f"Rate correction: night of {night} reversed at {base:,.2f}"},
-					{"night": night, "folio": c["folio"], "amount": round(new, 2),
+					 "description": f"Rate correction: night of {night} reversed at {base:{money}}"},
+					{"night": night, "folio": c["folio"], "amount": round(new, digits),
 					 "gst_rate": new_gst,
-					 "description": f"Rate correction: night of {night} at {new:,.2f}"},
+					 "description": f"Rate correction: night of {night} at {new:{money}}"},
 				]
 				base, gst, action = new, new_gst, "corrected"
 			elif changed and policy == "Credit the difference" and new < base:
 				out["lines"].append(
 					{"night": night, "folio": c["folio"],
-					 "amount": round(new - base, 2), "gst_rate": gst,
-					 "description": f"Rate change: night of {night} {base:,.2f} to {new:,.2f}"})
+					 "amount": round(new - base, digits), "gst_rate": gst,
+					 "description": f"Rate change: night of {night} {base:{money}} to {new:{money}}"})
 				action = "credited"
 				base = new
 			# the folio's levy for the night stays as posted
@@ -874,10 +971,10 @@ class Reservation(Document):
 			out["base"] += (base - new) + (c["levy_base"] - levy_new)
 			out["tax"] += (base * gst - new * new_gst) / 100 + c["levy_tax"] - (
 				levy_new * new_gst / 100 if levy_taxed else 0)
-			if action != "same":
+			if action != "same" and not b:  # the summary is of nights on the folio
 				out["nights"].append({"date": night, "charged": c["base"],
-				                      "new": round(new, 2), "action": action})
-			row["rate"], row["gst_rate"] = round(base, 2), gst
+				                      "new": round(new, digits), "action": action})
+			row["rate"], row["gst_rate"] = round(base, digits), gst
 		out["base"], out["tax"] = round(out["base"], 2), round(out["tax"], 2)
 		return out
 

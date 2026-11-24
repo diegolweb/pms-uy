@@ -25,6 +25,7 @@ import {
   ExternalLink,
   FileSpreadsheet,
   HeartPulse,
+  Dumbbell,
   Home,
   Landmark,
   Layers,
@@ -74,6 +75,7 @@ import {
   HandCoins,
   CalendarClock,
   Scale,
+  Link2,
 } from "lucide-react"
 import { useEffect, useState } from "react"
 
@@ -112,6 +114,9 @@ export interface AppDef {
   items: AppNavItem[]
   /** extra route prefixes that belong to this app (detail pages etc.) */
   extraPrefixes?: string[]
+  /** Shown even when the property's module list does not name this app.
+   *  Unit owners are not a module a hotel turns off. */
+  always?: boolean
 }
 
 const DESK = import.meta.env.PROD ? "" : "http://localhost:8000"
@@ -143,6 +148,8 @@ export const APPS: AppDef[] = [
       { to: "/calendar", label: "Calendar", icon: CalendarDays },
       { to: "/crs", label: "Central Reservations", icon: Search },
       { to: "/room-blocks", label: "Room Blocks", icon: Lock },
+      { to: "/recreation", label: "Recreation", icon: Dumbbell,
+        keywords: ["Gym", "Pool", "Spa", "Membership", "Walk-in"] },
       { to: "/groups", label: "Group Booking", icon: Users,
         keywords: ["Groups", "Group bookings", "Rooming list", "Blocks"] },
       { to: "/reports", label: "Reports", icon: ChartLine },
@@ -265,6 +272,9 @@ export const APPS: AppDef[] = [
       { to: "/seasons", label: "Seasons", icon: CalendarDays },
       { to: "/channel-restrictions", label: "Stay Restrictions", icon: Ban,
         keywords: ["stop sell", "CTA", "CTD", "min stay", "max stay"] },
+      // HR-319: upstream's own "Stay restrictions" (/rate-restrictions, Rate Restriction, #530) is left out of the
+      // menu: the hotel sets its stay rules in Stay Restrictions (Channel Restriction, HR-17), the ones certified
+      // with Channex, and two entries would read the same in Spanish. Its rules still reach quotes and Channex.
       { to: "/packages", label: "Packages", icon: Package,
         keywords: ["holiday package", "pacote", "carnaval", "reveillon", "special offer", "feriado", "closed package"] },
       { to: "/guardrails", label: "Guardrails", icon: ShieldCheck },
@@ -357,6 +367,7 @@ export const APPS: AppDef[] = [
       { to: "/booking-settings/payments", label: "Payments", icon: Receipt },
       { to: "/booking-settings/faq", label: "FAQ", icon: HelpCircle },
       { to: "/booking-settings/seo", label: "SEO", icon: Search },
+      { to: "/booking-settings/links", label: "Booking links", icon: Link2 },
       { to: "/settings/booking-engine", label: "Settings", icon: SettingsIcon,
         roles: ["Revenue Manager", "Hotel Admin", "System Manager", "Administrator"] },
     ],
@@ -380,6 +391,8 @@ export const APPS: AppDef[] = [
       { to: "/room-types", label: "Room Types", icon: LayoutGrid },
       { to: "/rooms", label: "Rooms", icon: BedDouble,
         keywords: ["Add rooms", "Room setup", "Floors", "Room numbers"] },
+      { to: "/unit-owners", label: "Unit owners", icon: Building2,
+        keywords: ["Owner", "Landlord", "Owner login", "Owner portal"] },
       { to: "/activity", label: "Activity Log", icon: ScrollText },
       { to: "/marketplace", label: "Marketplace", icon: Store },
       {
@@ -407,6 +420,19 @@ export const APPS: AppDef[] = [
         icon: ExternalLink,
         roles: ["Administrator", "System Manager"],
       },
+    ],
+  },
+  {
+    id: "unit-owners",
+    name: "My units",
+    icon: Building2,
+    tint: APP_TILE,
+    description: "Occupancy, bookings and revenue for the units you own.",
+    roles: ["Owner"],
+    always: true,
+    items: [
+      { to: "/unit-owners", label: "My units", icon: Building2,
+        keywords: ["Owner portal", "My units", "Occupancy"] },
     ],
   },
 ]
@@ -482,7 +508,7 @@ export function visibleApps(roles: string[], modules?: string[],
   return withDeskPages(APPS, deskPages).filter(
     (a) =>
       a.roles.some((r) => roles.includes(r)) &&
-      (!modules?.length || modules.includes(a.id)),
+      (a.always || !modules?.length || modules.includes(a.id)),
   )
 }
 

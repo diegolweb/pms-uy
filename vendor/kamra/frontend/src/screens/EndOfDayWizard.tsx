@@ -156,6 +156,14 @@ function StepTable({
 
 /* --- columns ---------------------------------------------------------------- */
 
+const ANOMALY_KINDS: Record<string, string> = {
+  voids: "Void spike",
+  allowances: "Allowance spike",
+  cash_variance: "Till variance",
+  rate: "Unusual room rate",
+  no_shows: "Repeated no-shows",
+}
+
 const resLink = (r: CheckItem) =>
   r.reservation ? (
     <Link className="font-medium text-brand-700 hover:underline" to={`/reservations?q=${encodeURIComponent(String(r.reservation))}`}>
@@ -277,6 +285,7 @@ function Message({ tone, children }: { tone: "info" | "warn" | "block" | "ok"; c
 
 /** What to do about a check: usual fixes, ask the agent, or override. */
 function FixHelp({ check, date }: { check: Check; date: string }) {
+  const property = decodeURIComponent(useParams().property ?? "")
   const { t } = useT()
   const navigate = useNavigate()
   const fix = CHECK_FIXES[check.key]
@@ -301,7 +310,7 @@ function FixHelp({ check, date }: { check: Check; date: string }) {
         <Button
           variant="outline"
           className="h-8 px-3 text-xs"
-          onClick={() => navigate("/assistant", { state: { prompt: translate(fix.ask(check.count, date)) } })}
+          onClick={() => navigate("/assistant", { state: { prompt: translate(fix.ask(check.count, date)), property } })}
         >
           <Sparkles className="me-1.5 size-3.5" aria-hidden />
           {t("Ask Kamra Agent to help")}
@@ -672,6 +681,38 @@ export default function EndOfDayWizard() {
             ]}
             rows={items}
             empty={translate("Front office and the room board agree.")}
+          />
+        )
+      case "anomalies":
+        if (!c.ready)
+          return (
+            <p className="text-sm text-zinc-500">
+              {c.enabled === false
+                ? t("Switched off in Settings → Night audit checklist.")
+                : t("Starts after {n} days of posted room nights (this property has {d}).", {
+                    n: c.min_history_days ?? 30,
+                    d: c.history_days ?? 0,
+                  })}
+            </p>
+          )
+        return (
+          <StepTable
+            cols={[
+              { key: "kind", label: "Kind", render: (r) => t(ANOMALY_KINDS[String(r.kind)] ?? String(r.kind)) },
+              { key: "who", label: "Who or what" },
+              { key: "reason", label: "Why" },
+              {
+                key: "sources",
+                label: "Rows",
+                render: (r) => (
+                  <span className="font-mono text-xs">
+                    {(r.sources as { doctype: string; name: string }[]).map((x) => x.name).join(", ")}
+                  </span>
+                ),
+              },
+            ]}
+            rows={items}
+            empty={translate("Nothing unusual against this property's history.")}
           />
         )
       case "vacant_rooms":

@@ -236,25 +236,25 @@ class ChannelContactNeverDropsBookingTestCase(IntegrationTestCase):
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test fixture
 		frappe.local.lang = "en"
 		self.property = frappe.get_doc({"doctype": "Property",
-			"property_name": "TEST UY " + frappe.generate_hash(length=8),
-			"country": "Uruguay", "currency": "UYU"}).insert(ignore_permissions=True).name
+			"property_name": "TEST OTA CONTACT " + frappe.generate_hash(length=8),
+			"country": "Uganda", "currency": "UGX"}).insert(ignore_permissions=True).name
 		self.room_type = frappe.get_doc({"doctype": "Room Type", "property": self.property,
 			"room_type_code": "STD", "room_type_name": "Standard", "base_price": 1000,
 			"adults_capacity": 2}).insert(ignore_permissions=True).name
 		frappe.get_doc({"doctype": "Room", "property": self.property,
 			"room_type": self.room_type, "room_number": "101"}).insert(ignore_permissions=True)
 		self.conn = frappe.get_doc({"doctype": "Channel Manager Connection", "property": self.property,
-			"provider": "Channex", "active": 1, "external_property_id": "demo-uy"}).insert(ignore_permissions=True)
+			"provider": "Channex", "active": 1, "external_property_id": "demo-contact"}).insert(ignore_permissions=True)
 		frappe.get_doc({"doctype": "Channel Room Mapping", "connection": self.conn.name,
-			"room_type": self.room_type, "external_room_id": "uy-std"}).insert(ignore_permissions=True)
-		frappe.db.delete("Guest", {"phone": ("in", ["+59899123456", "+598 99 123 456", "099 123 456"])})
+			"room_type": self.room_type, "external_room_id": "contact-std"}).insert(ignore_permissions=True)
+		frappe.db.delete("Guest", {"phone": ("in", ["+256772987654", "+256 772 987 654", "0772 987 654"])})
 
 	def ev(self, **kw):
 		tag = frappe.generate_hash(length=8)
-		e = {"event": "book", "ota_ref": "TEST-UY-" + tag, "channel": "Booking.com",
-			"room_type_external_id": "uy-std", "check_in": nowdate(),
+		e = {"event": "book", "ota_ref": "TEST-CONTACT-" + tag, "channel": "Booking.com",
+			"room_type_external_id": "contact-std", "check_in": nowdate(),
 			"check_out": str(add_days(nowdate(), 1)), "adults": 2, "children": 0,
-			"guest_name": "Prueba Contacto", "phone": "", "email": f"uy-{tag}@example.test",
+			"guest_name": "Contact Test", "phone": "", "email": f"contact-{tag}@example.test",
 			"total": 0, "nightly": [], "currency": "", "notes": ""}
 		e.update(kw)
 		return e
@@ -266,7 +266,7 @@ class ChannelContactNeverDropsBookingTestCase(IntegrationTestCase):
 
 	def test_local_number_is_read_with_the_property_country(self):
 		from kamra import phone as phone_mod
-		self.assertEqual(phone_mod.for_property("099 123 456", self.property), ("+59899123456", None))
+		self.assertEqual(phone_mod.for_property("0772 987 654", self.property), ("+256772987654", None))
 
 	def test_phone_frappe_refuses_keeps_the_booking_and_the_number(self):
 		res = self.booked(self.ev(phone="abc-123"))
@@ -279,13 +279,13 @@ class ChannelContactNeverDropsBookingTestCase(IntegrationTestCase):
 		self.assertNotIn("abc-123", rationale)
 
 	def test_email_frappe_refuses_keeps_the_booking_and_the_address(self):
-		res = self.booked(self.ev(email="no-es-un-correo"))
+		res = self.booked(self.ev(email="not-an-email"))
 		self.assertEqual(frappe.db.get_value("Guest", res.guest, "email") or "", "")
-		self.assertIn("no-es-un-correo", res.special_requests)
+		self.assertIn("not-an-email", res.special_requests)
 
 	def test_two_writings_of_one_number_are_one_guest(self):
-		first = self.booked(self.ev(phone="099 123 456"))
-		second = self.booked(self.ev(phone="+598 99 123 456",
+		first = self.booked(self.ev(phone="0772 987 654"))
+		second = self.booked(self.ev(phone="+256 772 987 654",
 			check_in=str(add_days(nowdate(), 2)), check_out=str(add_days(nowdate(), 3))))
 		self.assertEqual(first.guest, second.guest)
 
@@ -298,8 +298,8 @@ class ChannelContactNeverDropsBookingTestCase(IntegrationTestCase):
 
 	def test_unstorable_contact_lists_what_came_as_it_came(self):
 		self.assertEqual(cm._unstorable_contact("abc-123", "", self.property), ["abc-123"])
-		self.assertEqual(cm._unstorable_contact("", "no-es-un-correo", self.property), ["no-es-un-correo"])
-		self.assertEqual(cm._unstorable_contact("099 123 456", "a@example.test", self.property), [])
+		self.assertEqual(cm._unstorable_contact("", "not-an-email", self.property), ["not-an-email"])
+		self.assertEqual(cm._unstorable_contact("0772 987 654", "a@example.test", self.property), [])
 		self.assertEqual(cm._unstorable_contact("", "", self.property), [])
 
 	def post_webhook(self, body: dict, secret: str) -> dict:
@@ -307,8 +307,8 @@ class ChannelContactNeverDropsBookingTestCase(IntegrationTestCase):
 		the URL we hand out (connection_status), the secret in a header. The
 		arguments come from Frappe's own make_form_dict, and the call is the one
 		handler.execute_cmd makes, as Guest."""
-		from werkzeug.test import EnvironBuilder
 		from frappe.app import make_form_dict
+		from werkzeug.test import EnvironBuilder
 		request = EnvironBuilder(method="POST", path="/api/method/kamra.channel_manager.webhook",
 			query_string={"connection": self.conn.name}, json=body,
 			headers={"X-Webhook-Secret": secret}).get_request()
@@ -327,12 +327,12 @@ class ChannelContactNeverDropsBookingTestCase(IntegrationTestCase):
 		# URL with ?connection=, so it runs as Guest, through parse_webhook.
 		self.conn.webhook_secret = "ut-secret"
 		self.conn.save(ignore_permissions=True)
-		ref = "TEST-UY-WH-" + frappe.generate_hash(length=8)
+		ref = "TEST-CONTACT-WH-" + frappe.generate_hash(length=8)
 		payload = {"status": "new", "ota_reservation_code": ref, "ota_name": "Booking.com",
 			"arrival_date": nowdate(), "departure_date": str(add_days(nowdate(), 1)),
-			"customer": {"name": "Prueba", "surname": "Webhook", "phone": "abc-123",
-			             "mail": "uy-wh@example.test"},
-			"rooms": [{"room_type_id": "uy-std", "occupancy": {"adults": 2}}]}
+			"customer": {"name": "Webhook", "surname": "Test", "phone": "abc-123",
+			             "mail": "contact-wh@example.test"},
+			"rooms": [{"room_type_id": "contact-std", "occupancy": {"adults": 2}}]}
 		# The webhook only queues the worker (Channex's own path is the revisions
 		# feed, test_channex_feed); the worker applies a payload that carries it.
 		with patch("frappe.enqueue") as enqueue:
@@ -344,30 +344,6 @@ class ChannelContactNeverDropsBookingTestCase(IntegrationTestCase):
 		res = frappe.get_doc("Reservation", {"property": self.property, "ota_ref": ref})
 		self.assertEqual(frappe.db.get_value("Guest", res.guest, "phone") or "", "")
 		self.assertIn("abc-123", res.special_requests)
-
-	# ----------------------------------------------------------- HR-70
-	def test_hr70_a_modify_keeps_the_contact_line_with_the_new_notes(self):
-		e = self.ev(phone="abc-123", notes="Late arrival")
-		res = self.booked(e)
-		out = cm._apply_event(self.conn, dict(e, event="modify", notes="Early check-in"))
-		self.assertEqual(out["result"], "modified", out)
-		notes = frappe.db.get_value("Reservation", res.name, "special_requests")
-		self.assertIn("Early check-in", notes)
-		self.assertNotIn("Late arrival", notes)
-		self.assertIn("abc-123", notes)
-		self.assertLess(notes.index("Early check-in"), notes.index("abc-123"))
-		self.assertEqual(notes.count("could not be saved on the guest profile"), 1)
-
-	def test_hr70_a_modify_without_contact_keeps_the_line_it_had(self):
-		e = self.ev(phone="abc-123", notes="Late arrival")
-		res = self.booked(e)
-		cm._apply_event(self.conn, dict(e, event="modify", phone="", notes="Baby cot"))
-		notes = frappe.db.get_value("Reservation", res.name, "special_requests")
-		self.assertIn("Baby cot", notes)
-		self.assertIn("abc-123", notes)
-		self.assertEqual(notes.count("could not be saved on the guest profile"), 1)
-		cm._apply_event(self.conn, dict(e, event="modify", phone="", notes=""))
-		self.assertIn("abc-123", frappe.db.get_value("Reservation", res.name, "special_requests"))
 
 	# ----------------------------------------------------------- HR-71
 	def line(self, base: str, ref: str, event: str) -> dict:
@@ -412,6 +388,29 @@ class ChannelContactNeverDropsBookingTestCase(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_value("Reservation", first, ["ota_ref", "status"]),
 			(base, "Confirmed"))
 		self.assertEqual(frappe.db.get_value("Reservation", second, "status"), "Cancelled")
+
+	def test_a_modify_keeps_the_contact_line_with_the_new_notes(self):
+		e = self.ev(phone="abc-123", notes="Late arrival")
+		res = self.booked(e)
+		out = cm._apply_event(self.conn, dict(e, event="modify", notes="Early check-in"))
+		self.assertEqual(out["result"], "modified", out)
+		notes = frappe.db.get_value("Reservation", res.name, "special_requests")
+		self.assertIn("Early check-in", notes)
+		self.assertNotIn("Late arrival", notes)
+		self.assertIn("abc-123", notes)
+		self.assertLess(notes.index("Early check-in"), notes.index("abc-123"))
+		self.assertEqual(notes.count("could not be saved on the guest profile"), 1)
+
+	def test_a_modify_without_contact_keeps_the_line_it_had(self):
+		e = self.ev(phone="abc-123", notes="Late arrival")
+		res = self.booked(e)
+		cm._apply_event(self.conn, dict(e, event="modify", phone="", notes="Baby cot"))
+		notes = frappe.db.get_value("Reservation", res.name, "special_requests")
+		self.assertIn("Baby cot", notes)
+		self.assertIn("abc-123", notes)
+		self.assertEqual(notes.count("could not be saved on the guest profile"), 1)
+		cm._apply_event(self.conn, dict(e, event="modify", phone="", notes=""))
+		self.assertIn("abc-123", frappe.db.get_value("Reservation", res.name, "special_requests"))
 
 
 class OtaBookingCarriesItsRatePlanTestCase(IntegrationTestCase):

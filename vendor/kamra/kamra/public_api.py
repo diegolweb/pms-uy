@@ -333,6 +333,7 @@ def default_property():
 
 
 def _public_locale(property: str) -> dict:
+	from kamra.languages import enabled_codes, public_booking_language
 	from kamra.localization import pack_for, privacy_terms
 	prop = frappe.get_cached_doc("Property", property)
 	pack = pack_for(property)
@@ -341,7 +342,8 @@ def _public_locale(property: str) -> dict:
 	return {"currency_symbol": loc.get("currency_symbol") or "",
 	        "locale": loc.get("locale") or "en",
 	        "currency": loc.get("currency") or "",
-	        "default_language": prop.get("booking_language") or None,
+	        "default_language": public_booking_language(prop.get("booking_language")),
+	        "enabled_languages": enabled_codes(),
 	        **privacy_terms(pack)}
 
 
@@ -415,7 +417,7 @@ def search_stay(property: str, check_in_date: str, check_out_date: str,
 	# MCP / Kamra Agent tool; guests need the same availability math without
 	# role gate, so this calls the same underlying helpers directly.
 	from kamra.api import _available_rooms_raw, _block_hold
-	from kamra.pricing import capacity_overflow, quote
+	from kamra.pricing import capacity_overflow, quote, stay_restriction_error
 	from kamra.siu.availability import has_active_sius, sellable_count
 
 	nights = date_diff(check_out_date, check_in_date)
@@ -464,7 +466,11 @@ def search_stay(property: str, check_in_date: str, check_out_date: str,
 		if above:
 			row.update(needs_confirmation=True,
 			           confirmation_reason=_over_capacity_note(above))
-		if left:
+		blocked = left and stay_restriction_error(
+			property, rt, None, check_in_date, check_out_date)
+		if blocked:
+			row.update(available=False, reason=blocked)
+		elif left:
 			try:
 				plans = []
 				for mp in meal_plans:
@@ -1095,6 +1101,19 @@ def _deposit_link(reservation: str, amount: float, return_url: str | None) -> st
 	return link["url"]
 
 
+_TAG = re.compile(r"[^A-Za-z0-9_.\-]+")
+
+
+def clean_source_tag(property: str, tag: str | None) -> str | None:
+	"""A booking link's tag as stored: letters, digits, _ . - only, at most
+	60 characters; None when booking links are off at the property."""
+	from kamra.settings import get_setting
+	tag = _TAG.sub("-", (tag or "").strip()).strip("-")[:60]
+	if not tag or not cint(get_setting(property, "booking_links")):
+		return None
+	return tag
+
+
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=10, seconds=3600)
 def book(property: str, room_type: str, check_in_date: str,
@@ -1102,8 +1121,10 @@ def book(property: str, room_type: str, check_in_date: str,
          email: str = "", adults: int = 2, children: int = 0,
          meal_plan: str = "", special_requests: str = "", addons=None,
          voucher_code: str = "", idempotency_key: str = "", pets: int = 0,
-         child_ages=None, marketing_consent: int = 0, return_url: str = ""):
-	"""Create a Website booking. An existing guest profile is reused when
+         child_ages=None, marketing_consent: int = 0, return_url: str = "", source_tag: str = ""):
+	"""Create a Website booking. `source_tag` is the src / utm_source tag of
+	the booking link the guest came in on, kept on the reservation when the
+	property has booking links on (#560). An existing guest profile is reused when
 	both the phone and the full name match; staff verify at check-in.
 	The advance owed is computed from the property's
 	current payment policy and snapshotted onto the booking.
@@ -1222,6 +1243,9 @@ def book(property: str, room_type: str, check_in_date: str,
 		}
 		if special_requests:
 			updates["special_requests"] = special_requests
+		tag = clean_source_tag(property, source_tag)
+		if tag:
+			updates["source_tag"] = tag
 		# Instant + pay-at-hotel: if pre-insert peek overestimated advance,
 		# promote Pending Payment → Confirmed.
 		if (

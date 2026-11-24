@@ -148,6 +148,9 @@ class FiscalCase(AuditTestCase):
 
 	def setUp(self):
 		super().setUp()
+		# Kamra 2.8 (#649): check_in rechaza una llegada posterior a «hoy» (kamra.checkin.early_arrival_to); el
+		# calendario de las pruebas también vale ahí (HR-319)
+		self.at(d(0), "kamra.checkin")
 		if self.invoice_in:
 			self._stack.enter_context(patch.object(model, "proposed_currency", return_value=self.invoice_in))
 		make_uy_property()

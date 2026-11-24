@@ -383,6 +383,35 @@ company disputes. The bill stays on the account, in aging and on the
 statement, marked Disputed, but gets no payment reminders and does not
 count towards the overdue credit block. **Clear dispute** ends it.
 
+**Write off a bill as bad debt** (Finance and Hotel Admin): when a
+company will not pay, press **Write off** on the open bill, enter the
+amount (up to what it still owes) and pick a reason (an Adjust reason
+code such as *Bad debt - the company will not pay*, and/or a note). It
+follows the same approval rules as an allowance: above the property's
+approval line, or with a reason code that needs a supervisor, the
+write-off waits on the company's page and in **Allowance approvals**
+until a manager approves it with their PIN. A manager's own write-off
+posts at once, signed with their PIN. Once posted, the bill, the
+account balance and aging drop by the amount, the account history shows
+a **Write Off** line, and the books post an AR credit to transaction
+code 9110 *Bad Debt Write-off* (map its GL code to your bad-debt
+account). AI agents can ask for a write-off, never approve one.
+
+**Tax the company withheld** (TDS in India): many companies pay a bill
+less tax they withhold and send a certificate later. In **Record company
+payment**, tick **The company withheld tax**, pick the tax (and rate),
+and enter what was withheld on each bill. A payment of 98 with 2
+withheld clears a 100 bill: the withheld part comes off the bill and
+aging, so it never ages past 90 days or trips the credit block. It is
+kept as **tax withheld** - a receivable from the tax authority, posted
+to transaction code 9120 *Tax Withheld by Payer* (map its GL code to
+your withholding-tax receivable). **Receivables** lists every amount
+still waiting for its certificate; press **Record certificate** to add
+the certificate number and period when it arrives. Reversing the
+payment brings the withheld part back onto the bill. The country pack
+names the taxes and rates (India: TDS u/s 194C at 1% or 2%, u/s 194-I at
+10%); other countries get a plain *Tax withheld*.
+
 Aging, reminders and the overdue check count days from the property's
 business date, so they agree with night audit around midnight.
 
@@ -473,6 +502,14 @@ till. See [Book a trip across properties](/reservations#book-a-trip-across-prope
    number from the property's series and the bill becomes a **Tax
    Invoice**.
 3. Press **Print invoice**, or choose **Save as PDF** in the print dialog.
+
+**Close & generate invoice** refuses the Guest folio of a stay that is
+still checked in. Tonight's charges need an open bill, and closing it
+stops the night audit for the property. When that bill is fully paid
+and you want the invoice now, press **Settle & continue stay**. Kamra
+issues the invoice and opens a fresh Guest folio for the rest of the
+stay. Any other open folio, including the company's, still closes when
+its balance is zero. At check-out, **Check out** closes the bills.
 
 The invoice's title, tax lines and wording come from the country pack. In
 Saudi Arabia a settled bill prints as a *Simplified Tax Invoice* with the
@@ -581,7 +618,12 @@ again the same day updates it.
 Instead of typing each rate, Finance or a Hotel Admin can press **Fetch
 today's rates** on the Currency Desk. Kamra asks a free online service
 ([Exchange Rate API](https://www.exchangerate-api.com), refreshed once a
-day) for the market mid rate of each currency you take, and stores:
+day) for the market mid rate of each currency you take. When the
+property's country pack defines `market_rates`, that official source is
+used instead. No pack ships one yet, so every country still uses
+Exchange Rate API until its pack adds the function. The margin, a rate
+you typed by hand, and the rest of this desk stay the same either way.
+Kamra stores:
 
 - **Buy** = market rate less your margin, **Sell** = market rate plus it.
 - **Source** Online, the market rate, and who fetched it.
@@ -607,6 +649,8 @@ including your own currency:
 | Malaysia | USD, SGD, EUR, GBP, AUD, CNY, JPY, IDR |
 | Indonesia | USD, SGD, AUD, EUR, JPY, CNY, MYR, SAR |
 | Thailand | USD, EUR, GBP, CNY, JPY, AUD, SGD, INR |
+| Philippines | USD, EUR, JPY, KRW, CNY, AUD, SGD, HKD |
+| Germany | USD, GBP, CHF, PLN, CZK, DKK, SEK, NOK |
 
 Finance and Hotel Admin can fetch rates or type them in.
 

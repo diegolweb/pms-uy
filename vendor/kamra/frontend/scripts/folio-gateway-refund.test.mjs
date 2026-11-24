@@ -14,6 +14,7 @@ import assert from "node:assert/strict"
 import path from "node:path"
 import { after, before, beforeEach, describe, test } from "node:test"
 import { build } from "esbuild"
+import { viteGlob } from "./esbuild-vite-glob.mjs"
 import { chromium } from "playwright"
 
 const SRC = path.resolve(import.meta.dirname, "../src")
@@ -57,6 +58,7 @@ before(async () => {
       "process.env.NODE_ENV": '"development"',
       "import.meta.env": JSON.stringify({ PROD: false, DEV: true, MODE: "test", BASE_URL: "/" }),
     },
+    plugins: [viteGlob],
     loader: { ".png": "dataurl", ".svg": "dataurl", ".jpg": "dataurl", ".woff2": "dataurl" },
   })
   bundle = {
@@ -151,6 +153,8 @@ class Server {
         return reply(invoice(this.payments, this.status))
       case "kamra.api.property_locale":
         return reply(LOCALE)
+      case "kamra.languages.enabled_ui_languages":  // Kamra 2.8 (#630): the languages the site offers
+        return reply({ enabled: ["en", "es", "pt"] })
       case "kamra.ledger.list_exchange_rates":
         return reply({ business_date: "2026-11-19", rates: [] })
       case "kamra.ledger.list_reason_codes":

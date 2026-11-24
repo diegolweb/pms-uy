@@ -14,6 +14,7 @@ import assert from "node:assert/strict"
 import path from "node:path"
 import { after, before, beforeEach, describe, test } from "node:test"
 import { build } from "esbuild"
+import { viteGlob } from "./esbuild-vite-glob.mjs"
 import { chromium } from "playwright"
 
 const SRC = path.resolve(import.meta.dirname, "../src")
@@ -57,6 +58,7 @@ before(async () => {
       "process.env.NODE_ENV": '"development"',
       "import.meta.env": JSON.stringify({ PROD: false, DEV: true, MODE: "test", BASE_URL: "/" }),
     },
+    plugins: [viteGlob],
     loader: { ".png": "dataurl", ".svg": "dataurl", ".jpg": "dataurl", ".woff2": "dataurl", ".mp3": "dataurl" },
   })
   bundle = {

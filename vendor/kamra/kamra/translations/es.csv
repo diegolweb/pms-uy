@@ -1,257 +1,9 @@
-1 to 30,De 1 a 30
-15 days overdue,15 días de retraso
-31 to 60,De 31 a 60
-61 to 90,De 61 a 90
-90+,90+
-ADR,ADR
-Action,Acción
-Actor,Responsable de la acción
-Actual check-out,Hora real de salida
-Adults,Adultos
-Aging by days overdue,Antigüedad por días de retraso
-All companies,Todas las empresas
-Amount,Importe
-Approver,Aprobado por
-Arrivals,Llegadas
-Arrivals by source,Llegadas por origen
-As of {0},Al {0}
-Assigned to,Asignado a
-Balance,Saldo
-Balance due,Saldo pendiente
-Balance due: {0},Saldo pendiente: {0}
-Billed,Facturado
-Bookings,Reservas
-Breached,Incumplido
-By item,Por artículo
-By status,Por estado
-Cash collected,Efectivo cobrado
-Category,Categoría
-Channel,Canal
-Charges by type,Cargos por tipo
-Check-in,Registro de entrada
-Check-out,Salida
-Children,Niños
-Clean minutes,Minutos de limpieza
-Closing balance,Saldo final
-Closing cash,Efectivo de cierre
-Collected at,Recogido a las
-Collections by mode,Cobros por medio de pago
-Company,Empresa
-Condition,Condición
-Contribution by source,Contribución por origen
-Covers,Comensales
-Created,Creado
-DSO (days),DSO (días)
-Date,Fecha
-Days overdue,Días de retraso
-Days sales outstanding (DSO),Días de cobro (DSO)
-"Dear {0},",Estimados {0}:
-Delivered at,Entregado a las
-Departures,Salidas
-Description,Descripción
-Detail,Detalle
-Due by,Vence
-Due date,Fecha de vencimiento
-ETA,Hora prevista de llegada
-Early departures,Salidas anticipadas
-Engineering pack,Paquete de Ingeniería
-Express,Expreso
-F&B pack,Paquete de Alimentos y bebidas
-F&B revenue,Ingresos de alimentos y bebidas
-Floor,Piso
-Folio,Folio
-Folio charges,Cargos de folio
-Found by,Encontrado por
-Found on,Encontrado el
-Front Office pack,Paquete de Recepción
-Guest,Huésped
-HK status,Estado HK
-Handed over to,Entregado a
-Handover,Entrega
-Handover notes,Notas de entrega de turno
-Hotel Manager pack,Paquete del Gerente del hotel
-Housekeeping pack,Paquete de Limpieza
-Housekeeping tasks,Tareas de limpieza
-In house by room type,Alojados por tipo de habitación
-In-house guests,Huéspedes alojados
-Invoice,Factura
-Invoice date,Fecha de factura
-Invoice {0} for {1} is due on {2}.,La factura {0} por {1} vence el {2}.
-Invoice {0} for {1} is due today.,La factura {0} por {1} vence hoy.
-Invoice {0} for {1} was due on {2} and is {3} days overdue.,La factura {0} por {1} venció el {2} y lleva {3} días de retraso.
-Item,Artículo
-Items,Artículos
-Items by menu,Artículos por menú
-Kamra report,Informe de Kamra
-Laundry orders,Pedidos de lavandería
-Laundry pack,Paquete de Lavandería
-Lost and found,Objetos perdidos
-Metric,Indicador
-Mode,Modo
-Nights,Noches
-Nights short,Noches de menos
-No-shows & cancellations,No presentados y cancelaciones
-No-shows and cancellations,No presentados y cancelaciones
-Not due,Por vencer
-"Not sent, no billing contact email: {0}","No enviado, sin correo de contacto de facturación: {0}"
-Occ %,% de ocupación
-Occupancy,Ocupación
-Occupancy & revenue by day,Ocupación e ingresos por día
-Occupancy and revenue,Ocupación e ingresos
-Occupancy by day,Ocupación por día
-Oldest due date,Vencimiento más antiguo
-Open bills,Cuentas abiertas
-Open tickets,Tickets abiertos
-Opening cash,Efectivo inicial
-Order,Pedido
-Order type,Tipo de pedido
-Orders by status,Pedidos por estado
-Other revenue,Otros ingresos
-Allowances,Bonificaciones
-Outlet,Punto de venta
-Outstanding,Saldo pendiente
-Overdue,Vencido
-Overdue by company,Vencido por empresa
-POS items,Artículos POS
-POS order,Pedido POS
-POS orders,Pedidos POS
-Paid,Pagado
-Pax,Personas
-Payment reminder from {0},Recordatorio de pago de {0}
-Payment reminders at {0},Recordatorios de pago en {0}
-Payment terms: {0} days,Plazo de pago: {0} días
-Payments,Pagos
-Payouts,Salidas de efectivo
-Previous period,Período anterior
-Priority,Prioridad
-Qty,Cant.
-Rate,Tarifa
-Recent payments,Pagos recientes
-Reference,Referencia
-Report,Informe
-Reservation,Reserva
-Resolution minutes,Minutos de resolución
-Resolved on,Resuelto el
-Response minutes,Minutos de respuesta
-Returned,Devuelto
-Returned on,Fecha de devolución
-RevPAR,RevPAR
-RevPAX,RevPAX
-Revenue,Ingresos
-Revenue by source,Ingresos por origen
-Room,Habitación
-Room nights,Noches de habitación
-Room revenue,Ingresos por habitaciones
-Room status,Estado de la habitación
-Room type,Tipo de habitación
-Rooms,Habitaciones
-Rooms sold,Habitaciones vendidas
-SLA breaches,Incumplimientos de SLA
-Sales by outlet,Ventas por punto de venta
-Scheduled check-out,Salida programada
-Service,Servicio
-Service tickets,Tickets de servicio
-Commission,Comisión
-Share %,Participación %
-Shift,Turno
-Shift date,Fecha del turno
-Shift handover,Entrega de turno
-Shift handovers,Entregas de turno
-Source,Origen
-Statement of account,Estado de cuenta
-Statement of account from {0},Estado de cuenta de {0}
-Status,Estado
-Subject,Asunto
-Task,Tarea
-Tasks,Tareas
-Tasks by attendant,Tareas por camarera
-Tasks by type,Tareas por tipo
-Terms (days),Plazo (días)
-The report is attached.,El informe va adjunto.
-This period,Este período
-Ticket,Solicitud
-Tickets,Solicitudes
-Tickets by category,Tickets por categoría
-Tickets by priority,Tickets por prioridad
-Total,Total
-Total revenue,Ingresos totales
-Turnaround,Tiempo de entrega
-Turnaround hours,Horas de entrega
-Type,Tipo
-Unapplied credit,Saldo a favor sin aplicar
-Variance,Variación
-Variance %,Variación %
-Voids & allowances,Anulaciones y bonificaciones
-Voids and allowances,Anulaciones y bonificaciones
-Volume by guest vs house,Volumen huésped vs casa
-When,Cuándo
-Your statement of account is attached.,Adjuntamos su estado de cuenta.
-due in 3 days,vence en 3 días
-due today,vence hoy
-vs previous period,vs período anterior
-{0} has no billing contact email. Add one on the corporate account or type an address.,{0} no tiene correo de contacto de facturación. Agréguelo en la cuenta corporativa o escriba una dirección.
-{0}: reminder sent for {1} ({2}),{0}: recordatorio enviado para {1} ({2})
-{0} rows,{0} filas
-"Marketing consent is changed from the guest profile, the booking page or a STOP / START reply.","El consentimiento de marketing se cambia desde el perfil del huésped, la página de reservas o una respuesta STOP / START."
-This guest has no phone number on file.,Este huésped no tiene un número de teléfono registrado.
-This guest has not agreed to marketing messages.,Este huésped no ha aceptado recibir mensajes de marketing.
-You will get offers from {0} on WhatsApp. Reply STOP at any time to opt out.,Recibirás ofertas de {0} por WhatsApp. Responde BAJA en cualquier momento para darte de baja.
-You will no longer get offers from {0}. Booking and stay messages continue. Reply START to opt in again.,Ya no recibirá ofertas de {0}. Los mensajes de reserva y estancia continúan. Responda START para volver a suscribirse.
-AI Provider,Proveedor de IA
-"Your AI provider will act as {0}, within your role. Prices, taxes and availability stay in Kamra. Every action is recorded under your name in the Activity log.","Su proveedor de IA actuará como {0}, con los permisos de su rol. Los precios, los impuestos y la disponibilidad se gestionan en Kamra. Cada acción se registra con su nombre en el registro de Actividad."
-Tax,Impuestos
-{0} bill from {1},Factura de {0} de {1}
-{0} to {1},{0} a {1}
-Billed this month,Facturado este mes
-Bills this month,Facturas de este mes
-Brought forward,Saldo anterior
-"Each bill above is a tax invoice of its own; this is a summary of the month, not a tax invoice. Taxable value and tax show where the whole invoice is on this account.","Cada factura de arriba es una factura fiscal propia; esto es un resumen del mes, no una factura fiscal. La base imponible y el impuesto aparecen cuando toda la factura está en esta cuenta."
-Monthly bill,Factura mensual
-No such account.,No existe esa cuenta.
-Paid this month,Pagado este mes
-Payments this month,Pagos de este mes
-"Pick a month, like 2026-10.","Elige un mes, por ejemplo 2026-10."
-Taxable value,Base imponible
-"Your bill for {0} is attached: {1} billed, {2} due.","Adjuntamos tu factura de {0}: {1} facturado, {2} pendiente."
-Reason,Motivo
-Cashier,Cajero
-KOT,Comanda (KOT)
-Kitchen times,Tiempos de cocina
-Kitchen turnaround,Tiempos de cocina por punto de venta
-Order to pickup minutes,Minutos del pedido a la recogida
-Order to start minutes,Minutos del pedido al inicio
-Ordered at,Pedido a las
-Picked up at,Recogido a las
-Plated at,Emplatado a las
-Plated to pickup minutes,Minutos del emplatado a la recogida
-Served by,Atendido por
-Start to plated minutes,Minutos del inicio al emplatado
-Started at,Iniciado a las
-Your AI key is out of credit. Top it up with your provider or change the key in Settings > AI assistant.,Su clave de IA no tiene saldo. Recárguela con su proveedor o cambie la clave en Configuración > Asistente de IA.
-Sells alcohol,Vende alcohol
-"Off for a dry property: every alcohol field, tick box and label is hidden, in every language. Nothing posted before changes.","Desactívelo en una propiedad sin alcohol: se ocultan todos los campos, casillas y etiquetas de alcohol, en todos los idiomas. Nada de lo ya cargado cambia."
-Extend unchecked-out departures one night,Extender una noche las salidas sin check-out
-"On: a guest still Checked In past their departure date is extended by one night when the audit runs, and that night is posted like any other. A stay that can't be extended (the room is booked) stays on the checklist.","Activado: un huésped que sigue alojado después de su fecha de salida se extiende una noche al correr la auditoría, y esa noche se carga como cualquier otra. Una estancia que no se puede extender (la habitación está reservada) queda en la lista de verificación."
-The guest owes {0} - nothing is due back to refund.,El huésped debe {0}; no hay nada que devolver.
-Only {0} is due back to the guest - can't refund more than that.,Solo se le deben {0} al huésped; no se puede devolver más.
-Room type code {0} is already used at this property.,El código de tipo de habitación {0} ya se usa en esta propiedad.
-There are no room nights on this bill yet. A discount comes off posted nights: give it after night audit or at check-out.,Todavía no hay noches en esta cuenta. El descuento se aplica a las noches cargadas: déselo después de la auditoría nocturna o en el check-out.
-Enter a discount above zero.,Ingrese un descuento mayor que cero.
-A discount can't be more than 100%.,Un descuento no puede superar el 100%.
-The discount is more than the room nights on the bill ({0}).,El descuento supera las noches de la cuenta ({0}).
-"This folio is settled - give the discount on the guest's open folio, or cancel the invoice first.",Esta cuenta está liquidada: dé el descuento en la cuenta abierta del huésped o anule primero la factura.
-"Pick a percent or an amount, per night or for the stay.","Elija un porcentaje o un importe, por noche o para la estancia."
-Promo code {0} is already on this stay.,El código promocional {0} ya está en esta estancia.
-Promo code {0},Código promocional {0}
-Discount {0}%,Descuento {0}%
-Discount {0} per night,Descuento {0} por noche
-A discount needs a reason - it goes on the record.,Un descuento necesita un motivo; queda en el registro.
 Set access instructions on the Property first.,Primero configure las instrucciones de acceso en la propiedad.
 Invalid link.,Enlace no válido.
 Cannot release access yet. Failed gates: {0},Todavía no se puede liberar el acceso. Controles pendientes: {0}
 Enter the deposit amount.,Ingrese el importe del pago.
 No deposit is due - enter the amount to request.,No hay pago pendiente: ingrese el importe a solicitar.
-"Hello {guest}, please pay the deposit of {cur} {amount} to secure your booking {ref} at {property} ({checkin} → {checkout}): {url}","Hola, {guest}: para garantizar tu reserva {ref} en {property} ({checkin} → {checkout}), paga {cur} {amount} aquí: {url}"
+"Hello {guest}, please pay the deposit of {cur} {amount} to secure your booking {ref} at {property} ({checkin} → {checkout}): {url}","Hola, {guest}: para garantizar su reserva {ref} en {property} ({checkin} → {checkout}), pague {cur} {amount} aquí: {url}"
 Only available while the payment gateway is in test mode.,Solo disponible mientras la pasarela de pago está en modo de prueba.
 No payment link has been sent for this booking.,No se envió ningún enlace de pago para esta reserva.
 Only a housekeeping supervisor can pass an inspection or verify a clean.,Solo un supervisor de pisos puede aprobar una inspección o verificar una limpieza.
@@ -474,20 +226,20 @@ Quotation {0} — {1},Cotización {0} — {1}
 Quote {0} was {1} on {2} with no guest response yet.,La cotización {0} quedó {1} el {2} y el cliente todavía no respondió.
 Unknown guest response: {0},Respuesta del cliente desconocida: {0}
 Unknown channel: {0},Canal desconocido: {0}
-Quotation {num} for {event} on {date}: total {total}. Please reply to confirm or request changes.,Cotización {num} para {event} el {date}: total {total}. Responde para confirmarla o pedir cambios.
+Quotation {num} for {event} on {date}: total {total}. Please reply to confirm or request changes.,Cotización {num} para {event} el {date}: total {total}. Responda para confirmarla o pedir cambios.
 Following up: quotation {0},Seguimiento: cotización {0}
-"<p>Dear {name},</p><p>We sent a quotation for your event on {date} and have not heard back. Please reply to this email, call us, or message on WhatsApp so we can hold the hall for you.</p><p>Thank you.</p>","<p>Hola, {name}:</p><p>Te enviamos una cotización para tu evento del {date} y todavía no tenemos respuesta. Responde a este correo, llámanos o escríbenos por WhatsApp para que podamos reservarte el salón.</p><p>Gracias.</p>"
+"<p>Dear {name},</p><p>We sent a quotation for your event on {date} and have not heard back. Please reply to this email, call us, or message on WhatsApp so we can hold the hall for you.</p><p>Thank you.</p>","<p>Hola, {name}:</p><p>Le enviamos una cotización para su evento del {date} y todavía no tenemos respuesta. Responda a este correo, llámenos o escríbanos por WhatsApp para que podamos reservarle el salón.</p><p>Gracias.</p>"
 The arrival date has passed.,La fecha de llegada ya pasó.
 Give a reason for declining the request.,Indique un motivo para rechazar la solicitud.
 Not a booking request,No es una solicitud de reserva
 Request expired,Solicitud vencida
 No inventory left,No queda disponibilidad
 Reason required,Motivo obligatorio
-Decline it on the OTA's extranet too ({0}).,Recházela también en la extranet de la OTA ({0}).
-Your stay at {0} is confirmed,Tu estadía en {0} está confirmada
-"Good news, {0}: {1} accepted your booking request for {2} to {3}. Reference {4}.","Buenas noticias, {0}: {1} aceptó tu solicitud de reserva del {2} al {3}. Referencia {4}."
-Your booking request at {0},Tu solicitud de reserva en {0}
-"Sorry, {0}: {1} can't accept your booking request for {2} to {3}. Reason: {4}. Reference {5}.","Lo sentimos, {0}: {1} no puede aceptar tu solicitud de reserva del {2} al {3}. Motivo: {4}. Referencia {5}."
+Decline it on the OTA's extranet too ({0}).,Rechácela también en la extranet de la OTA ({0}).
+Your stay at {0} is confirmed,Su estadía en {0} está confirmada
+"Good news, {0}: {1} accepted your booking request for {2} to {3}. Reference {4}.","Buenas noticias, {0}: {1} aceptó su solicitud de reserva del {2} al {3}. Referencia {4}."
+Your booking request at {0},Su solicitud de reserva en {0}
+"Sorry, {0}: {1} can't accept your booking request for {2} to {3}. Reason: {4}. Reference {5}.","Lo sentimos, {0}: {1} no puede aceptar su solicitud de reserva del {2} al {3}. Motivo: {4}. Referencia {5}."
 Villa lockout: {0} is booked for these dates.,Bloqueo de villa: {0} está reservada en estas fechas.
 No {0} room is free for these dates.,No hay ninguna habitación {0} libre en estas fechas.
 "{0} is {1}, not a pending request.","{0} está {1}, no es una solicitud pendiente."
@@ -548,15 +300,6 @@ Give a reason for the early departure.,Indique un motivo para la salida anticipa
 Your role can settle the bill but not check the guest out. Ask Front Desk or a Hotel Admin to press Check out.,Su rol puede liquidar la cuenta pero no hacer el check-out del huésped. Pida a Recepción o a un administrador del hotel que pulse Check-out.
 "Not on the bill yet. Post it to the room, or the guest pays for it at the outlet.","Todavía no está en la cuenta. Cárguelo a la habitación, o el huésped lo paga en el punto de venta."
 Back from the laundry. Hand it to the guest and post it to the room.,Volvió de la lavandería. Entrégueselo al huésped y cárguelo a la habitación.
-Monthly,Mensual
-Shop,Tienda
-Revenue by department,Ingresos por departamento
-Department,Departamento
-"Rooms, each outlet, banquets and each minor department (laundry, spa, taxi...), as on the night audit report.","Habitaciones, cada punto de venta, banquetes y cada departamento operativo menor (lavandería, spa, taxi...), como en el informe de auditoría nocturna."
-Food and beverage on folios,Alimentos y bebidas en folios
-Meal plans and minibar,Planes de comidas y minibar
-Banquets,Banquetes
-Laundry,Lavandería
 Your till is closed. Open it here to take or give back money.,Su caja está cerrada. Ábrala aquí para cobrar o devolver dinero.
 The early departure charge must be one of: {0}.,El cargo por salida anticipada debe ser uno de: {0}.
 Only Finance or a Hotel Admin can change the early departure charge from the property's policy ({0}).,Solo Finanzas o un administrador del hotel pueden cambiar el cargo por salida anticipada respecto de la política de la propiedad ({0}).
@@ -661,13 +404,13 @@ Unknown document.,Documento desconocido.
 This property does not keep ID images. Verify the ID at check-in instead.,Esta propiedad no guarda imágenes de documentos. Verifique el documento en el check-in.
 Nothing on file.,No hay nada guardado.
 That file is no longer stored.,Ese archivo ya no está guardado.
-Please upload a photo of your ID.,Sube una foto de tu documento.
-That photo is too large. Please retake it.,La foto es demasiado grande. Vuelve a sacarla.
-Please upload a JPG or PNG photo.,Sube una foto en JPG o PNG.
+Please upload a photo of your ID.,Suba una foto de su documento.
+That photo is too large. Please retake it.,La foto es demasiado grande. Vuelva a sacarla.
+Please upload a JPG or PNG photo.,Suba una foto en JPG o PNG.
 This booking is no longer active.,Esta reserva ya no está activa.
-That file didn't upload correctly. Please try again.,El archivo no se subió bien. Inténtalo de nuevo.
-That doesn't look like a photo. Please retake it.,No parece una foto. Vuelve a sacarla.
-That photo couldn't be processed. Please retake it.,No se pudo procesar la foto. Vuelve a sacarla.
+That file didn't upload correctly. Please try again.,El archivo no se subió bien. Inténtelo de nuevo.
+That doesn't look like a photo. Please retake it.,No parece una foto. Vuelva a sacarla.
+That photo couldn't be processed. Please retake it.,No se pudo procesar la foto. Vuelva a sacarla.
 The ID didn't read cleanly. Scan it again.,El documento no se leyó bien. Escanéelo de nuevo.
 Nothing was scanned.,No se escaneó nada.
 That scan is too long to be an ID.,Ese escaneo es demasiado largo para ser un documento.
@@ -939,11 +682,11 @@ Online booking is not enabled for this property.,Las reservas en línea no está
 Stays longer than {0} nights: please contact the hotel.,"Para estadías de más de {0} noches, contacta al hotel."
 This check-in link is not valid anymore.,Este enlace de check-in ya no es válido.
 "The ID photo must be a JPEG, PNG or WebP image.","La foto del documento debe ser una imagen JPEG, PNG o WebP."
-The ID photo is too large - please retake it.,La foto del documento es demasiado grande: vuelve a sacarla.
+The ID photo is too large - please retake it.,La foto del documento es demasiado grande: vuelva a sacarla.
 ID type and number are required.,El tipo y el número de documento son obligatorios.
 Check-in details were already verified by the desk.,Recepción ya verificó los datos del check-in.
-Please accept the registration declaration to sign.,Acepta la declaración de registro para firmar.
-The desk has already verified your check-in details.,Recepción ya verificó tus datos de check-in.
+Please accept the registration declaration to sign.,Acepte la declaración de registro para firmar.
+The desk has already verified your check-in details.,Recepción ya verificó sus datos de check-in.
 Laundry pickup is available once you're checked in.,El retiro de lavandería está disponible cuando hayas hecho el check-in.
 At least one adult is required.,Se necesita al menos un adulto.
 Name and phone are required.,El nombre y el teléfono son obligatorios.
@@ -1109,60 +852,291 @@ District,Barrio
 City,Ciudad
 Building number (4 digits),Número de edificio (4 dígitos)
 Postal code (5 digits),Código postal (5 dígitos)
+1 to 30,De 1 a 30
+15 days overdue,15 días de retraso
+31 to 60,De 31 a 60
+61 to 90,De 61 a 90
+90+,90+
+ADR,ADR
+Action,Acción
+Actor,Responsable de la acción
+Actual check-out,Hora real de salida
+Adults,Adultos
+Aging by days overdue,Antigüedad por días de retraso
+All companies,Todas las empresas
+Amount,Importe
+Approver,Aprobado por
+Arrivals,Llegadas
+Arrivals by source,Llegadas por origen
+As of {0},Al {0}
+Assigned to,Asignado a
+Balance,Saldo
+Balance due,Saldo pendiente
+Balance due: {0},Saldo pendiente: {0}
+Billed,Facturado
+Bookings,Reservas
+Breached,Incumplido
+By item,Por artículo
+By status,Por estado
+Cash collected,Efectivo cobrado
+Category,Categoría
+Channel,Canal
+Charges by type,Cargos por tipo
+Check-in,Registro de entrada
+Check-out,Salida
+Children,Niños
+Clean minutes,Minutos de limpieza
+Closing balance,Saldo final
+Closing cash,Efectivo de cierre
+Collected at,Recogido a las
+Collections by mode,Cobros por medio de pago
+Company,Empresa
+Condition,Condición
+Contribution by source,Contribución por origen
+Covers,Comensales
+Created,Creado
+DSO (days),DSO (días)
+Date,Fecha
+Days overdue,Días de retraso
+Days sales outstanding (DSO),Días de cobro (DSO)
+"Dear {0},",Estimados {0}:
+Delivered at,Entregado a las
+Departures,Salidas
+Description,Descripción
+Detail,Detalle
+Due by,Vence
+Due date,Fecha de vencimiento
+ETA,Hora prevista de llegada
+Early departures,Salidas anticipadas
+Engineering pack,Paquete de Ingeniería
+Express,Expreso
+F&B pack,Paquete de Alimentos y bebidas
+F&B revenue,Ingresos de alimentos y bebidas
+Floor,Piso
+Folio,Folio
+Folio charges,Cargos de folio
+Found by,Encontrado por
+Found on,Encontrado el
+Front Office pack,Paquete de Recepción
+Guest,Huésped
+HK status,Estado HK
+Handed over to,Entregado a
+Handover,Entrega
+Handover notes,Notas de entrega de turno
+Hotel Manager pack,Paquete del Gerente del hotel
+Housekeeping pack,Paquete de Limpieza
+Housekeeping tasks,Tareas de limpieza
+In house by room type,Alojados por tipo de habitación
+In-house guests,Huéspedes alojados
+Invoice,Factura
+Invoice date,Fecha de factura
+Invoice {0} for {1} is due on {2}.,La factura {0} por {1} vence el {2}.
+Invoice {0} for {1} is due today.,La factura {0} por {1} vence hoy.
+Invoice {0} for {1} was due on {2} and is {3} days overdue.,La factura {0} por {1} venció el {2} y lleva {3} días de retraso.
+Item,Artículo
+Items,Artículos
+Items by menu,Artículos por menú
+Kamra report,Informe de Kamra
+Laundry orders,Pedidos de lavandería
+Laundry pack,Paquete de Lavandería
+Lost and found,Objetos perdidos
+Metric,Indicador
+Mode,Modo
+Nights,Noches
+Nights short,Noches de menos
+No-shows & cancellations,No presentados y cancelaciones
+No-shows and cancellations,No presentados y cancelaciones
+Not due,Por vencer
+"Not sent, no billing contact email: {0}","No enviado, sin correo de contacto de facturación: {0}"
+Occ %,% de ocupación
+Occupancy,Ocupación
+Occupancy & revenue by day,Ocupación e ingresos por día
+Occupancy and revenue,Ocupación e ingresos
+Occupancy by day,Ocupación por día
+Oldest due date,Vencimiento más antiguo
+Open bills,Cuentas abiertas
+Open tickets,Tickets abiertos
+Opening cash,Efectivo inicial
+Order,Pedido
+Order type,Tipo de pedido
+Orders by status,Pedidos por estado
+Other revenue,Otros ingresos
+Allowances,Bonificaciones
+Outlet,Punto de venta
+Outstanding,Saldo pendiente
+Overdue,Vencido
+Overdue by company,Vencido por empresa
+POS items,Artículos POS
+POS order,Pedido POS
+POS orders,Pedidos POS
+Paid,Pagado
+Pax,Personas
+Payment reminder from {0},Recordatorio de pago de {0}
+Payment reminders at {0},Recordatorios de pago en {0}
+Payment terms: {0} days,Plazo de pago: {0} días
+Payments,Pagos
+Payouts,Salidas de efectivo
+Previous period,Período anterior
+Priority,Prioridad
+Qty,Cant.
+Rate,Tarifa
+Recent payments,Pagos recientes
+Reference,Referencia
+Report,Informe
+Reservation,Reserva
+Resolution minutes,Minutos de resolución
+Resolved on,Resuelto el
+Response minutes,Minutos de respuesta
+Returned,Devuelto
+Returned on,Fecha de devolución
+RevPAR,RevPAR
+RevPAX,RevPAX
+Revenue,Ingresos
+Revenue by source,Ingresos por origen
+Room,Habitación
+Room nights,Noches de habitación
+Room revenue,Ingresos por habitaciones
+Room status,Estado de la habitación
+Room type,Tipo de habitación
+Rooms,Habitaciones
+Rooms sold,Habitaciones vendidas
+SLA breaches,Incumplimientos de SLA
+Sales by outlet,Ventas por punto de venta
+Scheduled check-out,Salida programada
+Service,Servicio
+Service tickets,Tickets de servicio
+Commission,Comisión
+Share %,Participación %
+Shift,Turno
+Shift date,Fecha del turno
+Shift handover,Entrega de turno
+Shift handovers,Entregas de turno
+Source,Origen
+Statement of account,Estado de cuenta
+Statement of account from {0},Estado de cuenta de {0}
+Status,Estado
+Subject,Asunto
+Task,Tarea
+Tasks,Tareas
+Tasks by attendant,Tareas por camarera
+Tasks by type,Tareas por tipo
+Terms (days),Plazo (días)
+The report is attached.,El informe va adjunto.
+This period,Este período
+Ticket,Solicitud
+Tickets,Solicitudes
+Tickets by category,Tickets por categoría
+Tickets by priority,Tickets por prioridad
+Total,Total
+Total revenue,Ingresos totales
+Turnaround,Tiempo de entrega
+Turnaround hours,Horas de entrega
+Type,Tipo
+Unapplied credit,Saldo a favor sin aplicar
+Variance,Variación
+Variance %,Variación %
+Voids & allowances,Anulaciones y bonificaciones
+Voids and allowances,Anulaciones y bonificaciones
+Volume by guest vs house,Volumen huésped vs casa
+When,Cuándo
+Your statement of account is attached.,Adjuntamos su estado de cuenta.
+due in 3 days,vence en 3 días
+due today,vence hoy
+vs previous period,vs período anterior
+{0} has no billing contact email. Add one on the corporate account or type an address.,{0} no tiene correo de contacto de facturación. Agréguelo en la cuenta corporativa o escriba una dirección.
+{0}: reminder sent for {1} ({2}),{0}: recordatorio enviado para {1} ({2})
+{0} rows,{0} filas
+"Marketing consent is changed from the guest profile, the booking page or a STOP / START reply.","El consentimiento de marketing se cambia desde el perfil del huésped, la página de reservas o una respuesta STOP / START."
+This guest has no phone number on file.,Este huésped no tiene un número de teléfono registrado.
+This guest has not agreed to marketing messages.,Este huésped no ha aceptado recibir mensajes de marketing.
+You will get offers from {0} on WhatsApp. Reply STOP at any time to opt out.,Recibirás ofertas de {0} por WhatsApp. Responde BAJA en cualquier momento para darte de baja.
+You will no longer get offers from {0}. Booking and stay messages continue. Reply START to opt in again.,Ya no recibirá ofertas de {0}. Los mensajes de reserva y estancia continúan. Responda START para volver a suscribirse.
+AI Provider,Proveedor de IA
+"Your AI provider will act as {0}, within your role. Prices, taxes and availability stay in Kamra. Every action is recorded under your name in the Activity log.","Su proveedor de IA actuará como {0}, con los permisos de su rol. Los precios, los impuestos y la disponibilidad se gestionan en Kamra. Cada acción se registra con su nombre en el registro de Actividad."
+Tax,Impuestos
+{0} bill from {1},Factura de {0} de {1}
+{0} to {1},{0} a {1}
+Billed this month,Facturado este mes
+Bills this month,Facturas de este mes
+Brought forward,Saldo anterior
+"Each bill above is a tax invoice of its own; this is a summary of the month, not a tax invoice. Taxable value and tax show where the whole invoice is on this account.","Cada factura de arriba es una factura fiscal propia; esto es un resumen del mes, no una factura fiscal. La base imponible y el impuesto aparecen cuando toda la factura está en esta cuenta."
+Monthly bill,Factura mensual
+No such account.,No existe esa cuenta.
+Paid this month,Pagado este mes
+Payments this month,Pagos de este mes
+"Pick a month, like 2026-10.","Elige un mes, por ejemplo 2026-10."
+Taxable value,Base imponible
+"Your bill for {0} is attached: {1} billed, {2} due.","Adjuntamos tu factura de {0}: {1} facturado, {2} pendiente."
+Reason,Motivo
+Cashier,Cajero
+KOT,Comanda (KOT)
+Kitchen times,Tiempos de cocina
+Kitchen turnaround,Tiempos de cocina por punto de venta
+Order to pickup minutes,Minutos del pedido a la recogida
+Order to start minutes,Minutos del pedido al inicio
+Ordered at,Pedido a las
+Picked up at,Recogido a las
+Plated at,Emplatado a las
+Plated to pickup minutes,Minutos del emplatado a la recogida
+Served by,Atendido por
+Start to plated minutes,Minutos del inicio al emplatado
+Started at,Iniciado a las
+Your AI key is out of credit. Top it up with your provider or change the key in Settings > AI assistant.,Su clave de IA no tiene saldo. Recárguela con su proveedor o cambie la clave en Configuración > Asistente de IA.
+Sells alcohol,Vende alcohol
+"Off for a dry property: every alcohol field, tick box and label is hidden, in every language. Nothing posted before changes.","Desactívelo en una propiedad sin alcohol: se ocultan todos los campos, casillas y etiquetas de alcohol, en todos los idiomas. Nada de lo ya cargado cambia."
+Extend unchecked-out departures one night,Extender una noche las salidas sin check-out
+"On: a guest still Checked In past their departure date is extended by one night when the audit runs, and that night is posted like any other. A stay that can't be extended (the room is booked) stays on the checklist.","Activado: un huésped que sigue alojado después de su fecha de salida se extiende una noche al correr la auditoría, y esa noche se carga como cualquier otra. Una estancia que no se puede extender (la habitación está reservada) queda en la lista de verificación."
+The guest owes {0} - nothing is due back to refund.,El huésped debe {0}; no hay nada que devolver.
+Only {0} is due back to the guest - can't refund more than that.,Solo se le deben {0} al huésped; no se puede devolver más.
+Room type code {0} is already used at this property.,El código de tipo de habitación {0} ya se usa en esta propiedad.
+There are no room nights on this bill yet. A discount comes off posted nights: give it after night audit or at check-out.,Todavía no hay noches en esta cuenta. El descuento se aplica a las noches cargadas: déselo después de la auditoría nocturna o en el check-out.
+Enter a discount above zero.,Ingrese un descuento mayor que cero.
+A discount can't be more than 100%.,Un descuento no puede superar el 100%.
+The discount is more than the room nights on the bill ({0}).,El descuento supera las noches de la cuenta ({0}).
+"This folio is settled - give the discount on the guest's open folio, or cancel the invoice first.",Esta cuenta está liquidada: dé el descuento en la cuenta abierta del huésped o anule primero la factura.
+"Pick a percent or an amount, per night or for the stay.","Elija un porcentaje o un importe, por noche o para la estancia."
+Promo code {0} is already on this stay.,El código promocional {0} ya está en esta estancia.
+Promo code {0},Código promocional {0}
+Discount {0}%,Descuento {0}%
+Discount {0} per night,Descuento {0} por noche
+A discount needs a reason - it goes on the record.,Un descuento necesita un motivo; queda en el registro.
 Contact from {0} could not be saved on the guest profile and is kept here: {1},Contacto recibido de {0} que no se pudo guardar en la ficha del huésped; queda aquí: {1}
-Arrival time: {0},Hora de llegada: {0}
-"Service: {0} × {1}, {2} {3}","Servicio: {0} × {1}, {2} {3}"
-The end date cannot be before the start date.,La fecha final no puede ser anterior a la inicial.
-{0} cannot be negative.,{0} no admite valores negativos.
-"Set at least one restriction: stop sell, closed to arrival, closed to departure, a minimum stay of two nights or more, or a maximum stay.","Indique al menos una restricción: cierre de venta, cerrado a la llegada, cerrado a la salida, una estadía mínima de dos noches o más, o una estadía máxima."
-The maximum stay ({0} nights) cannot be shorter than the minimum stay ({1} nights).,La estadía máxima ({0} noches) no puede ser menor que la mínima ({1} noches).
-The maximum stay (1 night) cannot be shorter than the minimum stay ({0} nights).,La estadía máxima (1 noche) no puede ser menor que la mínima ({0} noches).
-Room type {0} belongs to another property.,El tipo de habitación {0} es de otra propiedad.
-Rate plan {0} belongs to another property.,El plan tarifario {0} es de otra propiedad.
-Restriction {0} belongs to another property.,La restricción {0} es de otra propiedad.
-Expected a list.,Se esperaba una lista.
-These dates break a stay restriction: {0} Saved anyway.,Estas fechas no cumplen una restricción de estadía: {0} Se guardó de todos modos.
-Stay restrictions,Restricciones de estadía
-minimum stay of {0} nights,estadía mínima de {0} noches
-closed to arrival,cerrado a la llegada
-closed to departure,cerrado a la salida
-stop sell,cierre de venta
-maximum stay of {0} nights,estadía máxima de {0} noches
-maximum stay of 1 night,estadía máxima de 1 noche
-Booked by {0} outside the stay rules: {1},Reservada por {0} fuera de las restricciones de estadía: {1}
-These dates are closed to new bookings.,Estas fechas no están disponibles para reservar.
-Arrivals are not possible on {0}.,No se puede llegar el {0}.
-Departures are not possible on {0}.,No se puede terminar la estadía el {0}.
-These dates need a stay of at least {0} nights ({1}).,"Para estas fechas, la estadía mínima es de {0} noches ({1})."
-These dates need a stay of at least {0} nights.,"Para estas fechas, la estadía mínima es de {0} noches."
-These dates allow a stay of at most {0} nights.,"Para estas fechas, la estadía máxima es de {0} noches."
 These dates allow a stay of at most 1 night.,"Para estas fechas, la estadía máxima es de 1 noche."
-Provider rate plan {0} is already mapped on this connection.,El plan de tarifa {0} del proveedor ya está asociado en esta conexión.
-"Rate plan {0} belongs to {1}, not to this connection's property {2}.","El plan de tarifa {0} pertenece a {1}, no a la propiedad {2} de esta conexión."
-This connection is not active.,Esta conexión no está activa.
-{0} does not take ARI changes.,{0} no admite el envío de disponibilidad y tarifas por cambios.
-No room mappings yet - map your room types to the provider's room and rate ids first.,Todavía no hay asociaciones de habitaciones: primero asocie sus tipos de habitación a los ids de habitación y de tarifa del proveedor.
-"Enter the provider's property ID (your property's ID in Channex) to activate this connection: without it, availability and rates do not reach Channex and its bookings do not come in.","Ingrese el ID del alojamiento en el proveedor (el ID de su alojamiento en Channex) para activar esta conexión: sin él, la disponibilidad y las tarifas no llegan a Channex y sus reservas no entran."
-This connection has no provider's property ID yet: enter your property's ID in Channex first.,Esta conexión todavía no tiene el ID del alojamiento en el proveedor: primero ingrese el ID de su alojamiento en Channex.
-The channel manager sells in {0}; this property is in {1}.,El gestor de canales vende en {0}; esta propiedad está en {1}.
-The channel manager's property time zone is {0}; this property's is {1}.,La zona horaria de la propiedad en el gestor de canales es {0}; la de esta propiedad es {1}.
-No room type matches it.,No coincide con ningún tipo de habitación.
-Several rate plans of this room match no Kamra rate plan: map them by hand.,Varios planes de tarifa de esta habitación no coinciden con ningún plan de Kamra: asócielos a mano.
-The channel manager has {0} rooms of {1}; Kamra has {2}.,El gestor de canales tiene {0} habitaciones de {1}; Kamra tiene {2}.
-Rate plan {0} is priced per person; Kamra sends one price per room.,El plan de tarifa {0} tiene precio por persona; Kamra envía un precio por habitación.
-"Rate plan {0} adds a fixed amount: on the channels it applies every night, on direct bookings once per stay.","El plan de tarifa {0} suma un importe fijo: en las plataformas se aplica cada noche, en la venta directa una vez por estancia."
-Refunds through {0},La devolución por {0}
-Min. stay on arrival,Estadía mín. al llegar
-Min. stay through,Estadía mín. durante
-Max. stay,Estadía máx.
-This booking link is not valid.,Este enlace de reserva no es válido.
-This booking is no longer waiting for a payment.,Esta reserva ya no espera ningún pago.
-This return address is not allowed.,Esta dirección de vuelta no está permitida.
-Refund amount must be positive.,El importe de la devolución debe ser positivo.
-A refund reason is required.,El motivo de la devolución es obligatorio.
-This folio is closed.,Este folio está cerrado.
-No gateway payment {0} on this folio.,Este folio no tiene ningún pago {0} de la pasarela.
-Only {0} of this payment is left to refund.,De este pago solo quedan {0} por devolver.
+These dates allow a stay of at most {0} nights.,"Para estas fechas, la estadía máxima es de {0} noches."
+These dates need a stay of at least {0} nights.,"Para estas fechas, la estadía mínima es de {0} noches."
+These dates need a stay of at least {0} nights ({1}).,"Para estas fechas, la estadía mínima es de {0} noches ({1})."
+Departures are not possible on {0}.,No se puede terminar la estadía el {0}.
+Arrivals are not possible on {0}.,No se puede llegar el {0}.
+These dates are closed to new bookings.,Estas fechas no están disponibles para reservar.
+Booked by {0} outside the stay rules: {1},Reservada por {0} fuera de las restricciones de estadía: {1}
+maximum stay of 1 night,estadía máxima de 1 noche
+maximum stay of {0} nights,estadía máxima de {0} noches
+stop sell,cierre de venta
+closed to departure,cerrado a la salida
+closed to arrival,cerrado a la llegada
+minimum stay of {0} nights,estadía mínima de {0} noches
+Stay restrictions,Restricciones de estadía
+These dates break a stay restriction: {0} Saved anyway.,Estas fechas no cumplen una restricción de estadía: {0} Se guardó de todos modos.
+Expected a list.,Se esperaba una lista.
+Restriction {0} belongs to another property.,La restricción {0} es de otra propiedad.
+Rate plan {0} belongs to another property.,El plan tarifario {0} es de otra propiedad.
+Room type {0} belongs to another property.,El tipo de habitación {0} es de otra propiedad.
+The maximum stay (1 night) cannot be shorter than the minimum stay ({0} nights).,La estadía máxima (1 noche) no puede ser menor que la mínima ({0} noches).
+The maximum stay ({0} nights) cannot be shorter than the minimum stay ({1} nights).,La estadía máxima ({0} noches) no puede ser menor que la mínima ({1} noches).
+"Set at least one restriction: stop sell, closed to arrival, closed to departure, a minimum stay of two nights or more, or a maximum stay.","Indique al menos una restricción: cierre de venta, cerrado a la llegada, cerrado a la salida, una estadía mínima de dos noches o más, o una estadía máxima."
+{0} cannot be negative.,{0} no admite valores negativos.
+The end date cannot be before the start date.,La fecha final no puede ser anterior a la inicial.
+"Service: {0} × {1}, {2} {3}","Servicio: {0} × {1}, {2} {3}"
+Arrival time: {0},Hora de llegada: {0}
+Monthly,Mensual
+Shop,Tienda
+Revenue by department,Ingresos por departamento
+Department,Departamento
+"Rooms, each outlet, banquets and each minor department (laundry, spa, taxi...), as on the night audit report.","Habitaciones, cada punto de venta, banquetes y cada departamento operativo menor (lavandería, spa, taxi...), como en el informe de auditoría nocturna."
+Food and beverage on folios,Alimentos y bebidas en folios
+Meal plans and minibar,Planes de comidas y minibar
+Banquets,Banquetes
+Laundry,Lavandería
 Spa,Spa
 Taxi,Taxi
 Misc,Varios
@@ -1178,122 +1152,309 @@ Bills still open,Cuentas aún abiertas
 Use Check out to check a guest out: it makes sure every bill is cleared first.,Use Registrar salida para hacer el check-out del huésped: antes se comprueba que todas las cuentas estén saldadas.
 Check out,Check-out
 Discounts and allowances,Descuentos y bonificaciones
-Only a checked-in stay can have its check-in reversed.,Solo se puede revertir el check-in de una estadía con check-in.
-"The night audit has run since this check-in, so it can't be reversed. Check the guest out instead.","La auditoría nocturna ya se ejecutó después de este check-in, así que no se puede revertir. Haga el check-out del huésped."
-"A charge or payment is on the bill: void it, or check the guest out.",Hay un cargo o un pago en la cuenta: anúlelo o haga el check-out del huésped.
-"A security deposit is held for this stay: release or refund it first, or check the guest out.","Esta estadía tiene un depósito de garantía retenido: libérelo o devuélvalo primero, o haga el check-out del huésped."
-Give the amount and the mode to refund.,Indique el importe y el medio de pago para la devolución.
-"This folio is settled - issue a credit note, or cancel the invoice first.",Este folio está liquidado: emita una nota de crédito o anule primero la factura.
-That charge line is not on this folio.,Esa línea de cargo no está en este folio.
-This line is itself a correction. Correct the reposted line instead.,Esta línea ya es una corrección. Corrija la línea que se volvió a cargar.
-This line was already corrected. Correct the reposted line instead.,Esta línea ya se corrigió. Corrija la línea que se volvió a cargar.
-Alcohol cannot be billed to a company folio.,El alcohol no se puede facturar al folio de una empresa.
-Nothing to correct: the line already has these values.,No hay nada que corregir: la línea ya tiene estos valores.
-Pick the charges to move.,Elija los cargos que quiere mover.
-"Give one target: to_folio, to_company or to_reservation.","Indique un solo destino: to_folio, to_company o to_reservation."
-Pick a different folio to move the charges to.,Elija otro folio para mover los cargos.
-This folio has no open balance. Use a refund or credit note instead.,Este folio no tiene saldo pendiente. Use una devolución o una nota de crédito.
-Say why the check-in is being reversed.,Indique por qué se revierte el check-in.
-That payment is not on this folio.,Ese pago no está en este folio.
-"A security deposit is refunded from the stay's deposit (refund_deposit), not from the bill.","Un depósito de garantía se devuelve desde el depósito de la estadía (refund_deposit), no desde la cuenta."
-This payment is already refunded in full.,Este pago ya se devolvió por completo.
-The lock system did not answer. Cancel the keys at the encoder.,El sistema de cerraduras no respondió. Anule las llaves en el codificador.
-This idempotency_key was already used for another correction.,Esta idempotency_key ya se usó para otra corrección.
-A {0} line can't be corrected here. Room nights change through the stay's rate; reverse an allowance or discount with a charge.,Una línea de {0} no se puede corregir aquí. Las noches de habitación cambian con la tarifa de la estadía; revierta una bonificación o un descuento con un cargo.
-A correction can't repost as {0}.,Una corrección no se puede volver a cargar como {0}.
-This stay bills to no company. Set one with change_stay_company first.,Esta estadía no se factura a ninguna empresa. Asigne una primero con change_stay_company.
-Moving charges to another stay needs Finance or Hotel Admin.,Mover cargos a otra estadía requiere Finanzas o un administrador del hotel.
-Give a reason to move charges to another stay.,Indique un motivo para mover cargos a otra estadía.
-That stay is not at this property.,Esa estadía no es de esta propiedad.
-Charges move only to a stay that is checked in.,Los cargos solo se pueden mover a una estadía con check-in.
-That is the same stay. Use to_folio.,Es la misma estadía. Use to_folio.
-That stay has no open guest folio.,Esa estadía no tiene un folio de huésped abierto.
-App address,Dirección de la aplicación
-The app manifest is too large.,El manifiesto de la aplicación es demasiado grande.
-"The manifest needs an id: lowercase letters, digits and dashes.","El manifiesto necesita un id: letras minúsculas, dígitos y guiones."
-The manifest needs a name.,El manifiesto necesita un nombre.
-The manifest's roles must be a list.,Los roles del manifiesto deben ser una lista.
-"This app's manifest is not signed by a trusted publisher. IT can allow unsigned, self-hosted apps in Marketplace.",El manifiesto de esta aplicación no está firmado por un editor de confianza. TI puede permitir aplicaciones sin firmar y alojadas por cuenta propia en el Catálogo de integraciones.
-"This pairing code is wrong, used or expired. Ask IT for a new one.","Este código de vinculación es incorrecto, ya se usó o venció. Pida uno nuevo a TI."
-"{0} answered {1}, not the app manifest.","{0} respondió {1}, no el manifiesto de la aplicación."
-{0} is not a valid app manifest.,{0} no es un manifiesto de aplicación válido.
-The manifest asks for unknown scopes: {0},El manifiesto pide alcances desconocidos: {0}
-(none),(ninguno)
-The app didn't ask for: {0},La aplicación no pidió: {0}
-{0} is already connected. Disconnect it first.,{0} ya está conectada. Desconéctela primero.
-{0} is not waiting to pair.,{0} no está esperando vincularse.
-Couldn't reach {0}.,No se pudo conectar con {0}.
-"{0} must be on {1}, where the manifest is.","{0} debe estar en {1}, donde está el manifiesto."
-{0} is not a base64 Ed25519 public key.,{0} no es una clave pública Ed25519 en base64.
-Give the counted cash or the count by note.,Indique el efectivo contado o el arqueo por billete.
-Count whole notes and coins of a positive value.,Cuente billetes y monedas enteros de valor positivo.
-Each note count needs a value and a number.,Cada línea del arqueo necesita un valor y una cantidad.
-{0} is not a note or coin here. Count in: {1}.,{0} no es un billete ni una moneda de aquí. Cuente en: {1}.
-"The count by note adds up to {0}, not {1}.","El arqueo por billete suma {0}, no {1}."
-Check-out time must be after check-in.,La hora de check-out debe ser posterior a la del check-in.
-Rate plan {0} is hourly but has no hourly rate.,El plan tarifario {0} es por horas pero no tiene tarifa por hora.
-Rate plan {0} is a block plan but has no block rate.,El plan tarifario {0} es por bloque pero no tiene tarifa por bloque.
-The last room number must not be below the first.,El último número de habitación no puede ser menor que el primero.
-Add at most 500 rooms at a time.,Agregue como máximo 500 habitaciones a la vez.
-Enter the first and last room number as whole numbers.,Ingrese el primer y el último número de habitación como números enteros.
-Room type {0} does not belong to this property.,El tipo de habitación {0} no pertenece a esta propiedad.
-Choose Refund or Keep as forfeited deposit.,Elija Reembolso o Retener sin devolver.
-This no-show has no credit on its folio.,Este no presentado no tiene saldo a favor en su folio.
-Only a No Show's credit is settled here (this one is {0}).,Aquí solo se liquida el saldo a favor de un no presentado (este está en estado {0}).
-What was proposed can't change. Reject it and record it again.,Lo propuesto no puede cambiar. Rechácelo y vuelva a registrarlo.
-Confirm or reject it from the company account.,Confírmelo o rechácelo desde la cuenta de la empresa.
-A new company payment request is always Pending.,Una nueva solicitud de pago de empresa siempre queda Pendiente.
-This payment was already {0}.,Este pago ya está en estado {0}.
-Give the floor a name.,Póngale un nombre al piso.
-{0} already has a floor called {1}.,{0} ya tiene un piso llamado {1}.
-Floor {0} still has rooms. Move them to another floor before disabling it.,El piso {0} todavía tiene habitaciones. Muévalas a otro piso antes de desactivarlo.
-Floor {0} still has rooms. Move them to another floor before deleting it.,El piso {0} todavía tiene habitaciones. Muévalas a otro piso antes de eliminarlo.
-Start Date cannot be after End Date.,La fecha de inicio no puede ser posterior a la fecha de fin.
-Package Nights must be at least 1.,Las noches del paquete deben ser al menos 1.
-Package Rate 2 Pax (Base) must be greater than zero.,La tarifa del paquete para 2 personas (base) debe ser mayor que cero.
-Extra Night Rate % cannot be negative.,El % de la tarifa por noche extra no puede ser negativo.
-Extra Night Fixed Override cannot be negative.,El importe fijo por noche extra no puede ser negativo.
-Advance Deposit % must be between 0 and 100.,El % a pagar al reservar debe estar entre 0 y 100.
-OTA Daily Rate cannot be negative.,La tarifa diaria para OTA no puede ser negativa.
-{0} is sold out for {1}: {2} of {3} sellable rooms sold ({4} out of order or blocked).,{0} está agotado para el {1}: {2} de {3} habitaciones vendibles vendidas ({4} fuera de servicio o bloqueadas).
-"Room type code must use Latin letters or digits (e.g. DLX, RWBT3).","El código del tipo de habitación debe usar letras latinas o dígitos (p. ej. DLX, RWBT3)."
-The start date is after the end date.,La fecha de inicio es posterior a la fecha de fin.
-This bill changed while it was being moved to the company's account. Try again.,Esta cuenta cambió mientras se pasaba a la cuenta de la empresa. Inténtelo de nuevo.
-Recorded for Finance to confirm. It does not change the account until a Finance user confirms it with their PIN.,Registrado para que Finanzas lo confirme. No cambia la cuenta hasta que un usuario de Finanzas lo confirme con su PIN.
-An AI agent can't confirm a company payment. Ask Finance.,Un agente de IA no puede confirmar un pago de empresa. Pídaselo a Finanzas.
-An AI agent can't reverse a company payment. Ask Finance.,Un agente de IA no puede revertir un pago de empresa. Pídaselo a Finanzas.
-This payment was already reversed.,Este pago ya se revirtió.
-An AI agent can't put a bill in dispute. Ask Finance.,Un agente de IA no puede marcar una cuenta en disputa. Pídaselo a Finanzas.
-Say what the company disputes - it shows on the bill.,Indique qué disputa la empresa: aparece en la cuenta.
-You recorded this payment; another Finance user confirms it.,Usted registró este pago; lo confirma otro usuario de Finanzas.
-Say why the payment is rejected - it goes on the record.,Indique por qué se rechaza el pago: queda en el registro.
-Unknown ledger {0}.,Libro contable desconocido: {0}.
-The received date can't be after the business date ({0}).,La fecha de recepción no puede ser posterior a la fecha operativa ({0}).
-{0} is not a company payment.,{0} no es un pago de empresa.
-{0} is not billed on this account.,{0} no está facturado en esta cuenta.
-This payment was already recorded on {0}.,Este pago ya se registró en {0}.
-Pick the company to open an account for.,Elija la empresa a la que quiere abrirle una cuenta.
-This key already opened another account ({0}).,Esta clave ya abrió otra cuenta ({0}).
-This service account has been revoked.,Esta cuenta de servicio fue revocada.
-This service account has no properties.,Esta cuenta de servicio no tiene propiedades.
-This service account's scope has no MCP tools.,El alcance de esta cuenta de servicio no tiene herramientas MCP.
-Outside this service account's scope: {0},Fuera del alcance de esta cuenta de servicio: {0}
-Pick at least one scope.,Elija al menos un alcance.
-Pick at least one property.,Elija al menos una propiedad.
-Name the connected app.,Póngale un nombre a la aplicación conectada.
-This service account is revoked. Create a new one.,Esta cuenta de servicio está revocada. Cree una nueva.
-{0} is outside this service account's scope.,{0} está fuera del alcance de esta cuenta de servicio.
-Unknown scope: {0},Alcance desconocido: {0}
-{0} needs an admin and can't be in a scope.,{0} requiere un administrador y no puede estar en un alcance.
-Room {0} is part of sellable unit {1} and cannot change room type.,La habitación {0} forma parte de la unidad vendible {1} y no puede cambiar de tipo.
-statements,los estados de cuenta
-Pick statement or monthly.,Elija estado de cuenta o mensual.
-Pick at least one account.,Elija al menos una cuenta.
-"Some accounts are not on this property, or are closed.",Algunas cuentas no son de esta propiedad o están cerradas.
-month-end bills for {0},las facturas de cierre de mes de {0}
-Sent {0} to {1} companies.,Se enviaron {0} a {1} empresas.
-Company emails at {0},Correos a empresas en {0}
-"Not sent, see the Error Log: {0}",No enviados (vea el registro de errores): {0}
-This property does not ask where the guest lives.,Esta propiedad no pregunta dónde reside el huésped.
-This property does not invoice in {0}.,Esta propiedad no factura en {0}.
 Only the hotel's manager can waive the cancellation fee.,Solo el gerente del hotel puede exonerar el cargo de cancelación.
+This property does not invoice in {0}.,Esta propiedad no factura en {0}.
+This property does not ask where the guest lives.,Esta propiedad no pregunta dónde reside el huésped.
+"Not sent, see the Error Log: {0}",No enviados (vea el registro de errores): {0}
+Company emails at {0},Correos a empresas en {0}
+Sent {0} to {1} companies.,Se enviaron {0} a {1} empresas.
+month-end bills for {0},las facturas de cierre de mes de {0}
+"Some accounts are not on this property, or are closed.",Algunas cuentas no son de esta propiedad o están cerradas.
+Pick at least one account.,Elija al menos una cuenta.
+Pick statement or monthly.,Elija estado de cuenta o mensual.
+statements,los estados de cuenta
+Room {0} is part of sellable unit {1} and cannot change room type.,La habitación {0} forma parte de la unidad vendible {1} y no puede cambiar de tipo.
+{0} needs an admin and can't be in a scope.,{0} requiere un administrador y no puede estar en un alcance.
+Unknown scope: {0},Alcance desconocido: {0}
+{0} is outside this service account's scope.,{0} está fuera del alcance de esta cuenta de servicio.
+This service account is revoked. Create a new one.,Esta cuenta de servicio está revocada. Cree una nueva.
+Name the connected app.,Póngale un nombre a la aplicación conectada.
+Pick at least one property.,Elija al menos una propiedad.
+Pick at least one scope.,Elija al menos un alcance.
+Outside this service account's scope: {0},Fuera del alcance de esta cuenta de servicio: {0}
+This service account's scope has no MCP tools.,El alcance de esta cuenta de servicio no tiene herramientas MCP.
+This service account has no properties.,Esta cuenta de servicio no tiene propiedades.
+This service account has been revoked.,Esta cuenta de servicio fue revocada.
+This key already opened another account ({0}).,Esta clave ya abrió otra cuenta ({0}).
+Pick the company to open an account for.,Elija la empresa a la que quiere abrirle una cuenta.
+This payment was already recorded on {0}.,Este pago ya se registró en {0}.
+{0} is not billed on this account.,{0} no está facturado en esta cuenta.
+{0} is not a company payment.,{0} no es un pago de empresa.
+The received date can't be after the business date ({0}).,La fecha de recepción no puede ser posterior a la fecha operativa ({0}).
+Unknown ledger {0}.,Libro contable desconocido: {0}.
+Say why the payment is rejected - it goes on the record.,Indique por qué se rechaza el pago: queda en el registro.
+You recorded this payment; another Finance user confirms it.,Usted registró este pago; lo confirma otro usuario de Finanzas.
+Say what the company disputes - it shows on the bill.,Indique qué disputa la empresa: aparece en la cuenta.
+An AI agent can't put a bill in dispute. Ask Finance.,Un agente de IA no puede marcar una cuenta en disputa. Pídaselo a Finanzas.
+This payment was already reversed.,Este pago ya se revirtió.
+An AI agent can't reverse a company payment. Ask Finance.,Un agente de IA no puede revertir un pago de empresa. Pídaselo a Finanzas.
+An AI agent can't confirm a company payment. Ask Finance.,Un agente de IA no puede confirmar un pago de empresa. Pídaselo a Finanzas.
+Recorded for Finance to confirm. It does not change the account until a Finance user confirms it with their PIN.,Registrado para que Finanzas lo confirme. No cambia la cuenta hasta que un usuario de Finanzas lo confirme con su PIN.
+This bill changed while it was being moved to the company's account. Try again.,Esta cuenta cambió mientras se pasaba a la cuenta de la empresa. Inténtelo de nuevo.
+The start date is after the end date.,La fecha de inicio es posterior a la fecha de fin.
+"Room type code must use Latin letters or digits (e.g. DLX, RWBT3).","El código del tipo de habitación debe usar letras latinas o dígitos (p. ej. DLX, RWBT3)."
+{0} is sold out for {1}: {2} of {3} sellable rooms sold ({4} out of order or blocked).,{0} está agotado para el {1}: {2} de {3} habitaciones vendibles vendidas ({4} fuera de servicio o bloqueadas).
+OTA Daily Rate cannot be negative.,La tarifa diaria para OTA no puede ser negativa.
+Advance Deposit % must be between 0 and 100.,El % a pagar al reservar debe estar entre 0 y 100.
+Extra Night Fixed Override cannot be negative.,El importe fijo por noche extra no puede ser negativo.
+Extra Night Rate % cannot be negative.,El % de la tarifa por noche extra no puede ser negativo.
+Package Rate 2 Pax (Base) must be greater than zero.,La tarifa del paquete para 2 personas (base) debe ser mayor que cero.
+Package Nights must be at least 1.,Las noches del paquete deben ser al menos 1.
+Start Date cannot be after End Date.,La fecha de inicio no puede ser posterior a la fecha de fin.
+Floor {0} still has rooms. Move them to another floor before deleting it.,El piso {0} todavía tiene habitaciones. Muévalas a otro piso antes de eliminarlo.
+Floor {0} still has rooms. Move them to another floor before disabling it.,El piso {0} todavía tiene habitaciones. Muévalas a otro piso antes de desactivarlo.
+{0} already has a floor called {1}.,{0} ya tiene un piso llamado {1}.
+Give the floor a name.,Póngale un nombre al piso.
+This payment was already {0}.,Este pago ya está en estado {0}.
+A new company payment request is always Pending.,Una nueva solicitud de pago de empresa siempre queda Pendiente.
+Confirm or reject it from the company account.,Confírmelo o rechácelo desde la cuenta de la empresa.
+What was proposed can't change. Reject it and record it again.,Lo propuesto no puede cambiar. Rechácelo y vuelva a registrarlo.
+Only a No Show's credit is settled here (this one is {0}).,Aquí solo se liquida el saldo a favor de un no presentado (este está en estado {0}).
+This no-show has no credit on its folio.,Este no presentado no tiene saldo a favor en su folio.
+Choose Refund or Keep as forfeited deposit.,Elija Reembolso o Retener sin devolver.
+Room type {0} does not belong to this property.,El tipo de habitación {0} no pertenece a esta propiedad.
+Enter the first and last room number as whole numbers.,Ingrese el primer y el último número de habitación como números enteros.
+Add at most 500 rooms at a time.,Agregue como máximo 500 habitaciones a la vez.
+The last room number must not be below the first.,El último número de habitación no puede ser menor que el primero.
+Rate plan {0} is a block plan but has no block rate.,El plan tarifario {0} es por bloque pero no tiene tarifa por bloque.
+Rate plan {0} is hourly but has no hourly rate.,El plan tarifario {0} es por horas pero no tiene tarifa por hora.
+Check-out time must be after check-in.,La hora de check-out debe ser posterior a la del check-in.
+"The count by note adds up to {0}, not {1}.","El arqueo por billete suma {0}, no {1}."
+{0} is not a note or coin here. Count in: {1}.,{0} no es un billete ni una moneda de aquí. Cuente en: {1}.
+Each note count needs a value and a number.,Cada línea del arqueo necesita un valor y una cantidad.
+Count whole notes and coins of a positive value.,Cuente billetes y monedas enteros de valor positivo.
+Give the counted cash or the count by note.,Indique el efectivo contado o el arqueo por billete.
+{0} is not a base64 Ed25519 public key.,{0} no es una clave pública Ed25519 en base64.
+"{0} must be on {1}, where the manifest is.","{0} debe estar en {1}, donde está el manifiesto."
+Couldn't reach {0}.,No se pudo conectar con {0}.
+{0} is not waiting to pair.,{0} no está esperando vincularse.
+{0} is already connected. Disconnect it first.,{0} ya está conectada. Desconéctela primero.
+The app didn't ask for: {0},La aplicación no pidió: {0}
+(none),(ninguno)
+The manifest asks for unknown scopes: {0},El manifiesto pide alcances desconocidos: {0}
+{0} is not a valid app manifest.,{0} no es un manifiesto de aplicación válido.
+"{0} answered {1}, not the app manifest.","{0} respondió {1}, no el manifiesto de la aplicación."
+"This pairing code is wrong, used or expired. Ask IT for a new one.","Este código de vinculación es incorrecto, ya se usó o venció. Pida uno nuevo a TI."
+"This app's manifest is not signed by a trusted publisher. IT can allow unsigned, self-hosted apps in Marketplace.",El manifiesto de esta aplicación no está firmado por un editor de confianza. TI puede permitir aplicaciones sin firmar y alojadas por cuenta propia en el Catálogo de integraciones.
+The manifest's roles must be a list.,Los roles del manifiesto deben ser una lista.
+The manifest needs a name.,El manifiesto necesita un nombre.
+"The manifest needs an id: lowercase letters, digits and dashes.","El manifiesto necesita un id: letras minúsculas, dígitos y guiones."
+The app manifest is too large.,El manifiesto de la aplicación es demasiado grande.
+App address,Dirección de la aplicación
+That stay has no open guest folio.,Esa estadía no tiene un folio de huésped abierto.
+That is the same stay. Use to_folio.,Es la misma estadía. Use to_folio.
+Charges move only to a stay that is checked in.,Los cargos solo se pueden mover a una estadía con check-in.
+That stay is not at this property.,Esa estadía no es de esta propiedad.
+Give a reason to move charges to another stay.,Indique un motivo para mover cargos a otra estadía.
+Moving charges to another stay needs Finance or Hotel Admin.,Mover cargos a otra estadía requiere Finanzas o un administrador del hotel.
+This stay bills to no company. Set one with change_stay_company first.,Esta estadía no se factura a ninguna empresa. Asigne una primero con change_stay_company.
+A correction can't repost as {0}.,Una corrección no se puede volver a cargar como {0}.
+A {0} line can't be corrected here. Room nights change through the stay's rate; reverse an allowance or discount with a charge.,Una línea de {0} no se puede corregir aquí. Las noches de habitación cambian con la tarifa de la estadía; revierta una bonificación o un descuento con un cargo.
+This idempotency_key was already used for another correction.,Esta idempotency_key ya se usó para otra corrección.
+The lock system did not answer. Cancel the keys at the encoder.,El sistema de cerraduras no respondió. Anule las llaves en el codificador.
+This payment is already refunded in full.,Este pago ya se devolvió por completo.
+"A security deposit is refunded from the stay's deposit (refund_deposit), not from the bill.","Un depósito de garantía se devuelve desde el depósito de la estadía (refund_deposit), no desde la cuenta."
+That payment is not on this folio.,Ese pago no está en este folio.
+Say why the check-in is being reversed.,Indique por qué se revierte el check-in.
+This folio has no open balance. Use a refund or credit note instead.,Este folio no tiene saldo pendiente. Use una devolución o una nota de crédito.
+Pick a different folio to move the charges to.,Elija otro folio para mover los cargos.
+"Give one target: to_folio, to_company or to_reservation.","Indique un solo destino: to_folio, to_company o to_reservation."
+Pick the charges to move.,Elija los cargos que quiere mover.
+Nothing to correct: the line already has these values.,No hay nada que corregir: la línea ya tiene estos valores.
+Alcohol cannot be billed to a company folio.,El alcohol no se puede facturar al folio de una empresa.
+This line was already corrected. Correct the reposted line instead.,Esta línea ya se corrigió. Corrija la línea que se volvió a cargar.
+This line is itself a correction. Correct the reposted line instead.,Esta línea ya es una corrección. Corrija la línea que se volvió a cargar.
+That charge line is not on this folio.,Esa línea de cargo no está en este folio.
+"This folio is settled - issue a credit note, or cancel the invoice first.",Este folio está liquidado: emita una nota de crédito o anule primero la factura.
+Give the amount and the mode to refund.,Indique el importe y el medio de pago para la devolución.
+"A security deposit is held for this stay: release or refund it first, or check the guest out.","Esta estadía tiene un depósito de garantía retenido: libérelo o devuélvalo primero, o haga el check-out del huésped."
+"A charge or payment is on the bill: void it, or check the guest out.",Hay un cargo o un pago en la cuenta: anúlelo o haga el check-out del huésped.
+"The night audit has run since this check-in, so it can't be reversed. Check the guest out instead.","La auditoría nocturna ya se ejecutó después de este check-in, así que no se puede revertir. Haga el check-out del huésped."
+Only a checked-in stay can have its check-in reversed.,Solo se puede revertir el check-in de una estadía con check-in.
+"{0} is not a Kamra language.","{0} no es un idioma de Kamra."
+"{0} is switched off. Turn it on from Languages in Settings.","{0} está desactivado. Actívelo en Idiomas, dentro de Configuración."
+No room mappings yet - map your room types to the provider's room and rate ids first.,Todavía no hay asociaciones de habitaciones: primero asocie sus tipos de habitación a los ids de habitación y de tarifa del proveedor.
+This connection has no provider's property ID yet: enter your property's ID in Channex first.,Esta conexión todavía no tiene el ID del alojamiento en el proveedor: primero ingrese el ID de su alojamiento en Channex.
+"Enter the provider's property ID (your property's ID in Channex) to activate this connection: without it, availability and rates do not reach Channex and its bookings do not come in.","Ingrese el ID del alojamiento en el proveedor (el ID de su alojamiento en Channex) para activar esta conexión: sin él, la disponibilidad y las tarifas no llegan a Channex y sus reservas no entran."
+No room type matches it.,No coincide con ningún tipo de habitación.
+Provider rate plan {0} is already mapped on this connection.,El plan de tarifa {0} del proveedor ya está asociado en esta conexión.
+"Rate plan {0} adds a fixed amount: on the channels it applies every night, on direct bookings once per stay.","El plan de tarifa {0} suma un importe fijo: en las plataformas se aplica cada noche, en la venta directa una vez por estadía."
+Only {0} of this payment is left to refund.,De este pago solo quedan {0} por devolver.
+No gateway payment {0} on this folio.,Este folio no tiene ningún pago {0} de la pasarela.
+This folio is closed.,Este folio está cerrado.
+A refund reason is required.,El motivo de la devolución es obligatorio.
+Refund amount must be positive.,El importe de la devolución debe ser positivo.
+This return address is not allowed.,Esta dirección de vuelta no está permitida.
+This booking is no longer waiting for a payment.,Esta reserva ya no espera ningún pago.
+This booking link is not valid.,Este enlace de reserva no es válido.
+Max. stay,Estadía máx.
+Min. stay through,Estadía mín. durante
+Min. stay on arrival,Estadía mín. al llegar
+Refunds through {0},La devolución por {0}
+"Rate plan {0} belongs to {1}, not to this connection's property {2}.","El plan de tarifa {0} pertenece a {1}, no a la propiedad {2} de esta conexión."
+This connection is not active.,Esta conexión no está activa.
+Rate plan {0} is priced per person; Kamra sends one price per room.,El plan de tarifa {0} tiene precio por persona; Kamra envía un precio por habitación.
+"Room type {0} belongs to {1}, not to this connection's property {2}.","El tipo de habitación {0} pertenece a {1}, no a la propiedad {2} de esta conexión."
+Several rate plans of this room match no Kamra rate plan: map them by hand.,Varios planes de tarifa de esta habitación no coinciden con ningún plan de Kamra: asócielos a mano.
+The channel manager has {0} rooms of {1}; Kamra has {2}.,El gestor de canales tiene {0} habitaciones de {1}; Kamra tiene {2}.
+The channel manager sells in {0}; this property is in {1}.,El gestor de canales vende en {0}; esta propiedad está en {1}.
+The channel manager's property time zone is {0}; this property's is {1}.,La zona horaria de la propiedad en el gestor de canales es {0}; la de esta propiedad es {1}.
+{0} does not take ARI changes.,{0} no admite el envío de disponibilidad y tarifas por cambios.
+"The guest is still in house, so their bill stays open for tonight's charges. To invoice what is paid so far, use Settle & continue stay.","El huésped sigue alojado, así que su cuenta queda abierta para los cargos de esta noche. Para facturar lo pagado hasta ahora, use «Liquidar y continuar estadía»."
+Only a Revenue Manager or Hotel Admin can set nightly prices.,Solo un gerente de ingresos o un administrador del hotel puede fijar precios por noche.
+a voucher,un cupón
+a rate plan,un plan tarifario
+the company's negotiated rate plan,el plan tarifario negociado de la empresa
+"an OTA total, which already sets the price","un total de OTA, que ya fija el precio"
+the group's block rate,la tarifa de bloque del grupo
+This booking is not arriving early.,Esta reserva no tiene llegada anticipada.
+A day-use booking can't arrive early; change its date first.,Una reserva de uso diurno no puede adelantar la llegada; primero cambie su fecha.
+"Pick check in, check out or cancel.","Elija check-in, check-out o cancelar."
+Pick at least one stay.,Elija al menos una estadía.
+Task {0},Tarea {0}
+"{0} is {1} now (it was {2} when you changed it offline), so your change to {3} was not applied.","{0} ahora está en {1} (estaba en {2} cuando lo cambió sin conexión), así que su cambio a {3} no se aplicó."
+Hand-set nightly prices: {0}. The other nights are at the rate card.,Precios por noche fijados a mano: {0}. Las demás noches van con la lista de tarifas.
+"This booking has a fixed price, so the extra night(s) can't be priced here. Book them as a separate stay, or have the price changed first.","Esta reserva tiene un precio fijo, así que aquí no se puede poner precio a la(s) noche(s) adicional(es). Resérvela(s) como una estadía aparte o haga cambiar el precio antes."
+Ask for {0} nights or fewer at a time.,Pida {0} noches o menos por vez.
+Pick at most {0} stays at a time.,Elija como máximo {0} estadías por vez.
+Early arrival,Llegada anticipada
+{0} is booked to arrive on {1}. Checking in now moves the arrival to {2} and bills the extra night(s).,"{0} tiene la llegada reservada para el {1}. Si hace el check-in ahora, la llegada pasa al {2} y se factura(n) la(s) noche(s) adicional(es)."
+The guest asked for a food tasting - book it.,El huésped pidió una degustación: agéndela.
+Food tastings are switched off for this property (Settings -> Banquets & Groups).,Las degustaciones están desactivadas en esta propiedad (Configuración -> Banquetes y grupos).
+Pick when the tasting is.,Elija cuándo es la degustación.
+"Food tasting: {customer} on {when}, {pax} pax ({event} {date}).","Degustación: {customer} el {when}, {pax} personas ({event} {date})."
+A tasting is Done or Waived.,Una degustación se marca como «Degustación hecha» o «Sin degustación».
+Tasting {0} for {1}: {2},Degustación de {1} ({0}): {2}
+Online payment links are not available for this property's country.,Los enlaces de pago en línea no están disponibles para el país de esta propiedad.
+A {0} function doesn't get a tasting.,Un evento de tipo {0} no lleva degustación.
+{0} is already received.,{0} ya se cobró.
+{0} has no amount to pay.,{0} no tiene importe a pagar.
+"<p>Dear {name},</p><p>{milestone}: <strong>{amount}</strong> is due {due} for {event} on {date}.</p>{pay}<p>If you have already paid, thank you - please ignore this note.</p>","<p>Hola, {name}:</p><p>{milestone}: <strong>{amount}</strong> vence el {due} para {event} del {date}.</p>{pay}<p>Si ya realizó el pago, muchas gracias; por favor, ignore este aviso.</p>"
+Your food tasting for {0},Su degustación para {0}
+"<p>Dear {name},</p><p>Your food tasting is booked for <strong>{when}</strong> for {pax} people.</p>{menu}<p>The calendar invite is attached. Reply to this email if you need another time.</p>","<p>Hola, {name}:</p><p>Su degustación está agendada para el <strong>{when}</strong> para {pax} personas.</p>{menu}<p>Adjuntamos la invitación para su calendario. Responda a este correo si necesita otro horario.</p>"
+Pay {0} online,Pagar {0} en línea
+Reminder: {0} due for your event on {1},Recordatorio: vence {0} de su evento del {1}
+{0} for your event on {1},{0} de su evento del {1}
+{0} for your event on {1}: {2}. Pay here: {3},{0} de su evento del {1}: {2}. Pague aquí: {3}
+Only {0} {1} - {2} are needed on {3} with the other confirmed functions.,Solo hay {0} {1}: se necesitan {2} el {3} con los otros eventos confirmados.
+We will serve:,Serviremos:
+"Set the ERPNext company in Settings, Finance, ERPNext books.","Defina la empresa de ERPNext en Configuración, Finanzas, Contabilidad de ERPNext."
+ERPNext is not installed on this site.,ERPNext no está instalado en este sitio.
+Say why the posting is reversed.,Indique por qué se revierte el registro contable.
+Frappe HR is not installed on this site.,Frappe HR no está instalado en este sitio.
+{0} is not closed yet. It posts after its night audit.,El {0} todavía no está cerrado. Se registra después de su auditoría nocturna.
+"Map these in Settings, Finance, ERPNext books first: {0}","Primero asocie estos en Configuración, Finanzas, Contabilidad de ERPNext: {0}"
+{0} is not posted to ERPNext.,{0} no está registrado en ERPNext.
+Too many requests - try again within the hour.,Demasiadas solicitudes: vuelva a intentarlo dentro de una hora.
+Nothing is due now - the rest is paid at the hotel.,No hay nada que pagar ahora: el resto se paga en el hotel.
+The advance isn't paid yet - send the payment link.,El pago de la reserva todavía no está hecho: envíe el enlace de pago.
+No booking {0} made through this connection.,No hay ninguna reserva {0} hecha a través de esta conexión.
+This booking is {0}.,Esta reserva está {0}.
+"This is switched off in Settings, Housekeeping.","Esto está desactivado en Configuración, Limpieza."
+That room is not at this property.,Esa habitación no es de esta propiedad.
+This room already has an open case.,Esta habitación ya tiene un caso abierto.
+The front office and housekeeping agree on this room now.,Recepción y limpieza ya coinciden en esta habitación.
+This case is already closed.,Este caso ya está cerrado.
+Say what was found - it closes the case on the record.,Indique qué se encontró: queda registrado al cerrar el caso.
+Only an open inspection can be failed.,Solo se puede rechazar una inspección abierta.
+Say what failed - the attendant sees it on the re-clean.,Indique qué falló: la camarera lo verá al volver a limpiar.
+Re-clean: inspection failed - {0},Volver a limpiar: inspección rechazada - {0}
+Nights can't be below zero.,Las noches no pueden ser menos de cero.
+Minimum nights is more than maximum nights.,El mínimo de noches es mayor que el máximo.
+"Set at least one restriction: minimum or maximum nights, closed to arrival, closed to departure or stop-sell.","Defina al menos una restricción: mínimo o máximo de noches, cerrado a la llegada, cerrado a la salida o cierre de venta."
+That {0} is not at this property.,Ese {0} no es de esta propiedad.
+None of the nights with a typed price is in this stay.,Ninguna de las noches con precio escrito está en esta estadía.
+A room can't connect to itself.,Una habitación no puede estar comunicada consigo misma.
+The connecting room must be at the same property.,La habitación comunicada debe ser de la misma propiedad.
+Open and close room status cases from the Housekeeping Board.,Abra y cierre los casos de estado de habitación desde el Panel de limpieza.
+What was withheld can't change. Reverse the payment instead.,"Lo retenido no se puede cambiar. En su lugar, revierta el pago."
+Tax withheld is recorded with the company's payment.,El impuesto retenido se registra con el pago de la empresa.
+Add at least one unit or unit type.,Agregue al menos una unidad o un tipo de unidad.
+Add at least one login.,Agregue al menos un usuario.
+Each unit can only be listed once.,Cada unidad solo puede figurar una vez.
+Each unit type can only be listed once.,Cada tipo de unidad solo puede figurar una vez.
+Commission must be between 0 and 100.,La comisión debe estar entre 0 y 100.
+Each login can only be listed once.,Cada usuario solo puede figurar una vez.
+{0} is not a unit of this property.,{0} no es una unidad de esta propiedad.
+{0} is not a unit type of this property.,{0} no es un tipo de unidad de esta propiedad.
+No login named {0}.,No hay ningún usuario llamado {0}.
+Send a list of language codes.,Envíe una lista de códigos de idioma.
+You don't have units at this property.,No tiene unidades en esta propiedad.
+This login is read only.,Este usuario es de solo lectura.
+Pick a month.,Elija un mes.
+A cost needs a description and an amount.,Un costo necesita una descripción y un importe.
+You can only hold a unit you manage.,Solo puede bloquear una unidad que administra.
+You can only book a unit you manage.,Solo puede reservar una unidad que administra.
+You can set the rate only of a unit type whose units are all yours.,Solo puede fijar la tarifa de un tipo de unidad cuyas unidades sean todas suyas.
+That owner belongs to another property.,Ese propietario pertenece a otra propiedad.
+You can only release a hold you placed.,Solo puede liberar un bloqueo que hizo usted.
+{0} is not an email address.,{0} no es una dirección de correo electrónico.
+{0} is not one of this owner's units.,{0} no es una de las unidades de este propietario.
+That unit is already booked for those dates.,Esa unidad ya está reservada para esas fechas.
+That unit is not free for those dates.,Esa unidad no está libre para esas fechas.
+"{0} is a guest account, not a login.","{0} es una cuenta de huésped, no un usuario."
+Owner hold,Bloqueo del propietario
+"These dishes have no price: {0}. Set a price on the menu, or confirm they are free.",Estos platos no tienen precio: {0}. Defina un precio en el menú o confirme que son sin cargo.
+Prices typed by hand,Precios escritos a mano
+"night_prices must be a list of {date, price}.","night_prices debe ser una lista de {date, price}."
+Nightly prices need an overnight stay; a day-use stay is priced by its time slot.,Los precios por noche requieren una estadía con pernocte; una estadía de uso diurno se cobra según su franja horaria.
+Arrivals are closed on {0}.,No se admiten llegadas el {0}.
+A stay arriving on {0} needs at least {1} nights.,Una estadía con llegada el {0} necesita al menos {1} noches.
+A stay arriving on {0} can be at most {1} nights.,Una estadía con llegada el {0} puede tener como máximo {1} noches.
+Departures are closed on {0}.,No se admiten salidas el {0}.
+Stay restriction,Restricción de estadía
+"Nightly prices typed by hand cannot be combined with {0}. Clear the typed prices, or remove {0}.",Los precios por noche escritos a mano no se pueden combinar con {0}. Borre los precios escritos o quite {0}.
+"Each night price must be exactly {date, price}.","Cada precio por noche debe ser exactamente {date, price}."
+an agreed rate,una tarifa acordada
+the long-stay discount,el descuento por estadía larga
+a holiday package,un paquete de feriado
+{0} is closed for sale on {1}.,{0} está cerrado a la venta el {1}.
+This room type,Este tipo de habitación
+{0} is not a valid night.,{0} no es una noche válida.
+{0} is not a night of this stay ({1} to {2}).,{0} no es una noche de esta estadía (del {1} al {2}).
+The night {0} is priced twice.,La noche del {0} tiene dos precios.
+The price for {0} must be a number.,El precio del {0} debe ser un número.
+The price for {0} must be above zero.,El precio del {0} debe ser mayor que cero.
+The price for {0} is above the highest price Kamra accepts ({1}).,El precio del {0} supera el máximo que admite Kamra ({1}).
+The price for {0} can have at most 2 decimals.,El precio del {0} puede tener como máximo 2 decimales.
+Enter the amount to write off.,Ingrese el importe a dar de baja.
+The payment this was withheld from was reversed.,Se revirtió el pago del que se retuvo este importe.
+Enter the certificate number.,Ingrese el número de certificado.
+Tax withheld must be a positive amount.,El impuesto retenido debe ser un importe positivo.
+The bill owes {0} now - a write-off can't be more.,La factura tiene ahora un saldo de {0}: la baja no puede ser mayor.
+The bill owes {0} - a write-off can't be more.,La factura tiene un saldo de {0}: la baja no puede ser mayor.
+{0} has nothing open on this account.,{0} no tiene nada pendiente en esta cuenta.
+Pick the tax that was withheld ({0}).,Elija el impuesto que se retuvo ({0}).
+{0} is withheld at {1}%.,{0} se retiene al {1}%.
+Tax withheld on {0} is more than it owes.,El impuesto retenido sobre {0} es mayor que su saldo.
+Receipt. Not a tax invoice.,Recibo. No válido como factura.
+Unknown membership period.,Período de membresía desconocido.
+The customer's name is required.,El nombre del cliente es obligatorio.
+A cancelled membership can't be renewed. Sell a new one.,No se puede renovar una membresía cancelada. Venda una nueva.
+That customer is not at this property.,Ese cliente no es de esta propiedad.
+Say who is coming in: a checked-in guest or an external customer.,Indique quién ingresa: un huésped con check-in hecho o un cliente externo.
+That visit is already closed.,Esa visita ya está cerrada.
+Say who the booking is for: a checked-in guest or an external customer.,Indique para quién es la reserva: un huésped con check-in hecho o un cliente externo.
+Give the booking an end time.,Indique una hora de fin para la reserva.
+That therapist already has a booking then.,Ese terapeuta ya tiene una reserva en ese horario.
+That facility belongs to another property.,Esa instalación pertenece a otra propiedad.
+That is not a recreation pass.,Eso no es un pase de recreación.
+Pick a customer or a stay.,Elija un cliente o una estadía.
+Pick a year or less.,Elija un período de un año o menos.
+Memberships (several facilities),Membresías (varias instalaciones)
+That plan belongs to another property.,Ese plan pertenece a otra propiedad.
+That guest is not checked in at this property.,Ese huésped no tiene el check-in hecho en esta propiedad.
+That treatment is not offered here.,Ese tratamiento no se ofrece aquí.
+That therapist is not at this property.,Ese terapeuta no es de esta propiedad.
+That stay is not booked at this property.,Esa estadía no está reservada en esta propiedad.
+That belongs to another property.,Eso pertenece a otra propiedad.
+Only a walk-in payment has a receipt here; folio charges are on the guest bill.,Aquí solo los pagos de clientes de paso tienen recibo; los cargos al folio figuran en la cuenta del huésped.
+This membership is not paid yet.,Esta membresía todavía no está pagada.
+{0} is not open.,{0} no abre en este momento.
+{0} is at capacity ({1}).,{0}: capacidad completa ({1}).
+{0} is closed at that time.,{0} no abre en ese horario.
+{0} is fully booked then.,{0} no tiene lugar en ese horario.
+That booking is already {0}.,Esa reserva ya figura como {0}.
+{0} is paid access. Complimentary is not available.,{0} requiere pago: no se puede dar de cortesía.
+Enter the property name.,Ingrese el nombre del alojamiento.
+Enter a valid contact email.,Ingrese un correo de contacto válido.

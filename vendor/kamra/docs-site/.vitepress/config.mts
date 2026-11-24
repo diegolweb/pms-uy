@@ -46,6 +46,7 @@ const SIDEBAR: { text: ReturnType<typeof L>; collapsed?: boolean; items: [Return
     items: [
       [L("Introduction", "Introducción", "مقدمة"), ""],
       [L("Why Kamra", "Por qué Kamra", "لماذا Kamra"), "why-kamra"],
+      [L("Kamra is Apache-2.0", "Kamra es Apache-2.0", "Kamra برخصة Apache-2.0"), "apache-2.0"],
       [L("How Kamra works", "Cómo funciona Kamra", "كيف يعمل Kamra"), "how-it-works"],
       [L("Features at a glance", "Funciones de un vistazo", "الميزات بنظرة سريعة"), "features"],
       [L("What's new", "Novedades", "الجديد"), "releases"],
@@ -67,10 +68,12 @@ const SIDEBAR: { text: ReturnType<typeof L>; collapsed?: boolean; items: [Return
       [L("Night audit", "Auditoría nocturna", "التدقيق الليلي"), "night-audit"],
       [L("Reports & dashboards", "Informes y paneles", "التقارير ولوحات المعلومات"), "reports"],
       [L("Room Board", "Panel de habitaciones", "لوحة الغرف"), "rooms"],
+      [L("Unit owners", "Propietarios de unidades", "ملاك الوحدات"), "unit-owners"],
       [L("Housekeeping", "Limpieza", "التدبير المنزلي"), "housekeeping"],
       [L("Guest requests", "Solicitudes de huéspedes", "طلبات النزلاء"), "operations"],
       [L("F&B: POS & kitchen", "Alimentos y bebidas: POS y cocina", "الأغذية والمشروبات: نقطة البيع والمطبخ"), "fnb"],
       [L("Banquets & groups", "Banquetes y grupos", "الحفلات والمجموعات"), "banquets"],
+      [L("Recreation: gym, pool, spa", "Recreación: gimnasio, piscina, spa", "الترفيه: النادي الرياضي والمسبح والسبا"), "recreation"],
       [L("Revenue & rates", "Ingresos y tarifas", "الإيرادات والأسعار"), "revenue"],
       [L("Booking engine", "Motor de reservas", "محرك الحجز"), "booking-engine"],
       [L("Settings & staff", "Configuración y personal", "الإعدادات والموظفون"), "settings"],
@@ -98,9 +101,11 @@ const SIDEBAR: { text: ReturnType<typeof L>; collapsed?: boolean; items: [Return
       [L("AWS", "AWS", "AWS"), "self-hosting/aws"],
       [L("AWS / Azure / GCP marketplaces", "Marketplaces de AWS / Azure / GCP", "أسواق AWS / Azure / GCP"), "self-hosting/marketplace/hyperscalers"],
       [L("Install with bench", "Instalar con bench", "التثبيت باستخدام bench"), "self-hosting/bench"],
+      [L("A box at the hotel (offline)", "Un equipo en el hotel (sin conexión)", "جهاز في الفندق (دون اتصال)"), "self-hosting/hotel-box"],
       [L("Frappe Cloud marketplace", "Marketplace de Frappe Cloud", "سوق Frappe Cloud"), "self-hosting/frappe-cloud"],
       [L("ERPNext & Frappe HR", "ERPNext y Frappe HR", "ERPNext و Frappe HR"), "self-hosting/erpnext-hr"],
       [L("Email (SMTP) setup", "Configurar el correo (SMTP)", "إعداد البريد (SMTP)"), "self-hosting/email"],
+      [L("Usage reporting", "Informe de uso", "تقارير الاستخدام"), "self-hosting/usage-reporting"],
     ],
   },
   {
@@ -176,8 +181,8 @@ const themeWords = (lang: Exclude<Lang, "en">) => {
     langMenuLabel: es ? "Idioma" : "اللغة",
     footer: {
       message: es
-        ? `Código abierto (AGPL-3.0) · documentación de Kamra v${docCurrent} · todas las funciones incluidas, siempre.`
-        : `مفتوح المصدر (AGPL-3.0) · توثيق Kamra الإصدار ${docCurrent} · كل الميزات مشمولة دائماً.`,
+        ? `Código abierto (Apache-2.0) · documentación de Kamra v${docCurrent} · todas las funciones incluidas, siempre.`
+        : `مفتوح المصدر (Apache-2.0) · توثيق Kamra الإصدار ${docCurrent} · كل الميزات مشمولة دائماً.`,
       copyright: "Kamra PMS · hello@kamrapms.com",
     },
   }
@@ -248,7 +253,7 @@ export default defineConfig({
       { icon: "github", link: "https://github.com/Kamra-PMS/kamra-pms" },
     ],
     footer: {
-      message: `Open source (AGPL-3.0) · docs for Kamra v${docCurrent} · every feature included, always.`,
+      message: `Open source (Apache-2.0) · docs for Kamra v${docCurrent} · every feature included, always.`,
       copyright: "Kamra PMS · hello@kamrapms.com",
     },
     // consumed by the version switcher / outdated banner (custom theme fields)
