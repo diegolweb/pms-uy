@@ -116,8 +116,11 @@ after_migrate = ["kamra_uy.notifications.confirmation.ensure_fields", "kamra_uy.
 # El IVA del residente al reservar (HR-266, D-HR-47): book de la página pública (la de la web y la de /book de Kamra)
 # pide en Uruguay la residencia declarada y cobra con ella el IVA de cada noche, y booking_status lleva su desglose
 # (kamra_uy/booking/residence.py). Frappe usa el último valor del hook: kamra no los toca. La búsqueda y la vitrina son
-# las de Kamra tal cual (la fecha de apertura de HR-263 se quitó con HR-275, D-HR-49: las fechas las decide el fundador).
+# las de Kamra (la fecha de apertura de HR-263 se quitó con HR-275, D-HR-49: las fechas las decide el fundador); la búsqueda
+# solo añade el presupuesto por coste de HR-337 (kamra_uy/booking/stay_search.py).
 override_whitelisted_methods = {
 	"kamra.public_api.book": "kamra_uy.booking.residence.book",
 	"kamra.public_api.booking_status": "kamra_uy.booking.residence.booking_status",
+	# HR-337: la cotización pública con presupuesto por IP y ráfaga, medidos por noches (sin tope de noches: D-HR-49)
+	"kamra.public_api.search_stay": "kamra_uy.booking.stay_search.search_stay",
 }

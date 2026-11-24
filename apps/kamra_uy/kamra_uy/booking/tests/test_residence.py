@@ -243,9 +243,10 @@ class TestResidence(AuditTestCase):
 		self.assertEqual(frappe.override_whitelisted_method("kamra.public_api.book"), "kamra_uy.booking.residence.book")
 		self.assertIn(residence.booking_status, frappe.guest_methods)
 		self.assertIn(residence.book, frappe.guest_methods)
-		# HR-275: la búsqueda y la vitrina son las de Kamra tal cual
-		for metodo in ("kamra.public_api.search_stay", "kamra.public_api.showcase"):
-			self.assertEqual(frappe.override_whitelisted_method(metodo), metodo)
+		# HR-275: la vitrina es la de Kamra tal cual; la búsqueda, la de Kamra con el presupuesto por coste de HR-337
+		self.assertEqual(frappe.override_whitelisted_method("kamra.public_api.showcase"), "kamra.public_api.showcase")
+		self.assertEqual(frappe.override_whitelisted_method("kamra.public_api.search_stay"),
+		                 "kamra_uy.booking.stay_search.search_stay")
 
 	# --- el check-in: solo la diferencia, si el documento contradice lo declarado ---
 

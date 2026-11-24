@@ -36,11 +36,12 @@ def _flat(value) -> list[str]:
 # --- la residencia y el IVA al reservar (HR-266) -------------------------------------------------------------------
 
 def test_book_y_su_estado_pasan_por_la_residencia() -> None:
-    # HR-275: la búsqueda y la vitrina vuelven a ser las de Kamra tal cual; book pide la residencia en Uruguay y el
-    # estado de la reserva lleva el desglose del IVA que se cobró al reservar
+    # HR-275: la vitrina vuelve a ser la de Kamra tal cual; book pide la residencia en Uruguay y el estado de la reserva
+    # lleva el desglose del IVA que se cobró al reservar; HR-337: la búsqueda es la de Kamra con su presupuesto por coste
     assert _hooks()["override_whitelisted_methods"] == {
         "kamra.public_api.book": "kamra_uy.booking.residence.book",
         "kamra.public_api.booking_status": "kamra_uy.booking.residence.booking_status",
+        "kamra.public_api.search_stay": "kamra_uy.booking.stay_search.search_stay",
     }
 
 
