@@ -5,6 +5,9 @@
 - `process_now` (POST): emite ya lo pendiente de una reserva (lo mismo que hace la cola).
 - `retry` (POST, Finanzas): vuelve a intentar un CFE que quedó para revisar.
 - `record_manual` (POST, Finanzas): registra el CFE emitido en papel o en el portal de la DGI (recordManualCfe).
+- `invoice_currency` y `set_invoice_currency` (HR-316; kamra.localization, «the currency a stay is invoiced in»): la
+  moneda de la factura, que recepción elige en la última pantalla del check-in (dólares o pesos; por defecto, dólares
+  en la alta temporada y pesos el resto del año). Los precios siguen en dólares (D-HR-60).
 """
 
 from __future__ import annotations
@@ -99,6 +102,32 @@ def folio_cfe(folio: str):
 	                                              "status_text": ""}
 
 
+def invoice_currency(reservation: str) -> dict | None:
+	"""La elección de la moneda de la factura para el check-in (HR-316): las dos monedas, la propuesta por la fecha
+	del check-in y, en cada una, con qué cotización del BCU sale. Fuera de Uruguay, o con una propiedad en una moneda
+	que no se factura con CFE, nada que elegir."""
+	res = frappe.get_doc("Reservation", reservation)
+	if not connector.is_uruguay(res.property):
+		return None
+	try:
+		home = connector._currency(res.property)
+	except connector.FiscalError:
+		return None
+	try:
+		fx, day = connector.fx_quote(res.property, "USD")
+	except connector.FiscalError:
+		fx, day = None, None
+	return model.currency_choice(home, res.check_in_date, fx, day)
+
+
+def set_invoice_currency(doc, currency: str) -> None:
+	"""La moneda que eligió recepción, en la reserva que kamra.api.check_in va a guardar con el huésped en casa: la
+	tarea del CFE del check-in la toma de ahí (connector.queue_task)."""
+	if currency not in model.INVOICE_CURRENCIES:
+		frappe.throw(texts.BAD_CURRENCY.format(currency=currency or "-"))
+	doc.flags.invoice_currency = currency
+
+
 @frappe.whitelist(methods=["GET"])
 @require_roles(*DESK)
 def preview(reservation: str):
@@ -177,7 +206,8 @@ def pending(property: str, day: str | None = None) -> dict:
 	rows = frappe.get_all(connector.DOCTYPE, filters={"property": property, "kind": ["!=", "Reconcile"]},
 	                      fields=["name", "kind", "status", "core_status", "reservation", "cfe_type", "currency",
 	                              "total", "lines_json", "core_cfe_id", "contingency_since", "overdue", "error",
-	                              "creation", "reference_number", "request_json"],
+	                              "creation", "reference_number", "request_json", "references_cfe",
+	                              "source_currency", "source_fx_rate"],
 	                      order_by="creation asc, name asc")
 	rows = [r for r in rows if model.is_pending(r) and (not day or str(r.creation)[:10] == day)]
 	guests = dict(frappe.get_all("Reservation", filters={"name": ["in", [r.reservation for r in rows] or [""]]},
@@ -185,10 +215,20 @@ def pending(property: str, day: str | None = None) -> dict:
 	items = []
 	for r in rows:
 		request = json.loads(r.request_json or "{}")
+		if r.kind == "Credit note" and r.references_cfe:
+			# la nota de crédito va en la moneda y con el tipo de cambio de su factura (HR-316)
+			original = frappe.db.get_value(connector.DOCTYPE, r.references_cfe,
+			                               ["request_json", "source_currency", "source_fx_rate"], as_dict=True) or {}
+			fx = model.fx_note(r.currency, original.get("source_currency"),
+			                   json.loads(original.get("request_json") or "{}").get("fx_rate"),
+			                   original.get("source_fx_rate"))
+		else:
+			fx = model.fx_note(r.currency or request.get("currency"), r.source_currency, request.get("fx_rate"),
+			                   r.source_fx_rate)
 		items.append({
 			"name": r.name, "reservation": r.reservation, "guest_name": guests.get(r.reservation) or "",
 			"kind": r.kind, "title": model.TYPE_TITLES.get(r.cfe_type or "", texts.TYPE_PENDING),
-			"currency": r.currency or request.get("currency") or "", "total": r.total or "",
+			"currency": r.currency or request.get("currency") or "", "total": r.total or "", "fx": fx,
 			"created": str(r.creation)[:16], "buyer": request.get("buyer") or {},
 			"lines": [{"description": ln.get("description"), "amount": ln.get("unit_amount") or ln.get("amount"),
 			           "rate": ln.get("rate")}

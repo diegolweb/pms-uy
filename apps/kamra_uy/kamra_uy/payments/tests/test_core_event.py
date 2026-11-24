@@ -9,7 +9,7 @@ import uuid
 from unittest.mock import patch
 
 import frappe
-from frappe.utils import now_datetime
+from frappe.utils import add_to_date, now_datetime
 
 from kamra import payments as kamra_payments
 from kamra.tests.audit_fixtures import ensure_user
@@ -284,6 +284,19 @@ class TestCoreEvent(CobrosCase):
 		self.assertEqual(self.receive(body)["status"], "Needs attention")
 		self.assertEqual(self.rows(folio), [])
 		self.assertEqual(self.mails(), 1)
+
+	def test_a_usd_link_charged_in_pesos_confirms_and_keeps_the_pesos_and_the_rate(self):
+		"""D-HR-68 (HR-324), el caso de `dev`: core avisa los USD del enlace y lo que Mercado Pago cobró en UYU."""
+		res, folio = self.booking("Pending Payment", hold_expires_on=add_to_date(now_datetime(), minutes=30))
+		body = event("payment.approved", folio, amount="110.00",
+		             charged={"amount": "4478.14", "currency": "UYU", "exchange_rate": "40.710364"})
+		self.assertEqual(self.receive(body)["status"], "Applied")
+		(row,) = self.rows(folio)
+		self.assertEqual((row.amount, row.currency, row.fx_amount), (110.0, "UYU", 4478.14))
+		self.assertAlmostEqual(row.exchange_rate * row.fx_amount, 110.0, places=2)
+		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Confirmed")
+		self.assertEqual(float(frappe.db.get_value("Reservation", res, "advance_paid")), 110.0)
+		self.assertEqual(self.stored(body).detail, "posted; charged UYU 4478.14 at 40.710364")
 
 	def test_a_folio_that_does_not_exist_needs_attention(self):
 		self.outbox()

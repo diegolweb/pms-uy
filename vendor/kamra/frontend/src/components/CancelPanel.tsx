@@ -28,7 +28,14 @@ interface Preview {
   inside_window: boolean
   fee_basis: string
   estimated_fee: number
+  /** still waiting for its payment: cancelling is free */
+  unsecured?: boolean
+  /** the user may waive the fee (the hotel's manager: authz.can_waive_fee) */
+  can_waive?: boolean
 }
+
+// Not yet paid or confirmed: they cancel too, with no fee (api.UNSECURED_STATUSES)
+const CANCELLABLE = ["Confirmed", "Pending Payment", "Held"]
 
 const inr = (n: number) =>
   Number(n).toLocaleString(moneyLocale(), { maximumFractionDigits: 0 })
@@ -53,7 +60,7 @@ export default function CancelPanel({ row, reload }: { row: Row; reload: () => v
         .catch((e) => setError(serverError(e)))
   }, [open, preview, row.name])
 
-  if (row.status !== "Confirmed" && !done) return null
+  if (!CANCELLABLE.includes(String(row.status)) && !done) return null
 
   if (done)
     return (
@@ -92,7 +99,9 @@ export default function CancelPanel({ row, reload }: { row: Row; reload: () => v
                 n: preview.days_before_arrival,
                 s: preview.days_before_arrival === 1 ? "" : "s",
               })}{" "}
-              {preview.inside_window && preview.fee_basis !== "None" ? (
+              {preview.unsecured ? (
+                t("It is not paid yet - cancelling is free.")
+              ) : preview.inside_window && preview.fee_basis !== "None" ? (
                 <>
                   {t("Inside the {days}-day window - the {basis} ({amount}) will be charged.", {
                     days: preview.free_cancel_days,
@@ -125,7 +134,7 @@ export default function CancelPanel({ row, reload }: { row: Row; reload: () => v
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
-          {preview?.inside_window && preview.fee_basis !== "None" && (
+          {preview?.can_waive && preview.inside_window && preview.fee_basis !== "None" && (
             <label className="flex items-center gap-2 text-sm text-zinc-600">
               <input
                 type="checkbox"

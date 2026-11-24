@@ -178,8 +178,50 @@ def sena() -> list[list]:
 	]
 
 
-def pestanas(habitaciones=None, temporadas_=None, extra: dict | None = None, sena_=None) -> dict:
-	"""Las seis pestañas de la planilla real, con las dos de datos personales ROTAS: abrirlas tumba la prueba."""
+RES_CABECERA = [
+	"Código",
+	"Plataforma",
+	"Huésped",
+	"Teléfono",
+	"Correo",
+	"Llegada",
+	"Salida",
+	"Tipo de habitación",
+	"Habitación",
+	"Adultos",
+	"Niños",
+	"Total (US$)",
+	"Estado",
+	"Notas",
+]
+
+
+def reservas() -> list[list]:
+	"""Reservas INVENTADAS (HR-33), todas de 2030: ni los huéspedes, ni los códigos, ni los importes existen. Dos de
+	Booking.com (una con el código con puntos, como lo enseña la extranet, y sin total: la precia Kamra), una de Expedia
+	de dos habitaciones (el mismo código en dos filas), una de Airbnb con habitación, una directa por teléfono con total y
+	una cancelada, que no se carga: 6 reservas que cargar."""
+	return [
+		["4100000001", "Booking.com", "Huésped Inventado Uno", "+598 99 000 001", "uno@example.test", D(2030, 1, 3),
+		 D(2030, 1, 6), "Doble", None, 2, None, 2400, None, "Llega tarde (inventado)"],
+		["4100.000.002", "Booking", "Huésped Inventado Dos", None, None, D(2030, 1, 12), D(2030, 1, 14), "Triple", None,
+		 2, 1, None, "Confirmada", None],
+		["EXP-INV-77", "Expedia", "Huésped Inventado Tres", None, None, D(2030, 1, 22), D(2030, 1, 25), "Triple", None,
+		 3, None, 1500, None, None],
+		["EXP-INV-77", "Expedia", "Huésped Inventado Tres", None, None, D(2030, 1, 22), D(2030, 1, 25), "Doble", None,
+		 2, None, 1200, None, None],
+		["HMINVENT04", "Airbnb", "Huésped Inventado Cuatro", None, "cuatro@example.test", D(2030, 2, 1), D(2030, 2, 8),
+		 "Apartamento", "806", 4, 1, None, None, None],
+		["T-0005", "Teléfono", "Huésped Inventado Cinco", "+598 99 000 005", None, D(2030, 1, 15), D(2030, 1, 17),
+		 "Doble", "802", 2, None, 1000, None, None],
+		["4100000006", "Booking.com", "Huésped Inventado Seis", None, None, D(2030, 1, 3), D(2030, 1, 5), "Doble", None,
+		 2, None, None, "Cancelada", None],
+	]
+
+
+def pestanas(habitaciones=None, temporadas_=None, extra: dict | None = None, sena_=None, reservas_=None) -> dict:
+	"""Las seis pestañas de la planilla real, con las dos de datos personales ROTAS: abrirlas tumba la prueba. Con
+	`reservas_` (filas bajo RES_CABECERA), la de reservas trae esas reservas inventadas; «Personal» sigue rota."""
 	out = {
 		"Léeme": [["Planilla inventada para pruebas"], ["Precios en dólares."]],
 		"Habitaciones": [["1. Habitaciones"], ["Una fila por habitación."], HAB_CABECERA, *(habitaciones or HABITACIONES)],
@@ -195,15 +237,20 @@ def pestanas(habitaciones=None, temporadas_=None, extra: dict | None = None, sen
 			SENA_CABECERA,
 			*(sena_ if sena_ is not None else sena()),
 		],
-		"Reservas desde 15-nov": ROTA,
+		"Reservas desde 15-nov": ROTA if reservas_ is None else [
+			["5. Reservas desde 15-nov"],
+			["Una fila por habitación reservada."],
+			RES_CABECERA,
+			*reservas_,
+		],
 		"Personal": ROTA,
 	}
 	out.update(extra or {})
 	return out
 
 
-def planilla_inventada(ruta, precio_doble: float = 1001) -> None:
-	escribe_xlsx(ruta, pestanas(temporadas_=temporadas(precio_doble)))
+def planilla_inventada(ruta, precio_doble: float = 1001, con_reservas: bool = False) -> None:
+	escribe_xlsx(ruta, pestanas(temporadas_=temporadas(precio_doble), reservas_=reservas() if con_reservas else None))
 
 
 if __name__ == "__main__":

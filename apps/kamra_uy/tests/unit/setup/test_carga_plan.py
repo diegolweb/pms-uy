@@ -53,10 +53,12 @@ _FABRICA_KAMRA = {
 	"cancellation_fee": "First Night",
 	"no_show_charge": "First Night",
 	"pets_allowed": 0,
+	"security_deposit_amount": 5000,
 }
 
 # lo que la carga cambia de una propiedad recién creada (lo demás ya está como lo pide la planilla)
 _CAMBIAN = {k: v for k, v in CONDICIONES.items() if k == "hold_minutes" or _FABRICA_KAMRA.get(k) != v}
+_CAMBIAN["security_deposit_amount"] = 0  # HR-232 (D-HR-64): el hotel no pide garantía
 
 
 def _vacio(**kw):
@@ -336,7 +338,7 @@ def test_a_set_timezone_is_kept_and_the_conditions_come_from_the_planilla(p) -> 
 def test_kamra_times_as_timedelta_or_text_compare_with_the_planilla(p) -> None:
 	ya = {**CONDICIONES, "checkin_time": datetime.timedelta(hours=15, minutes=30), "checkout_time": "10:15:00"}
 	pl = plan.planea(p, _vacio(timezone="America/Montevideo", currency="USD", country="Uruguay",
-	                           booking_payment_mode="Full online", deposit_pct=100, **ya))
+	                           booking_payment_mode="Full online", deposit_pct=100, security_deposit_amount=0, **ya))
 	(prop,) = [a for a in pl.acciones if a.doctype == "Property"]
 	assert (prop.op, prop.valores) == ("igual", {})
 

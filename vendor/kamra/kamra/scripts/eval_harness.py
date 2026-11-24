@@ -84,6 +84,12 @@ def setup():
 	# a generous allowance keeps them off the type-capacity guard (t32
 	# asserts that guard on its own isolated property)
 	frappe.db.set_value("Property", P, "overbooking_pct", 400)
+	# the eval checks Kamra's own defaults: an installed app that holds unpaid
+	# desk bookings (kamra_setting_defaults) must not turn the eval's desk
+	# bookings into Pending Payment once a check asks for a deposit (t47c)
+	from kamra.settings import clear_cache, write_kv
+	write_kv(P, "hold_unpaid_desk_bookings", 0)
+	clear_cache(P)
 	rt = frappe.get_doc({
 		"doctype": "Room Type", "property": P, "room_type_code": "EVL",
 		"room_type_name": "Eval Room", "base_price": 4000,

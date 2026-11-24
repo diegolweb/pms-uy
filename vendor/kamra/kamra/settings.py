@@ -203,6 +203,11 @@ MODULES: tuple[Module, ...] = (
 			)),
 			Section("holds", "Holds & selling", "", (
 				S("hold_minutes", "Hold unconfirmed bookings for", "number", 120, P, min=5, max=10080, unit="min"),
+				S("hold_unpaid_desk_bookings", "Desk bookings wait for payment too", "check", 0,
+				  hint="On: a reservation taken at the desk (phone, e-mail) that the payment policy asks to pay "
+				       "now waits in Pending Payment for the hold time above, like an online booking, and is "
+				       "released on its own if it is neither paid nor confirmed by hand. Walk-ins, platform "
+				       "and company bookings are never held."),
 				S("sell_message", "Sell message", "textarea", store=P,
 				  hint="Shown in the booking dialog and used by the AI agent as its upsell prompt."),
 			)),
@@ -598,7 +603,19 @@ def _default(property: str | None, spec: S):
 			return fn(property)
 		except Exception:
 			return spec.default
-	return spec.default
+	return _app_default(spec)
+
+
+def _app_default(spec: S):
+	"""An installed app may set its own default for a setting with the
+	`kamra_setting_defaults` hook ({key: value}); a value a property saves
+	still wins over it."""
+	mapping = frappe.get_hooks("kamra_setting_defaults") or {}
+	if spec.key not in mapping:
+		return spec.default
+	val = mapping[spec.key]
+	val = val[-1] if isinstance(val, (list, tuple)) else val
+	return _coerce(spec, val)
 
 
 def get_setting(property: str | None, key: str, default=None):

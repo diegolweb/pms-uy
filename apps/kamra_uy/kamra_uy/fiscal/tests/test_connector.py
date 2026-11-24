@@ -10,6 +10,7 @@ from urllib.parse import quote
 import frappe
 from frappe.utils import add_days
 from kamra import api as kamra_api
+from kamra import checkin as kamra_checkin
 from kamra.tests.audit_fixtures import (
 	AuditTestCase,
 	d,
@@ -88,6 +89,7 @@ class FakeCore:
 		       "cae": "90123456789", "security_code": "aB3dE5", "cae_range": {"from": "1", "to": "1000"},
 		       "cae_expires_on": "2027-12-31", "qr_url": f"https://www.dgi.gub.uy/ctdcfe?n={self.seq}",
 		       "created_at": now, "updated_at": now, "currency": "USD", "total": f"{total:.2f}", **extra}
+		# HR-316: el CFE va en la moneda que pidió Kamra; la nota de crédito, en la de su CFE (como core)
 		if self.contingency:
 			cfe.update(status="contingency", serie=None, number=None, cae=None, security_code=None, qr_url=None,
 			           contingency_since=now)
@@ -117,11 +119,13 @@ class FakeCore:
 		if path == "/v1/fiscal/cfe" and method == "POST":
 			total = sum(float(ln["unit_amount"]) * float(ln["quantity"]) for ln in body["lines"])
 			kind = "e-factura" if body["buyer"]["type"] == "rut" else "e-ticket"
-			out = self._cfe("original", total, type=kind, folio=body["folio"], invoice_number=body["invoice_number"])
+			out = self._cfe("original", total, type=kind, folio=body["folio"], invoice_number=body["invoice_number"],
+			                currency=body["currency"])
 		elif path.endswith("/credit-note"):
 			original = self.cfes[path.split("/")[4]]
 			total = sum(float(ln["amount"]) for ln in body.get("lines") or []) or float(original["total"])
-			out = self._cfe("credit_note", total, type=f"nc-{original['type']}", references_cfe_id=original["cfe_id"])
+			out = self._cfe("credit_note", total, type=f"nc-{original['type']}", references_cfe_id=original["cfe_id"],
+			                currency=original["currency"])
 		elif path.endswith("/manual-issue"):
 			out = self.cfes[path.split("/")[4]]
 			out.update(status="issued", issued_via=body["via"], serie=body["serie"], number=body["number"],
@@ -138,9 +142,14 @@ class FakeCore:
 
 class FiscalCase(AuditTestCase):
 	properties = (PROP,)
+	# HR-316: las pruebas de antes facturan en dólares, caiga hoy donde caiga en la temporada; TestInvoiceCurrency
+	# usa la propuesta de verdad
+	invoice_in: str | None = "USD"
 
 	def setUp(self):
 		super().setUp()
+		if self.invoice_in:
+			self._stack.enter_context(patch.object(model, "proposed_currency", return_value=self.invoice_in))
 		make_uy_property()
 		self.rt = make_room_type(PROP, "UYF", base_price=100)
 		# Kamra no deja hacer el check-in sin habitación asignada (Reservation._occupied_rooms): como en recepción
@@ -668,3 +677,124 @@ class TestCoreEvent(FiscalCase):
 			webhook.receive(*signed(event, "otro-secreto-que-no-es"))
 		with self.assertRaises(webhook.InvalidEvent):
 			webhook.receive(b"{}", {})
+
+
+class TestInvoiceCurrency(FiscalCase):
+	"""HR-316 (D-HR-57, D-HR-60): recepción elige antes del check-in si la factura sale en dólares o en pesos; por
+	defecto, dólares del 16 de noviembre al domingo de Turismo y pesos el resto del año. Los precios siguen en dólares:
+	solo el CFE se convierte, con la cotización del BCU que carga Kamra (aquí, 1 UYU = 0,025 USD: 40 pesos por dólar),
+	y lleva su tipo de cambio. La nota de crédito sale en la moneda de su factura."""
+
+	invoice_in = None
+
+	def foreigner(self):
+		return make_guest("UT Huésped Moneda", residence_country="Argentina", id_type="DNI", id_number="30111222",
+		                  id_file="/private/files/ut-dni.png")
+
+	def checked_in(self, check_in: str, check_out: str):
+		"""Un check-in en esas fechas, como en recepción pero sin elegir moneda."""
+		res = make_reservation(PROP, self.rt, check_in, check_out, room=self.room, guest=self.foreigner())
+		res = frappe.get_doc("Reservation", res.name)
+		res.flags.allow_past_check_in = True
+		res.status = "Checked In"
+		res.save(ignore_permissions=True)
+		connector.process_reservation(res.name)
+		return res
+
+	def sent(self) -> dict:
+		[body] = self.core.bodies("/v1/fiscal/cfe")
+		return body
+
+	def test_a_check_in_in_high_season_is_invoiced_in_dollars_with_the_bcu_rate(self):
+		res = self.checked_in("2025-12-20", "2025-12-22")
+		body = self.sent()
+		self.assertEqual((body["currency"], body["fx_rate"]), ("USD", "40"))
+		self.assertEqual([ln["unit_amount"] for ln in body["lines"]], ["100.00", "100.00"])
+		[cfe] = self.documents(res)
+		self.assertEqual((cfe.currency, cfe.source_currency or "", cfe.total), ("USD", "", "200.00"))
+
+	def test_a_check_in_out_of_season_is_invoiced_in_pesos_converted_from_the_dollars(self):
+		res = self.checked_in("2026-05-10", "2026-05-12")
+		body = self.sent()
+		self.assertEqual((body["currency"], body["fx_rate"]), ("UYU", "1"))
+		self.assertEqual([ln["unit_amount"] for ln in body["lines"]], ["4000.00", "4000.00"])
+		self.assertTrue(all("source_amount" not in ln for ln in body["lines"]))
+		[cfe] = self.documents(res)
+		self.assertEqual((cfe.currency, cfe.source_currency, cfe.source_fx_rate, cfe.total),
+		                 ("UYU", "USD", "40", "8000.00"))
+		# el precio no cambia: la reserva y su IVA siguen en dólares
+		res.reload()
+		self.assertEqual(float(res.amount_before_tax), 200.0)
+		self.assertEqual(self.core.bodies("/v1/fiscal/iva/determine")[-1]["lines"][0]["currency"], "USD")
+
+	def booked_today(self):
+		res = make_reservation(PROP, self.rt, d(0), d(2), room=self.room, guest=self.foreigner())
+		frappe.db.set_value("Room", self.room, "housekeeping_status", "Clean")
+		return res
+
+	def test_the_check_in_screen_proposes_by_season_and_says_the_rate(self):
+		res = self.booked_today()
+		offer = kamra_checkin.checkin_flow(res.name)["invoice_currency"]
+		self.assertEqual([o["code"] for o in offer["options"]], ["USD", "UYU"])
+		self.assertEqual(offer["currency"], model.proposed_currency(d(0)))
+		self.assertEqual(offer["title"], model.CURRENCY_TITLE)
+		usd, uyu = offer["options"]
+		self.assertIn("1 USD = 40 UYU", usd["note"])
+		self.assertIn("se convierten de USD", uyu["note"])
+
+	def test_the_desk_picks_the_other_currency_and_the_cfe_goes_out_in_it(self):
+		res = self.booked_today()
+		other = "UYU" if model.proposed_currency(d(0)) == "USD" else "USD"
+		kamra_api.check_in(res.name, invoice_currency=other)
+		connector.process_reservation(res.name)
+		body = self.sent()
+		self.assertEqual(body["currency"], other)
+		self.assertEqual(body["fx_rate"], "40" if other == "USD" else "1")
+		self.assertEqual([ln["unit_amount"] for ln in body["lines"]],
+		                 ["100.00", "100.00"] if other == "USD" else ["4000.00", "4000.00"])
+
+	def test_a_currency_the_hotel_does_not_invoice_in_is_refused_and_the_guest_stays_out(self):
+		res = self.booked_today()
+		with self.assertRaises(frappe.ValidationError):
+			kamra_api.check_in(res.name, invoice_currency="EUR")
+		self.assertEqual(frappe.db.get_value("Reservation", res.name, "status"), "Confirmed")
+
+	def test_the_credit_note_of_an_invoice_in_pesos_goes_in_pesos(self):
+		res = self.checked_in("2026-05-10", "2026-05-12")
+		frappe.db.set_value("Reservation", res.name, "status", "Confirmed")
+		connector.queue_task(frappe.get_doc("Reservation", res.name), "Void", None, texts.REASON_CHECK_IN_UNDONE)
+		connector.process_reservation(res.name)
+		original, credit = self.documents(res)
+		self.assertEqual((credit.kind, credit.currency), ("Credit note", "UYU"))
+		sent = self.core.bodies(f"/v1/fiscal/cfe/{original.core_cfe_id}/credit-note")[0]
+		self.assertEqual(sorted(ln["amount"] for ln in sent["lines"]), ["4000.00", "4000.00"])
+		self.assertTrue(all(set(ln) == {"line_id", "amount"} for ln in sent["lines"]))
+		# y ya no queda nada cubierto: ni en pesos ni en dólares
+		self.assertEqual(connector.covered(res.name), [])
+
+	def test_a_stay_extended_at_close_is_billed_in_the_currency_of_its_check_in(self):
+		res = self.checked_in("2026-05-10", "2026-05-12")
+		frappe.db.set_value("Reservation", res.name, "check_out_date", "2026-05-13")
+		self.settle_and_close(frappe.get_doc("Reservation", res.name), 3, start="2026-05-10")
+		connector.process_reservation(res.name)
+		first, extension = self.core.bodies("/v1/fiscal/cfe")
+		self.assertEqual((first["currency"], extension["currency"]), ("UYU", "UYU"))
+		self.assertEqual(sum(float(ln["unit_amount"]) for ln in extension["lines"]), 4000.0)
+
+	def test_the_pending_invoices_page_says_the_rate_to_type_in_the_portal(self):
+		self.core.contingency = True
+		low = self.checked_in("2026-05-10", "2026-05-12")
+		high = make_reservation(PROP, self.rt, "2025-12-20", "2025-12-22", room=make_room(PROP, self.rt, "UYF-102"),
+		                        guest=self.foreigner())
+		high = frappe.get_doc("Reservation", high.name)
+		high.flags.allow_past_check_in = True
+		high.status = "Checked In"
+		high.save(ignore_permissions=True)
+		connector.process_reservation(high.name)
+		items = {i["reservation"]: i for i in api.pending(PROP)["items"]}
+		self.assertEqual((items[low.name]["currency"], items[low.name]["fx"]),
+		                 ("UYU", model.CONVERTED_LINE.format(source="USD", rate="40")))
+		self.assertEqual([ln["amount"] for ln in items[low.name]["lines"]], ["4000.00", "4000.00"])
+		self.assertEqual((items[high.name]["currency"], items[high.name]["fx"]),
+		                 ("USD", model.FX_LINE.format(currency="USD", rate="40")))
+

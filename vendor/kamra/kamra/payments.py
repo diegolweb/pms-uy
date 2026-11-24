@@ -90,14 +90,20 @@ def booking_deposit_link(reservation: str, amount: float,
 
 def settle_payment_link(folio_name: str, link_id: str, amount: float,
                         mode: str = "Payment Link",
-                        reference: str | None = None) -> bool:
+                        reference: str | None = None,
+                        fx: dict | None = None) -> bool:
 	"""Post money received through a link, once per link payment. Money that
 	arrives before the guest does is an Advance on the booking: it counts
 	toward the deposit and confirms a held booking.
 
 	A gateway may report how the guest paid (mode) and which payment this
 	is (reference): a link can be paid more than once, so the payment's own
-	reference, when there is one, is what makes a retried event a no-op."""
+	reference, when there is one, is what makes a retried event a no-op.
+
+	A gateway that charged the guest in another currency than the link's
+	may say so (fx: currency, fx_amount, exchange_rate): the row keeps it,
+	as a desk FX payment does, and amount stays the property-currency
+	value the link asked for."""
 	key = reference or link_id
 	folio = frappe.get_doc("Folio", folio_name)
 	if amount <= 0 or any(p.reference == key for p in folio.payments):
@@ -115,6 +121,7 @@ def settle_payment_link(folio_name: str, link_id: str, amount: float,
 		# a payment the gateway named is one it can be asked to give back
 		# (gateway_refunds); a desk payment with a typed slip number is not
 		"idempotency_key": gateway_payment_key(reference) if reference else None,
+		**_fx_fields(fx),
 	})
 	from kamra.folio import _recalculate
 	_recalculate(folio)
@@ -143,10 +150,18 @@ def settle_payment_link(folio_name: str, link_id: str, amount: float,
 	return True
 
 
+def _fx_fields(fx: dict | None) -> dict:
+	"""The foreign-currency part of a gateway payment row, or nothing."""
+	if not fx or not fx.get("currency") or not fx.get("fx_amount"):
+		return {}
+	return {"currency": fx["currency"], "fx_amount": float(fx["fx_amount"]),
+	        "exchange_rate": float(fx.get("exchange_rate") or 0)}
+
+
 def handle_webhook(gateway: str, payload: bytes, headers: dict) -> dict:
 	"""Settle a gateway's "link paid" event. Idempotent: a retried event
 	never posts the same payment twice. A bad signature raises. The
-	provider may add mode and reference to what it parses (see
+	provider may add mode, reference and fx to what it parses (see
 	settle_payment_link)."""
 	from kamra import localization as loc
 
@@ -155,7 +170,8 @@ def handle_webhook(gateway: str, payload: bytes, headers: dict) -> dict:
 		return {"ignored": True}
 	posted = settle_payment_link(paid["folio"], paid["link_id"], paid["amount"],
 	                             mode=paid.get("mode") or "Payment Link",
-	                             reference=paid.get("reference"))
+	                             reference=paid.get("reference"),
+	                             fx=paid.get("fx"))
 	return {"ok": True, "folio": paid["folio"], "posted": posted}
 
 

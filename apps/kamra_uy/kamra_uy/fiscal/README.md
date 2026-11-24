@@ -36,8 +36,27 @@ CFE nuevo. Las filas de una reserva se procesan en orden y se para en la primera
 - País del documento: Kamra no lo guarda. La cédula («National ID») es de Uruguay, el RG de Brasil; el DNI, el
   pasaporte y los demás toman el país de residencia (el DNI solo para AR, BR, CL y PY).
 - Comprador: e-Factura si la reserva es de una empresa (`Corporate Account.gstin`) con un RUT válido; si no, e-Ticket.
-- Tipo de cambio: la cotización del BCU que carga Kamra (`Exchange Rate` de UYU, `market_rate`); la propiedad en UYU
-  manda `1`.
+- Tipo de cambio: la cotización del BCU que carga Kamra (`Exchange Rate`, `market_rate`; `connector.fx_quote`): pesos
+  por dólar. El CFE en pesos manda `1`.
+
+## La moneda de la factura (HR-316, D-HR-57 y D-HR-60)
+
+Los precios van siempre en la moneda de la propiedad (dólares): la tarifa, la web, la reserva, lo que cotiza recepción,
+el folio y el IVA que decide `determineIva`. Solo el CFE puede ir en la otra moneda:
+- Recepción la elige en la última pantalla del check-in de Kamra (kamra.localization, «the currency a stay is invoiced
+  in»: `api.invoice_currency` da las dos monedas, la propuesta y la cotización de cada una; `kamra.api.check_in` pasa la
+  elegida a `api.set_invoice_currency`, que la deja en `res.flags`). Por defecto, dólares si el check-in cae del 16 de
+  noviembre al domingo de Turismo (`model.proposed_currency`, con `kamra_uy.pure.turismo`) y pesos el resto del año.
+- La tarea «Check-in» de UY CFE guarda la moneda (`currency`); las de cierre y anulación siguen con esa
+  (`connector.invoice_currency`). Se elige antes de emitir: después del check-in el CFE ya está pedido.
+- En otra moneda que la de la reserva, `model.convert_lines` convierte línea a línea con la cotización del BCU
+  (`model.conversion`, con los tipos de cambio a 6 decimales que lleva el CFE) y cada línea guarda en `source_amount` lo
+  que era en la de la reserva: la conciliación (`model.coverage`, `model.reconcile`) cuenta en la de la reserva y la nota
+  de crédito devuelve en la de su CFE (`invoice_amount`), a la proporción de cada línea. El CFE guarda
+  `source_currency` y `source_fx_rate`; /facturas enseña el tipo de cambio que hay que copiar en el portal
+  (`model.fx_note`). El CFE en pesos no lleva tipo de cambio (la DGI lo pide solo en moneda extranjera).
+- Qué cotización pide la DGI (de qué día y de qué tipo) lo confirma el contador: HUECO H16 de
+  `docs/operacion/huecos.md`.
 - Credenciales: el Payment Gateway Settings de la propiedad (HR-30): `key_id` (la propiedad en core), `key_secret`
   (clave con `fiscal:write`) y `webhook_secret`. `hr_core_base_url` en site_config.
 
@@ -55,5 +74,6 @@ factura impresa de Kamra no cambia: sigue siendo el «Detalle de cuenta», que n
 ## Textos aprobados
 
 Los de `texts.py` y los de `model.py` (`CONSUMER_NAME`, `ADJUSTMENT_TEXT`, `VERIFY_TEXT`, `TYPE_TITLES`,
-`STATUS_TEXTS`). Salen en el CFE (líneas y motivos de nota de crédito) o en el folio. Fuente: D-HR-48 (22-11), con la
+`STATUS_TEXTS`, y los de la moneda de HR-316: `CURRENCY_TITLE`, `CURRENCY_LABELS`, `PROPOSED_USD`, `PROPOSED_UYU`,
+`FX_NOTE`, `CONVERTED_NOTE`, `FX_LINE`, `CONVERTED_LINE`). Salen en el CFE (líneas y motivos de nota de crédito) o en el folio. Fuente: D-HR-48 (22-11), con la
 que el fundador aprobó todos los textos (HR-282); lo que no le guste se cambia después.

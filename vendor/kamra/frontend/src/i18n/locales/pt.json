@@ -6698,5 +6698,14 @@
   "Tax receipt": "Comprovante fiscal",
   "In contingency": "Em contingência",
   "Issued": "Emitido",
-  "Open the PDF": "Abrir o PDF"
+  "Open the PDF": "Abrir o PDF",
+  "Invoice currency": "Moeda da fatura",
+  "Desk bookings wait for payment too": "As reservas da recepção também aguardam o pagamento",
+  "On: a reservation taken at the desk (phone, e-mail) that the payment policy asks to pay now waits in Pending Payment for the hold time above, like an online booking, and is released on its own if it is neither paid nor confirmed by hand. Walk-ins, platform and company bookings are never held.": "Ativado: uma reserva feita na recepção (por telefone ou e-mail) que a política de pagamento manda pagar ao reservar fica em «Pagamento pendente» durante o tempo de retenção acima, como uma reserva do site, e é cancelada sozinha se ninguém a pagar nem a confirmar manualmente. As reservas sem reserva prévia, as de plataformas e as de empresas nunca ficam pendentes.",
+  "Waiting for payment": "Aguardando o pagamento",
+  "If it is not paid or confirmed by {time}, it is cancelled on its own and the room goes back on sale.": "Se não for paga nem confirmada até {time}, é cancelada sozinha e o quarto volta à venda.",
+  "If it is not paid or confirmed in time, it is cancelled on its own and the room goes back on sale.": "Se não for paga nem confirmada a tempo, é cancelada sozinha e o quarto volta à venda.",
+  "Confirm without payment": "Confirmar sem pagamento",
+  "It is not paid yet - cancelling is free.": "Ainda não foi paga: o cancelamento não tem custo.",
+  "Only the hotel's manager can waive the cancellation fee.": "Somente o gerente do hotel pode isentar a taxa de cancelamento."
 }

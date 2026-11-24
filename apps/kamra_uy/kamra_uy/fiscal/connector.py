@@ -112,16 +112,39 @@ def _currency(property: str) -> str:
 	return currency
 
 
-def fx_rate(property: str, currency: str) -> str:
-	"""Pesos uruguayos por unidad de la moneda de la propiedad: la cotización del BCU que carga Kamra (Exchange Rate)."""
+def fx_quote(property: str, currency: str) -> tuple[str, str | None]:
+	"""Pesos uruguayos por unidad de `currency` y el día de la cotización: la del BCU que carga Kamra (Exchange Rate,
+	unidades de la moneda de la propiedad por unidad de la otra). En pesos, «1». Qué día y qué tipo pide la DGI lo
+	confirma el contador (HUECO H16)."""
 	if currency == "UYU":
-		return "1"
-	rows = frappe.get_all("Exchange Rate", filters={"property": property, "currency": "UYU", "disabled": 0},
-	                      fields=["market_rate", "buy_rate"], order_by="rate_date desc", limit=1)
+		return "1", None
+	home = _currency(property)
+	quoted = "UYU" if home == currency else currency
+	rows = frappe.get_all("Exchange Rate", filters={"property": property, "currency": quoted, "disabled": 0},
+	                      fields=["market_rate", "buy_rate", "rate_date"], order_by="rate_date desc", limit=1)
 	rate = (rows[0].market_rate or rows[0].buy_rate) if rows else None
 	if not rate:
 		raise FiscalError(texts.NO_FX)
-	return model.fx_text(Decimal(1) / Decimal(str(rate)))
+	value = Decimal(1) / Decimal(str(rate)) if home == currency else Decimal(str(rate))
+	return model.fx_text(value), str(rows[0].rate_date)
+
+
+def fx_rate(property: str, currency: str) -> str:
+	"""Pesos uruguayos por unidad de `currency` (el tipo de cambio que lleva el CFE)."""
+	return fx_quote(property, currency)[0]
+
+
+def invoice_currency(res) -> str:
+	"""La moneda de las facturas de la reserva (HR-316): la que eligió recepción en su check-in (la de la tarea
+	«Check-in» más reciente); sin ella, la del último CFE de la reserva (uno de antes de HR-316); y si no hay ninguno,
+	la que se propone por la fecha del check-in (model.proposed_currency)."""
+	for filters in ({"kind": "Reconcile", "purpose": "Check-in"}, {"kind": "Original"}):
+		chosen = frappe.get_all(DOCTYPE, filters={"reservation": res.name, "currency": ["in", list(CURRENCIES)],
+		                                          **filters},
+		                        pluck="currency", order_by="creation desc, name desc", limit=1)
+		if chosen:
+			return chosen[0]
+	return model.proposed_currency(res.check_in_date)
 
 
 def _payments(folio: str | None) -> list[dict]:
@@ -295,8 +318,14 @@ def _guest_folio(reservation: str) -> str | None:
 def queue_task(res, purpose: str, folio: str | None = None, reason: str | None = None) -> str | None:
 	if not is_uruguay(res.property):
 		return None
+	# la moneda de la factura (HR-316): la que eligió recepción en este check-in (kamra.api.check_in la deja en
+	# res.flags, api.set_invoice_currency) o la propuesta; las demás tareas siguen con la del check-in
+	if purpose == "Check-in":
+		currency = res.flags.get("invoice_currency") or model.proposed_currency(res.check_in_date)
+	else:
+		currency = invoice_currency(res)
 	doc = frappe.get_doc({"doctype": DOCTYPE, "kind": "Reconcile", "purpose": purpose, "status": "Pending",
-	                      "property": res.property, "reservation": res.name,
+	                      "property": res.property, "reservation": res.name, "currency": currency,
 	                      "folio": folio or _guest_folio(res.name), "reason": (reason or "")[:500]})
 	doc.insert(ignore_permissions=True)
 	frappe.enqueue("kamra_uy.fiscal.connector.process_reservation", queue="short", enqueue_after_commit=True,
@@ -353,9 +382,13 @@ def _posted_at_other_rate(folios: list, desired: list[dict]) -> int:
 
 
 def _run_task(task, res, client, core_property) -> None:
-	currency = _currency(res.property)
+	home = _currency(res.property)
+	invoiced_in = (task.currency or invoice_currency(res)).strip().upper()
+	if invoiced_in not in CURRENCIES:
+		raise FiscalError(texts.BAD_CURRENCY.format(currency=invoiced_in or "-"))
 	inputs = guest_inputs(res)
-	desired, rules_version, folios = _desired(task, res, client, core_property, inputs, currency)
+	# el IVA se decide en la moneda de la reserva (lo que Kamra cobra); solo el CFE va en la de la factura
+	desired, rules_version, folios = _desired(task, res, client, core_property, inputs, home)
 	checked_in = task.purpose == "Check-in" and res.status == "Checked In"
 	if checked_in and apply_room_rates(res, model.room_rate_by_date(desired)):
 		# core no contestó en el check-in (events.on_reservation_validate) y las noches seguían con el IVA de la
@@ -368,16 +401,25 @@ def _run_task(task, res, client, core_property) -> None:
 	created = []
 	if plan["supplement"]:
 		n = len(_rows(res.name, kind="Original")) + 1
+		fx = fx_rate(res.property, invoiced_in)
+		# en otra moneda que la de la reserva (HR-316): los importes, convertidos con la cotización del BCU; cada
+		# línea guarda lo que era en la de la reserva, con lo que se concilia
+		source_fx = fx if invoiced_in == home else fx_rate(res.property, home)
+		rate = model.conversion(source_fx, fx)
+		lines = model.convert_lines(plan["supplement"], rate)
+		converted = {"source_currency": home, "source_fx_rate": source_fx} if invoiced_in != home else {}
 		created.append({"kind": "Original", "reference_number": model.reference(res.name, n),
-		                "lines_json": json.dumps(plan["supplement"]),
+		                "currency": invoiced_in, **converted, "lines_json": json.dumps(lines),
 		                "request_json": json.dumps(model.cfe_request(
 		                    core_property, task.folio or res.name, model.reference(res.name, n), inputs["buyer"],
-		                    currency, fx_rate(res.property, currency), plan["supplement"], _payments(task.folio),
+		                    invoiced_in, fx, lines, model.convert_payments(_payments(task.folio), rate),
 		                    rules_version))})
 	reason = (task.reason or "").strip() or texts.REASON_CLOSE
 	for credit in plan["credits"]:
+		# la nota de crédito, en la moneda de su factura (core le pone la del CFE original)
+		credited_in = frappe.db.get_value(DOCTYPE, credit["row"], "currency") or home
 		created.append({"kind": "Credit note", "references_cfe": credit["row"], "reason": reason[:500],
-		                "lines_json": json.dumps(credit["lines"])})
+		                "currency": credited_in, "lines_json": json.dumps(credit["lines"])})
 	# las notas de crédito antes que el CFE nuevo: si la anulación se queda a medias, no hay nada facturado dos veces
 	created.sort(key=lambda c: c["kind"] != "Credit note")
 	for c in created:
@@ -397,7 +439,7 @@ def _send(row, client) -> dict:
 	original = frappe.db.get_value(DOCTYPE, row.references_cfe, "core_cfe_id")
 	if not original:
 		raise FiscalError(f"el CFE {row.references_cfe} no tiene id en el servicio")
-	body = {"reason": row.reason or texts.REASON_CLOSE, "lines": _lines(row)}
+	body = {"reason": row.reason or texts.REASON_CLOSE, "lines": model.credit_note_lines(_lines(row))}
 	return client.post(f"/v1/fiscal/cfe/{original}/credit-note", body, idempotency_key=key)
 
 

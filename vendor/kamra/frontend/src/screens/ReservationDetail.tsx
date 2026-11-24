@@ -18,6 +18,7 @@ import {
 
 import {
   acceptBookingRequest,
+  confirmPendingReservation,
   amendStayConfirmed,
   call,
   declineBookingRequest,
@@ -713,6 +714,22 @@ export default function ReservationDetail({
             onClick={onClose}
             className="mt-1 inline-block font-medium text-rose-900 underline"
           >{translate("Cancellation letter")}</Link>
+        </div>
+      )}
+
+      {d.actions.can_confirm && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-semibold">{translate("Waiting for payment")}</p>
+          <p className="mt-0.5 text-xs">
+            {d.hold_expires_on
+              ? translate("If it is not paid or confirmed by {time}, it is cancelled on its own and the room goes back on sale.", { time: d.hold_expires_on.slice(0, 16) })
+              : translate("If it is not paid or confirmed in time, it is cancelled on its own and the room goes back on sale.")}
+          </p>
+          <div className="mt-2">
+            <Button disabled={busy} onClick={() => act(() => confirmPendingReservation(name))}>
+              {translate("Confirm without payment")}
+            </Button>
+          </div>
         </div>
       )}
 

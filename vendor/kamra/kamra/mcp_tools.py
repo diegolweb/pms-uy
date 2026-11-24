@@ -271,8 +271,8 @@ TOOLS: tuple[ToolSpec, ...] = (
 		fee posts to the folio. Returns a cancellation number - always give
 		it to the guest. Reasons: Guest request, Change of plans, Duplicate
 		booking, Payment failed, Weather / travel disruption, Booked
-		elsewhere, Other. Only waive the fee when a manager authorizes it;
-		the waiver is logged.""",
+		elsewhere, Other. Only a hotel admin may waive the fee (refused for
+		anyone else); the waiver is logged.""",
 		{
 			"reservation": _p("string"),
 			"reason": _p("string"),
@@ -395,7 +395,8 @@ TOOLS: tuple[ToolSpec, ...] = (
 		"crs.cancel_itinerary",
 		"""Cancel every confirmed leg of a trip, each under its own property's
 		policy (fees post to that leg's folio). Returns a cancellation number
-		per leg. Only waive fees when a manager authorizes it (logged).""",
+		per leg. Only a hotel admin may waive fees (refused for anyone else;
+		logged).""",
 		{
 			"itinerary": _p("string"),
 			"reason": _p("string"),

@@ -482,7 +482,7 @@ def _till(property: str) -> dict:
 
 
 def _flow_payload(res, steps, ctx, guest) -> dict:
-	from kamra.localization import front_desk_vocabulary, guest_residence, pack_for
+	from kamra.localization import front_desk_vocabulary, guest_residence, invoice_currency, pack_for
 	residence = guest_residence(pack_for(res.property), res.name)
 	return {
 		"reservation": {
@@ -525,6 +525,10 @@ def _flow_payload(res, steps, ctx, guest) -> dict:
 		# where the guest lives, where the country taxes by it: the check-in
 		# cannot go on without it there (the pack refuses it)
 		"residence": residence,
+		# the currency the tax invoice goes out in, where the pack lets the desk
+		# pick it (kamra.localization.invoice_currency); kamra.api.check_in
+		# takes the pick
+		"invoice_currency": invoice_currency(pack_for(res.property), res.name),
 		"missing_required": [s["step_key"] for s in hard_missing(steps)]
 		+ (["residence"] if residence and residence.get("missing") else []),
 		"pending_backfill": [

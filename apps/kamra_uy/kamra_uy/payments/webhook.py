@@ -20,7 +20,7 @@ from frappe.utils import now_datetime
 from kamra_uy.payments import texts
 from kamra_uy.payments.mercadopago import GATEWAY
 from kamra_uy.pure.core_signature import verify
-from kamra_uy.pure.payments import amount_to_float, parse_core_event
+from kamra_uy.pure.payments import amount_to_float, charged_fx, parse_core_event
 
 EVENT_DOCTYPE = "UY Core Event"
 APPLIED, DUPLICATE, NEEDS_ATTENTION = "Applied", "Duplicate", "Needs attention"
@@ -102,7 +102,8 @@ def _apply(event: dict, folio: str | None, prop: str, payload: bytes, headers: d
 		out = payments.handle_webhook(GATEWAY, payload, headers)
 		if out.get("ignored"):
 			return NEEDS_ATTENTION, "ignored by the gateway door", texts.ACTION_NO_FOLIO
-		return (APPLIED, "posted", None) if out.get("posted") else (DUPLICATE, "payment already posted", None)
+		return (APPLIED, "posted" + _charged_note(event), None) if out.get("posted") else \
+			(DUPLICATE, "payment already posted", None)
 
 	payment_id = event["payment_id"]
 	doc = frappe.get_doc("Folio", folio)
@@ -124,6 +125,12 @@ def _apply(event: dict, folio: str | None, prop: str, payload: bytes, headers: d
 	if out.get("reason") == "duplicate":
 		return DUPLICATE, "chargeback already posted", None
 	return NEEDS_ATTENTION, f"chargeback posted: {left:.2f}", texts.ACTION_CHARGEBACK
+
+
+def _charged_note(event: dict) -> str:
+	"""D-HR-68: lo que Mercado Pago cobró en otra moneda, para quien mire el aviso («; charged UYU 4478.14 at 40.71»)."""
+	fx = charged_fx(event)
+	return f"; charged {fx['currency']} {event['charged']['amount']} at {fx['charged_rate']}" if fx else ""
 
 
 def _booking_status(folio: str) -> str | None:

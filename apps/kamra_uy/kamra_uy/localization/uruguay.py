@@ -25,6 +25,11 @@ Qué cubre:
   kamra_uy.booking.residence. Con ellas Kamra pregunta en la reserva por teléfono si el huésped reside en Uruguay (y
   cotiza el 10 % del residente como la reserva en línea), lo deja declarar en una reserva ya hecha (la de una
   plataforma) y pide en el check-in la residencia y el país, sin la cual el check-in no se hace.
+- La moneda de la factura (HR-316; kamra.localization, «the currency a stay is invoiced in»): `invoice_currency` y
+  `set_invoice_currency`, de kamra_uy.fiscal.api. Recepción elige en la última pantalla del check-in si la factura sale
+  en dólares o en pesos (por defecto, dólares del 16 de noviembre al domingo de Turismo y pesos el resto del año); los
+  importes se convierten con la cotización del BCU que carga Kamra y el CFE lleva su tipo de cambio. Los precios siguen
+  en la moneda de la propiedad (D-HR-60).
 - El CFE en el folio y /facturas desde el menú (HR-307; kamra.localization, «the folio's tax receipt»):
   `folio_fiscal_documents` da la tarjeta del CFE de la reserva (pendiente, en contingencia o emitido con su serie y
   número, y el aviso de la residencia), que el folio pinta aparte de la factura impresa, y `desk_pages` pone «Facturas
@@ -233,3 +238,16 @@ def desk_pages(property: str) -> list:
 	from kamra_uy.fiscal import api
 
 	return api.desk_pages(property)
+
+
+# ── la moneda de la factura (HR-316) ─────────────────────────────────────────────────────────────────────────────
+def invoice_currency(reservation: str):
+	from kamra_uy.fiscal import api
+
+	return api.invoice_currency(reservation)
+
+
+def set_invoice_currency(doc, currency: str) -> None:
+	from kamra_uy.fiscal import api
+
+	api.set_invoice_currency(doc, currency)

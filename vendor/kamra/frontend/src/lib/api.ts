@@ -644,6 +644,14 @@ export const declineBookingRequest = (reservation: string, reason: string) =>
     { reservation, reason },
   )
 
+/** A booking waiting for its payment (Pending Payment / Held), confirmed
+ * by hand before its hold lapses. */
+export const confirmPendingReservation = (reservation: string) =>
+  call<{ reservation: string; status: string }>(
+    "kamra.api.confirm_pending_reservation",
+    { reservation },
+  )
+
 export const promoteWaitlist = (reservation: string) =>
   call<{ ok: boolean; reservation: string; room: string }>(
     "kamra.api.promote_waitlist",
@@ -1747,6 +1755,18 @@ export interface TaxResidence {
   missing: boolean
 }
 
+/** The currency the tax invoice of a stay goes out in, where the country pack
+ *  lets the desk pick it (kamra.localization.invoice_currency). Prices and the
+ *  folio stay in the property's currency. */
+export interface InvoiceCurrency {
+  title: string
+  /** why the proposal */
+  text: string
+  options: { code: string; label: string; note: string }[]
+  /** the code proposed */
+  currency: string
+}
+
 export interface ReservationDetail {
   name: string
   residence?: TaxResidence | null
@@ -1841,7 +1861,11 @@ export interface ReservationDetail {
     can_reinstate: boolean
     /** same-day check-in with nothing on the bill (api.reverse_check_in) */
     can_reverse_check_in?: boolean
+    /** waiting for its payment: confirm by hand (confirm_pending_reservation) */
+    can_confirm?: boolean
   }
+  /** When an unpaid hold is released on its own (Pending Payment / Held only) */
+  hold_expires_on?: string | null
   /** Things the desk should see but which must never gate an arrival. Kept
    *  apart from `actions` on purpose: a missing ID is a warning, not a
    *  capability, and conflating the two is how check-in quietly gets blocked. */

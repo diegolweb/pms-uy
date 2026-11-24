@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
 from kamra_uy.fiscal import texts
+from kamra_uy.pure import turismo
 
 CENT = Decimal("0.01")
 TOLERANCE = Decimal("0.005")
@@ -172,28 +173,56 @@ def room_rate_by_date(lines: list[dict]) -> dict[str, Decimal]:
 
 
 # ── conciliación ─────────────────────────────────────────────────────────────────────────────────────────────────
+def _source(line: dict, invoiced: Decimal) -> Decimal:
+	"""Lo que la línea es en la moneda de la reserva: `source_amount` si la factura va en otra moneda (HR-316); si no,
+	lo mismo que en la factura."""
+	return dec(line["source_amount"]) if line.get("source_amount") not in (None, "") else invoiced
+
+
 def coverage(originals: list[dict], credits: list[dict]) -> list[dict]:
 	"""Lo que sigue cubierto de cada línea de los CFE originales, descontadas sus notas de crédito (una sin líneas es
-	total). Cada entrada: {row, line_id, rate, amount}."""
-	left: dict[tuple[str, str], Decimal] = {}
+	total). Cada entrada: {row, line_id, rate, amount}, con `amount` en la moneda de la reserva (la que se concilia);
+	si el CFE va en otra moneda (HR-316), también `invoice_amount`, lo que queda en la del CFE."""
+	left: dict[tuple[str, str], list[Decimal]] = {}
 	meta: dict[tuple[str, str], str] = {}
 	for o in originals:
 		for ln in o.get("lines") or []:
 			key = (o["row"], ln["line_id"])
-			left[key] = dec(ln.get("unit_amount")) * dec(ln.get("quantity") or 1)
+			invoiced = dec(ln.get("unit_amount")) * dec(ln.get("quantity") or 1)
+			left[key] = [_source(ln, invoiced), invoiced]
 			meta[key] = str(ln["rate"])
 	for c in credits:
 		if c.get("lines") is None:
 			for key in left:
 				if key[0] == c["references"]:
-					left[key] = Decimal(0)
+					left[key] = [Decimal(0), Decimal(0)]
 			continue
 		for ln in c["lines"]:
 			key = (c["references"], ln["line_id"])
 			if key in left:
-				left[key] -= dec(ln.get("amount"))
-	return [{"row": k[0], "line_id": k[1], "rate": meta[k], "amount": money(v)}
-	        for k, v in left.items() if v > TOLERANCE]
+				given = dec(ln.get("amount"))
+				left[key][0] -= _source(ln, given)
+				left[key][1] -= given
+	out = []
+	for k, (source, invoiced) in left.items():
+		if source <= TOLERANCE:
+			continue
+		entry = {"row": k[0], "line_id": k[1], "rate": meta[k], "amount": money(source)}
+		if money(invoiced) != money(source):
+			entry["invoice_amount"] = money(invoiced)
+		out.append(entry)
+	return out
+
+
+def _credit_line(covered_line: dict, take: Decimal) -> dict:
+	"""Lo que se devuelve de una línea cubierta: `take` en la moneda de la reserva y, si el CFE va en otra, en la suya,
+	a la misma proporción con que se convirtió esa línea (y lo que queda entero si se devuelve entera)."""
+	source = dec(covered_line["amount"])
+	if covered_line.get("invoice_amount") in (None, ""):
+		return {"line_id": covered_line["line_id"], "amount": money(take)}
+	invoiced = dec(covered_line["invoice_amount"])
+	given = invoiced if source - take <= TOLERANCE else min(invoiced, dec(money(take * invoiced / source)))
+	return {"line_id": covered_line["line_id"], "amount": money(given), "source_amount": money(take)}
 
 
 def _cfe_line(line_id: str, description: str, amount, src: dict) -> dict:
@@ -235,7 +264,7 @@ def reconcile(desired: list[dict], covered: list[dict]) -> dict:
 				if owed <= TOLERANCE:
 					break
 				take = min(owed, dec(ln["amount"]))
-				credit_lines.setdefault(ln["row"], []).append({"line_id": ln["line_id"], "amount": money(take)})
+				credit_lines.setdefault(ln["row"], []).append(_credit_line(ln, take))
 				owed -= take
 	return {"supplement": supplement, "credits": [{"row": row, "lines": lines} for row, lines in credit_lines.items()]}
 
@@ -273,13 +302,106 @@ def cfe_request(property_code: str, folio: str, reference_number: str, buyer_blo
 		"buyer": buyer_block,
 		"currency": currency,
 		"fx_rate": fx,
-		"lines": lines,
+		"lines": [{k: v for k, v in ln.items() if k != "source_amount"} for ln in lines],
 		"payments": [{"mode": p["mode"], "amount": money(p["amount"])} for p in _positive_payments(payments)],
 		"prices_include_iva": False,
 	}
 	if rules_version:
 		body["rules_version"] = rules_version
 	return body
+
+
+# ── la moneda de la factura (HR-316, D-HR-57 y D-HR-60) ─────────────────────────────────────────────────────────
+# Los precios van siempre en la moneda de la reserva (dólares: la tarifa, la web, la reserva y lo que cotiza
+# recepción); solo la factura puede ir en la otra. Recepción la elige antes del check-in, que es cuando sale el CFE
+# (D-HR-32). La conversión usa la cotización del BCU que carga Kamra (Exchange Rate): qué día y qué tipo pide la DGI
+# lo confirma el contador (HUECO H16 de docs/operacion/huecos.md).
+INVOICE_CURRENCIES = ("USD", "UYU")
+CURRENCY_TITLE = "Moneda de la factura"
+CURRENCY_LABELS = {"USD": "Dólares (USD)", "UYU": "Pesos uruguayos (UYU)"}
+PROPOSED_USD = "Se propone en dólares: el check-in cae en la alta temporada (del 16 de noviembre al domingo de Turismo)."
+PROPOSED_UYU = "Se propone en pesos: el check-in cae fuera de la alta temporada."
+FX_NOTE = "El CFE lleva la cotización del BCU del {day}: 1 {currency} = {rate} UYU."
+CONVERTED_NOTE = "Los importes se convierten de {source} con la cotización del BCU del {day}: 1 USD = {rate} UYU."
+FX_LINE = "Tipo de cambio: 1 {currency} = {rate} UYU"
+CONVERTED_LINE = "Convertido de {source}: 1 USD = {rate} UYU"
+
+
+def _day(value) -> date:
+	return value if isinstance(value, date) else date.fromisoformat(str(value)[:10])
+
+
+def proposed_currency(check_in) -> str:
+	"""Lo que se le propone a recepción: dólares si el check-in cae en la alta temporada (del 16 de noviembre al
+	domingo de Turismo, los dos inclusive: kamra_uy.pure.turismo), pesos el resto del año."""
+	return "USD" if turismo.en_alta_temporada(_day(check_in)) else "UYU"
+
+
+def conversion(fx_source, fx_invoice) -> Decimal:
+	"""Unidades de la moneda de la factura por unidad de la de la reserva, con los tipos de cambio a pesos de las dos
+	(los mismos, a 6 decimales, que lleva el CFE): 40,123 de dólares a pesos; 1/40,123 de pesos a dólares."""
+	return dec(fx_source) / dec(fx_invoice)
+
+
+def convert_lines(lines: list[dict], rate: Decimal) -> list[dict]:
+	"""Las líneas del CFE en la moneda de la factura, línea a línea al centavo. Cada una guarda en `source_amount` lo
+	que era en la de la reserva (con eso se concilia). En la misma moneda, las líneas tal cual."""
+	if rate == 1:
+		return lines
+	out = []
+	for ln in lines:
+		source = dec(ln["unit_amount"]) * dec(ln.get("quantity") or 1)
+		out.append({**ln, "unit_amount": money(dec(ln["unit_amount"]) * rate), "source_amount": money(source)})
+	return out
+
+
+def convert_payments(payments: list[dict], rate: Decimal) -> list[dict]:
+	if rate == 1:
+		return payments
+	return [{**p, "amount": money(dec(p.get("amount")) * rate)} for p in payments or []]
+
+
+def credit_note_lines(lines: list[dict] | None) -> list[dict] | None:
+	"""Lo que core recibe de cada línea de la nota de crédito: la línea y el importe en la moneda de su CFE."""
+	if lines is None:
+		return None
+	return [{"line_id": ln["line_id"], "amount": ln["amount"]} for ln in lines]
+
+
+def _rate_text(fx) -> str:
+	return format(dec(fx).normalize(), "f").replace(".", ",")
+
+
+def _day_text(value) -> str:
+	return _day(value).strftime("%d-%m-%Y")
+
+
+def currency_choice(home: str, check_in, fx, fx_day) -> dict:
+	"""Lo que recepción ve en el check-in (kamra.localization, «the currency a stay is invoiced in»): las dos monedas,
+	la propuesta y, en cada una, con qué cotización sale. `home`: la moneda de la reserva; `fx`: pesos por dólar (la
+	cotización del BCU que carga Kamra) y `fx_day`, su día; sin ella, el aviso de cargarla."""
+	proposed = proposed_currency(check_in)
+	options = []
+	for code in INVOICE_CURRENCIES:
+		if not fx:
+			note = texts.NO_FX
+		elif code == home:
+			note = FX_NOTE.format(currency=code, rate=_rate_text(fx), day=_day_text(fx_day)) if code != "UYU" else ""
+		else:
+			note = CONVERTED_NOTE.format(source=home, rate=_rate_text(fx), day=_day_text(fx_day))
+		options.append({"code": code, "label": CURRENCY_LABELS[code], "note": note})
+	return {"title": CURRENCY_TITLE, "text": PROPOSED_USD if proposed == "USD" else PROPOSED_UYU,
+	        "options": options, "currency": proposed}
+
+
+def fx_note(currency: str, source_currency: str | None, fx_rate, source_fx_rate) -> str:
+	"""El tipo de cambio de un CFE, como lo escribe recepción en el portal: el del CFE si va en dólares; si va en pesos
+	convertido de dólares, la cotización con que se convirtió (el CFE en pesos no lleva tipo de cambio)."""
+	if currency and currency != "UYU" and fx_rate:
+		return FX_LINE.format(currency=currency, rate=_rate_text(fx_rate))
+	if source_currency and source_currency != currency and source_fx_rate:
+		return CONVERTED_LINE.format(source=source_currency, rate=_rate_text(source_fx_rate))
+	return ""
 
 
 def reference(reservation: str, n: int) -> str:

@@ -707,3 +707,62 @@ def desk_pages(pack, property: str) -> list[dict]:
 	return [{"label": _text(p.get("label")), "url": _safe_url(p.get("url")),
 	         "roles": [str(r) for r in p.get("roles") or []]}
 	        for p in pages if _text(p.get("label")) and _safe_url(p.get("url"))]
+
+
+# ── the currency a stay is invoiced in ───────────────────────────────────
+#
+# Prices, the folio and every payment stay in the property's currency. In
+# some countries the tax invoice may still go out in another one: Uruguay
+# invoices in dollars or in pesos, and its CFE goes out at check-in, so the
+# desk picks it before the guest is checked in. A pack like that implements
+#
+#   invoice_currency(reservation) -> dict | None
+#       {"title": "<what the choice is called>", "text": "<why the proposal>",
+#        "options": [{"code": "USD", "label": str, "note": "<the rate used>"},
+#                    ...],
+#        "currency": "<the code proposed>"}
+#   set_invoice_currency(reservation_doc, code) -> None
+#       kamra.api.check_in calls it with the desk's pick before it saves the
+#       reservation as checked in, so the pack's own hooks see the pick.
+#
+# The guided check-in shows the choice on its last screen when there are two
+# or more currencies to pick from. A pick the pack did not offer is refused.
+
+def _currency_code(value) -> str:
+	code = str(value or "").strip().upper()
+	return code if len(code) == 3 and code.isalpha() else ""
+
+
+def invoice_currency(pack, reservation: str):
+	fn = getattr(pack, "invoice_currency", None)
+	if not callable(fn):
+		return None
+	try:
+		raw = fn(reservation)
+	except Exception:
+		frappe.log_error(title="localization: invoice_currency failed",
+		                 message=frappe.get_traceback())
+		return None
+	if not raw:
+		return None
+	options, codes = [], []
+	for option in raw.get("options") or []:
+		code = _currency_code(option.get("code"))
+		if code and code not in codes:
+			codes.append(code)
+			options.append({"code": code, "label": _text(option.get("label")) or code,
+			                "note": _text(option.get("note"))})
+	if len(options) < 2:
+		return None
+	proposed = _currency_code(raw.get("currency"))
+	return {"title": _text(raw.get("title")), "text": _text(raw.get("text")),
+	        "options": options, "currency": proposed if proposed in codes else codes[0]}
+
+
+def set_invoice_currency(pack, doc, currency) -> None:
+	offer = invoice_currency(pack, doc.name)
+	code = _currency_code(currency)
+	if not offer or code not in [o["code"] for o in offer["options"]]:
+		frappe.throw(frappe._("This property does not invoice in {0}.").format(
+			str(currency or "").strip() or "-"))
+	pack.set_invoice_currency(doc, code)

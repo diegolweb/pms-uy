@@ -12,6 +12,12 @@ required_apps = ["kamra"]
 # después de kamra, así que este reclama «Uruguay» (vendor/kamra/kamra/hooks.py, kamra_localization).
 kamra_localization = {"Uruguay": "kamra_uy.localization.uruguay"}
 
+# HR-332 (D-HR-65, H3: «se espera 120 minutos, al igual que una reserva online»): la reserva que toma recepción sin
+# pagar queda en «Pago pendiente» con la retención de la propiedad (hold_minutes, 120) y vence sola como la de la web
+# (kamra.api._desk_booking_waits_for_payment, kamra.reservation_state.expire_holds). Es el valor por defecto de las
+# propiedades del sitio; la que lo apague en Ajustes manda (vendor/kamra/kamra/settings.py, kamra_setting_defaults).
+kamra_setting_defaults = {"hold_unpaid_desk_bookings": 1}
+
 # Campos propios (tasas de IVA de la propiedad, país de residencia del huésped) y las opciones de modo de pago que
 # añaden «Tarjeta local» y «Tarjeta extranjera». Solo lo del módulo Kamra UY: nunca lo de otra app.
 fixtures = [
@@ -49,6 +55,9 @@ scheduler_events = {
 		"0 * * * *": ["kamra_uy.contingency.alerts.daily_report"],
 		"*/5 * * * *": ["kamra_uy.fiscal.sync.sweep"],
 	},
+	# HR-314: las consultas del formulario de contacto de la web, fuera de la cola de correo en cuanto salen
+	# (kamra_uy/contact/form.py)
+	"hourly": ["kamra_uy.contact.form.purge"],
 }
 
 # Conector fiscal (HR-28, D-HR-32): el IVA de la estancia y su CFE en el check-in, el ajuste al cerrar la cuenta y la
@@ -98,8 +107,11 @@ extend_bootinfo = ["kamra_uy.health.sentry.extend_bootinfo"]
 # Los campos de la Reservation del correo de confirmación (HR-227): el idioma de la reserva web y cuándo salió el correo.
 # Y la residencia declarada al reservar (HR-266, `uy_declared_residence`). Van por código y no en
 # fixtures/custom_field.json, y se ponen al día al instalar y en cada migrate (idempotente).
-after_install = ["kamra_uy.notifications.confirmation.ensure_fields", "kamra_uy.booking.residence.ensure_fields"]
-after_migrate = ["kamra_uy.notifications.confirmation.ensure_fields", "kamra_uy.booking.residence.ensure_fields"]
+# HR-314: el destinatario de las consultas de la web, un ajuste de la Property (kamra_uy/contact/form.py)
+after_install = ["kamra_uy.notifications.confirmation.ensure_fields", "kamra_uy.booking.residence.ensure_fields",
+                 "kamra_uy.contact.form.ensure_fields"]
+after_migrate = ["kamra_uy.notifications.confirmation.ensure_fields", "kamra_uy.booking.residence.ensure_fields",
+                 "kamra_uy.contact.form.ensure_fields"]
 
 # El IVA del residente al reservar (HR-266, D-HR-47): book de la página pública (la de la web y la de /book de Kamra)
 # pide en Uruguay la residencia declarada y cobra con ella el IVA de cada noche, y booking_status lleva su desglose

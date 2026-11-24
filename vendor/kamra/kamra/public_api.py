@@ -107,6 +107,7 @@ def _property_payload(prop) -> dict:
 		"pet_charge_basis": prop.get("pet_charge_basis") or "Per stay",
 		"security_deposit_amount": float(prop.get("security_deposit_amount") or 0),
 		"minimum_nights": int(prop.get("minimum_nights") or 1),
+		"maximum_nights": cint(prop.get("maximum_nights")),  # 0: no cap
 		"free_cancel_days": int(prop.get("free_cancel_days") or 0),
 		"cancellation_fee": prop.get("cancellation_fee") or "None",
 		"has_cancellation_tiers": bool(prop.get("cancellation_tiers")),
@@ -420,12 +421,11 @@ def search_stay(property: str, check_in_date: str, check_out_date: str,
 	nights = date_diff(check_out_date, check_in_date)
 	if nights < 1:
 		frappe.throw("Check-out must be after check-in.")
-	if nights > 30:
-		frappe.throw("Stays longer than 30 nights: please contact the hotel.")
+	prop = frappe.get_cached_doc("Property", property)
+	_within_online_stay(prop, nights)
 	ages = _child_ages(child_ages)
 	_party(None, adults, children, None)  # at least one adult, before any work
 
-	prop = frappe.get_cached_doc("Property", property)
 	voucher = _usable_voucher(property, voucher_code, nights)
 	# the first plan is the room-only price: a free plan (EP) when the
 	# property has one, else no meal plan at all
@@ -515,6 +515,14 @@ def search_stay(property: str, check_in_date: str, check_out_date: str,
 				pass  # still list the room type even if this date range cannot be quoted
 		results.append(row)
 	return results
+
+
+def _within_online_stay(prop, nights: int) -> None:
+	"""The property's `maximum_nights` caps what the public page quotes and
+	books; 0 or blank is no cap (longer stays go through the property)."""
+	most = cint(prop.get("maximum_nights"))
+	if most and nights > most:
+		frappe.throw(frappe._("Stays longer than {0} nights: please contact the hotel.").format(most))
 
 
 def _usable_voucher(property: str, code: str | None, nights: int) -> str | None:
@@ -1120,6 +1128,7 @@ def book(property: str, room_type: str, check_in_date: str,
 	from kamra.pricing import capacity_overflow
 
 	prop = frappe.get_cached_doc("Property", property)
+	_within_online_stay(prop, date_diff(check_out_date, check_in_date))
 	rtd = frappe.get_cached_doc("Room Type", room_type)
 	adults, children, infants = _party(rtd, adults, children, _child_ages(child_ages))
 	above, beds = capacity_overflow(rtd, adults, children)

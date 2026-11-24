@@ -4526,6 +4526,9 @@ def reservation_detail(reservation: str):
 			for n in (res.get("night_rates") or [])],
 		"precheckin_status": res.precheckin_status,
 		"precheckin_token": res.get("precheckin_token"),
+		# when an unpaid hold lapses (reservation_state.expire_holds)
+		"hold_expires_on": _dt(res.get("hold_expires_on"))
+		if res.status in UNSECURED_STATUSES else None,
 		# the scan itself is never in this payload - id_document is only the
 		# private path, fetched separately through id_document_image so one
 		# role gate governs who ever sees the picture
@@ -4550,7 +4553,10 @@ def reservation_detail(reservation: str):
 			"can_check_in": res.status == "Confirmed" and (
 				bool(res.room) or uses_member_rooms(res.property, res.room_type)),
 			"can_check_out": res.status == "Checked In",
-			"can_cancel": res.status in ("Confirmed", "Checked In"),
+			"can_cancel": res.status in ("Confirmed", "Checked In", *UNSECURED_STATUSES),
+			# a booking waiting for its payment, confirmed by hand
+			# (confirm_pending_reservation) before its hold lapses
+			"can_confirm": res.status in UNSECURED_STATUSES,
 			# an arrival due on or before the business date (eod_mark_no_show)
 			"can_no_show": res.status == "Confirmed"
 			and getdate(res.check_in_date) <= getdate(get_business_date(res.property)),
@@ -4748,7 +4754,8 @@ def checkin_context(reservation: str):
 
 @frappe.whitelist()
 @require_roles("Front Desk", "Night Auditor", "Kamra Agent")
-def check_in(reservation: str, room: str | None = None):
+def check_in(reservation: str, room: str | None = None,
+             invoice_currency: str | None = None):
 	"""Check the guest in: the last step of the guided check-in.
 
 	Hard gate: a room must be assigned (or passed here). Soft-required
@@ -4756,11 +4763,15 @@ def check_in(reservation: str, room: str | None = None):
 	is warned and finishes them later. kamra.checkin.check_in_readiness
 	lists hard blockers and pending backfill. Records who checked the guest
 	in and when; a connected door-lock system then makes the keys recorded
-	in the Keys step."""
+	in the Keys step. `invoice_currency`: the desk's pick where the country
+	pack offers one (kamra.localization.invoice_currency)."""
 	doc = frappe.get_doc("Reservation", reservation)
 	from kamra.checkin import after_check_in, assert_ready, evaluate, soft_pending
 	if doc.status == "Confirmed":
 		assert_ready(doc, room=room)
+	if invoice_currency:
+		from kamra.localization import pack_for, set_invoice_currency
+		set_invoice_currency(pack_for(doc.property), doc, invoice_currency)
 	if room:
 		doc.room = room
 	doc.status = "Checked In"
@@ -5152,9 +5163,25 @@ def _cancellation_terms(res):
 @frappe.whitelist()
 @require_roles("Front Desk", "Kamra Agent")
 def cancellation_preview(reservation: str):
-	"""What cancelling right now would cost - shown before confirming."""
+	"""What cancelling right now would cost - shown before confirming - and
+	whether the user may waive it (authz.can_waive_fee). A booking still
+	waiting for its payment (UNSECURED_STATUSES) cancels free."""
+	from frappe.utils import date_diff
+
+	from kamra.authz import can_waive_fee
 	res = frappe.get_doc("Reservation", reservation)
-	return _cancellation_terms(res)
+	if res.status in UNSECURED_STATUSES:
+		return {"days_before_arrival": date_diff(res.check_in_date, nowdate()),
+		        "free_cancel_days": 0, "inside_window": False,
+		        "fee_basis": "None", "estimated_fee": 0.0, "unsecured": True,
+		        "can_waive": can_waive_fee()}
+	return {**_cancellation_terms(res), "unsecured": False,
+	        "can_waive": can_waive_fee()}
+
+
+# Not yet secured by a payment or by the desk: cancelling one is free, as it
+# is when its hold lapses (reservation_state.expire_holds)
+UNSECURED_STATUSES = ("Pending Payment", "Held")
 
 
 CANCEL_REASONS = ["Guest request", "Change of plans", "Duplicate booking",
@@ -5163,8 +5190,10 @@ CANCEL_REASONS = ["Guest request", "Change of plans", "Duplicate booking",
 
 
 def _do_cancel(res, reason: str = "Guest request", note: str | None = None,
-               waive_fee: int = 0, issue_credit_note: int = 0) -> dict:
-	"""Shared cancel path for desk API and OTA channel manager."""
+               waive_fee: int = 0, issue_credit_note: int = 0,
+               no_fee: bool = False) -> dict:
+	"""Shared cancel path for desk API and OTA channel manager. no_fee: the
+	booking was never secured, so no policy fee applies (not a waiver)."""
 	from frappe.model.naming import make_autoname
 
 	if reason not in CANCEL_REASONS:
@@ -5175,7 +5204,7 @@ def _do_cancel(res, reason: str = "Guest request", note: str | None = None,
 	           + (" · fee waived" if int(waive_fee or 0) else ""))
 
 	fee = 0.0
-	if terms["inside_window"] and not int(waive_fee or 0) \
+	if terms["inside_window"] and not int(waive_fee or 0) and not no_fee \
 			and terms["fee_basis"] != "None":
 		from kamra.folio import post_policy_fee
 		tier = terms.get("tier")
@@ -5240,11 +5269,17 @@ def cancel_reservation(reservation: str, reason: str = "Guest request",
 	"""Cancel a booking, applying the property's cancellation policy:
 	free outside the window, else the configured fee lands on the folio.
 	Issues a cancellation number the guest can hold on to. Pass
-	waive_fee=1 to cancel graciously (logged).
+	waive_fee=1 to cancel graciously (logged) - the manager's call only
+	(authz.require_fee_waiver). A booking still waiting for its payment
+	(Pending Payment / Held) cancels with no fee.
 
 	The cancellation is recorded in the action log.
 	"""
+	from kamra.authz import require_fee_waiver
+	require_fee_waiver(waive_fee)
 	res = frappe.get_doc("Reservation", reservation)
+	if res.status in UNSECURED_STATUSES:
+		return _do_cancel(res, reason=reason, note=note, no_fee=True)
 	if res.status != "Confirmed":
 		frappe.throw("Only confirmed bookings can be cancelled - "
 		             "checked-in stays check out.")
@@ -7112,6 +7147,55 @@ def _stay_slot(check_in_date, check_out_date, t_in=None, t_out=None):
 	return t_in, t_out
 
 
+# Who books at the desk and pays later: the desk itself and the AI agent.
+# A walk-in pays at the counter, a platform or a company pays on its own
+# terms, a group block bills the group.
+DESK_HOLD_SOURCES = ("Manual", "Phone", "AI Agent")
+
+
+def _desk_booking_waits_for_payment(property: str, *, status, waitlist, source,
+                                    via, company, group_booking) -> bool:
+	"""Whether this desk booking starts in Pending Payment with the
+	property's hold window (Property.hold_minutes), the way an online one
+	does: on a property with hold_unpaid_desk_bookings on, for a booking
+	the desk takes for the guest to pay later. reservation_state.expire_holds
+	releases it if no payment and no one confirms it in time."""
+	if status or int(waitlist or 0) or via or company or group_booking:
+		return False
+	if source not in DESK_HOLD_SOURCES:
+		return False
+	from kamra.settings import get_setting
+	return bool(get_setting(property, "hold_unpaid_desk_bookings"))
+
+
+def _desk_terms_ask_now(property: str, room_type: str, check_in_date,
+                        check_out_date, rate_plan: str | None) -> bool:
+	"""Whether the desk's payment terms (_deposit_terms) ask for money at
+	booking on these dates: one night on "First night", else the season's
+	advance % or the property's deposit %."""
+	from kamra.pricing import advance_percent, stay_season_rules
+	if frappe.get_cached_value("Property", property,
+	                           "booking_payment_mode") == "First night":
+		return True
+	rules = stay_season_rules(property, check_in_date, check_out_date,
+	                          room_type, rate_plan)
+	return advance_percent(property, rules)[0] > 0
+
+
+def _settle_desk_hold(doc) -> None:
+	"""A held desk booking whose payment terms ask for nothing now (_deposit_terms
+	on its saved total) never needed to wait: it is Confirmed straight away, as
+	public_api.book promotes a pay-at-hotel one."""
+	expected = _deposit_terms(doc, float(doc.amount_after_tax or 0))[1]
+	if expected > 0:
+		return
+	frappe.db.set_value("Reservation", doc.name,
+	                    {"status": "Confirmed", "hold_expires_on": None})
+	doc.reload()
+	# the confirmation a Confirmed insert sends (Reservation.after_insert)
+	doc._notify_confirmed()
+
+
 @frappe.whitelist()
 @require_roles("Front Desk", "Kamra Agent")
 def create_booking(property: str, room_type: str, check_in_date: str,
@@ -7164,7 +7248,9 @@ def create_booking(property: str, room_type: str, check_in_date: str,
 	that are sold out or restricted; promote it later when a room frees.
 
 	status / idempotency_key / hold_expires_on support Instant public booking
-	(ADR-006 / ADR-007). Desk callers leave them unset → Confirmed.
+	(ADR-006 / ADR-007). Desk callers leave them unset → Confirmed, or
+	Pending Payment with the hold window on a property that holds unpaid
+	desk bookings (_desk_booking_waits_for_payment).
 
 	Day use: check_out_date == check_in_date books a same-day stay, priced
 	by the quote engine (one billable date). check_in_time / check_out_time
@@ -7308,6 +7394,18 @@ def create_booking(property: str, room_type: str, check_in_date: str,
 	elif not int(waitlist or 0):
 		lock_sius_for_booking(property, room_type)
 
+	# A desk booking nobody has paid for yet waits like an online one, on a
+	# property that asks for it (setting hold_unpaid_desk_bookings)
+	desk_hold = _desk_booking_waits_for_payment(
+		property, status=status, waitlist=waitlist, source=source, via=via,
+		company=company, group_booking=group_booking) and \
+		_desk_terms_ask_now(property, room_type, check_in_date, check_out_date,
+		                    rate_plan)
+	if desk_hold:
+		from kamra.reservation_state import hold_expiry
+		hold_expires_on = hold_expiry(
+			frappe.get_cached_value("Property", property, "hold_minutes"))
+
 	doc = frappe.get_doc({
 		"doctype": "Reservation",
 		"property": property,
@@ -7347,6 +7445,8 @@ def create_booking(property: str, room_type: str, check_in_date: str,
 		doc.status = "Waitlist"
 	elif status:
 		doc.status = status
+	elif desk_hold:
+		doc.status = "Pending Payment"
 	if via:
 		doc.channel, doc.ota_ref = via, ota_ref
 		if float(ota_total or 0) > 0:
@@ -7480,6 +7580,8 @@ def create_booking(property: str, room_type: str, check_in_date: str,
 			doc = frappe.get_doc(payload)
 	if via:
 		set_ota_commission(doc, ota_commission_pct)
+	if desk_hold:
+		_settle_desk_hold(doc)
 
 	from kamra.savings import log_action
 	log_action(

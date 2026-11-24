@@ -476,3 +476,123 @@ def test_an_issued_stay_with_a_pending_adjustment_is_pending_not_issued() -> Non
     assert model.desk_block([ISSUED_ROW, adjustment], [], PAGE)["state"] == "pending"
     assert model.desk_block([ISSUED_ROW, {**ISSUED_ROW, "cfe_type": "nc-e-ticket"}], [], PAGE)["documents"][1][
         "label"] == "Nota de crédito de e-Ticket"
+
+
+# ── la moneda de la factura (HR-316, D-HR-57 y D-HR-60) ───────────────────────────────────────────────────────────
+@pytest.mark.parametrize(("check_in", "expected"), [
+    ("2026-11-16", "USD"),  # empieza la alta temporada
+    ("2026-12-20", "USD"),
+    ("2027-03-28", "USD"),  # el domingo de Turismo de 2027, el último día de la alta temporada
+    ("2027-03-29", "UYU"),
+    ("2026-11-15", "UYU"),
+    ("2026-07-10", "UYU"),
+])
+def test_the_desk_is_offered_dollars_in_high_season_and_pesos_the_rest_of_the_year(check_in, expected) -> None:
+    assert model.proposed_currency(check_in) == expected
+
+
+def test_a_reservation_in_dollars_converts_to_pesos_at_the_bcu_rate_and_back() -> None:
+    # dólares → pesos: el importe por la cotización del dólar; pesos → dólares: dividido por ella
+    assert model.conversion("40.123", "1") == Decimal("40.123")
+    assert model.money(Decimal("100") * model.conversion("1", "40")) == "2.50"
+    assert model.conversion("40.123", "40.123") == Decimal(1)
+
+
+def test_converted_lines_keep_what_they_were_in_the_currency_of_the_reservation() -> None:
+    lines = model.reconcile(_desired(), [])["supplement"]
+    out = model.convert_lines(lines, model.conversion("40.123", "1"))
+    assert [(ln["unit_amount"], ln["source_amount"]) for ln in out] == [("4012.30", "100.00"), ("4814.76", "120.00")]
+    assert [ln["rate"] for ln in out] == ["0", "0"]
+    # en la misma moneda no cambia nada: ni el importe ni las claves
+    assert model.convert_lines(lines, Decimal(1)) == lines
+
+
+def test_the_cfe_request_never_carries_the_amount_of_the_reservation() -> None:
+    lines = model.convert_lines(model.reconcile(_desired(), [])["supplement"], Decimal("40"))
+    body = model.cfe_request("HR-GATE-CFE", "FOLIO-1", "RES-1/1", model.buyer("Ana", None), "UYU", "1", lines,
+                             [{"mode": "Efectivo", "amount": "8800.00"}], None)
+    assert body["currency"] == "UYU" and body["fx_rate"] == "1"
+    assert [ln["unit_amount"] for ln in body["lines"]] == ["4000.00", "4800.00"]
+    assert all("source_amount" not in ln for ln in body["lines"])
+
+
+def test_payments_go_in_the_currency_of_the_invoice() -> None:
+    paid = [{"mode": "Tarjeta extranjera", "amount": "220.00"}, {"mode": "Efectivo", "amount": "-5"}]
+    assert model.convert_payments(paid, Decimal("40.5")) == [{"mode": "Tarjeta extranjera", "amount": "8910.00"},
+                                                              {"mode": "Efectivo", "amount": "-202.50"}]
+    assert model.convert_payments(paid, Decimal(1)) == paid
+
+
+def _converted_original(rate="40.123"):
+    lines = model.convert_lines(model.reconcile(_desired(), [])["supplement"], Decimal(rate))
+    return [{"row": "CFE-1", "lines": lines}]
+
+
+def test_the_coverage_of_an_invoice_in_pesos_is_counted_in_the_currency_of_the_reservation() -> None:
+    assert model.coverage(_converted_original(), []) == [
+        {"row": "CFE-1", "line_id": "2026-12-20:Room", "rate": "0", "amount": "100.00", "invoice_amount": "4012.30"},
+        {"row": "CFE-1", "line_id": "2026-12-21:Room", "rate": "0", "amount": "120.00", "invoice_amount": "4814.76"}]
+    # lo que nada cubre de más: la misma estancia no pide ningún CFE ni ninguna nota de crédito
+    assert model.reconcile(_desired(), model.coverage(_converted_original(), [])) == {"supplement": [], "credits": []}
+
+
+def test_the_credit_note_of_an_invoice_in_pesos_goes_in_pesos() -> None:
+    # salida anticipada: la noche entera que sobra vuelve tal como se facturó, al centavo
+    plan = model.reconcile(_desired(nights=NIGHTS[:1]), model.coverage(_converted_original(), []))
+    assert plan["credits"] == [{"row": "CFE-1", "lines": [
+        {"line_id": "2026-12-21:Room", "amount": "4814.76", "source_amount": "120.00"}]}]
+    # una parte de una noche, a la misma proporción con que se convirtió esa línea
+    cheaper = [NIGHTS[0], {**NIGHTS[1], "amount": "90.00"}]
+    plan = model.reconcile(_desired(nights=cheaper), model.coverage(_converted_original(), []))
+    assert plan["credits"] == [{"row": "CFE-1", "lines": [
+        {"line_id": "2026-12-21:Room", "amount": "1203.69", "source_amount": "30.00"}]}]
+
+
+def test_what_a_credit_note_in_pesos_gave_back_is_out_of_the_coverage_in_both_currencies() -> None:
+    credits = [{"references": "CFE-1", "lines": [
+        {"line_id": "2026-12-21:Room", "amount": "1203.69", "source_amount": "30.00"}]}]
+    assert model.coverage(_converted_original(), credits)[1] == {
+        "row": "CFE-1", "line_id": "2026-12-21:Room", "rate": "0", "amount": "90.00", "invoice_amount": "3611.07"}
+    credits.append({"references": "CFE-1", "lines": [
+        {"line_id": "2026-12-21:Room", "amount": "3611.07", "source_amount": "90.00"}]})
+    assert [c["line_id"] for c in model.coverage(_converted_original(), credits)] == ["2026-12-20:Room"]
+
+
+def test_the_credit_note_sent_to_core_has_only_the_line_and_its_amount() -> None:
+    assert model.credit_note_lines([{"line_id": "a", "amount": "1203.69", "source_amount": "30.00"},
+                                    {"line_id": "b", "amount": "5.00"}]) == [
+        {"line_id": "a", "amount": "1203.69"}, {"line_id": "b", "amount": "5.00"}]
+    assert model.credit_note_lines(None) is None
+
+
+def test_the_desk_sees_the_choice_with_the_proposal_and_the_rate() -> None:
+    block = model.currency_choice("USD", "2026-07-10", "40.123", "2026-07-09")
+    assert block["title"] == model.CURRENCY_TITLE
+    assert [o["code"] for o in block["options"]] == ["USD", "UYU"]
+    assert block["currency"] == "UYU"
+    assert block["text"] == model.PROPOSED_UYU
+    usd, uyu = block["options"]
+    assert usd["label"] == "Dólares (USD)" and uyu["label"] == "Pesos uruguayos (UYU)"
+    # la de pesos dice con qué cotización se convierte; la de dólares, el tipo de cambio que lleva el CFE
+    assert uyu["note"] == model.CONVERTED_NOTE.format(source="USD", rate="40,123", day="09-07-2026")
+    assert usd["note"] == model.FX_NOTE.format(currency="USD", rate="40,123", day="09-07-2026")
+    assert model.currency_choice("USD", "2026-12-20", "40.123", "2026-12-19")["currency"] == "USD"
+    assert model.currency_choice("USD", "2026-12-20", "40.123", "2026-12-19")["text"] == model.PROPOSED_USD
+
+
+def test_without_a_rate_the_desk_is_told_to_load_it_before_invoicing() -> None:
+    block = model.currency_choice("USD", "2026-12-20", None, None)
+    assert {o["note"] for o in block["options"]} == {texts.NO_FX}
+
+
+def test_a_hotel_in_pesos_converts_to_dollars_only_for_the_dollar_invoice() -> None:
+    usd, uyu = model.currency_choice("UYU", "2026-12-20", "40", "2026-12-19")["options"]
+    assert usd["note"] == model.CONVERTED_NOTE.format(source="UYU", rate="40", day="19-12-2026")
+    assert uyu["note"] == ""
+
+
+def test_the_rate_note_of_an_invoice_reads_like_the_desk_writes_it() -> None:
+    assert model.fx_note("USD", "USD", "40.123", None) == model.FX_LINE.format(currency="USD", rate="40,123")
+    assert model.fx_note("UYU", "USD", "1", "40.123") == model.CONVERTED_LINE.format(source="USD", rate="40,123")
+    assert model.fx_note("UYU", "UYU", "1", None) == ""
+    assert model.fx_note("USD", "", "39.5", None) == model.FX_LINE.format(currency="USD", rate="39,5")

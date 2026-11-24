@@ -256,6 +256,9 @@ def _book_legs(itn, legs: list[dict], adults, children, phone,
 			booking_type="Corporate" if itn.company else "Individual",
 			booked_by_name=itn.booked_by_name,
 			booked_by_phone=itn.booked_by_phone,
+			# a trip is secured by its own trip advance (crs.allocate_trip_advance),
+			# never by a desk hold that would lapse one leg on its own
+			status="Confirmed",
 			idempotency_key=f"{idempotency_key}:{i}" if idempotency_key else None)
 		if not frappe.db.exists("Itinerary", itn.name):
 			# create_booking's deadlock retry rolled the whole transaction

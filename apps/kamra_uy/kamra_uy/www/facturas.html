@@ -59,6 +59,7 @@
           </table>
         {% endif %}
         {% if it.total %}<p><strong>Total: {{ it.currency }} {{ it.total }}</strong></p>{% endif %}
+        {% if it.fx %}<p data-testid="fp-fx">{{ it.fx }}</p>{% endif %}
         {% if it.in_core %}
           <form class="fp-record" data-name="{{ it.name }}">
             <label>Dónde se hizo<select name="via">{% for v, label in vias %}<option value="{{ v }}">{{ label }}</option>{% endfor %}</select></label>

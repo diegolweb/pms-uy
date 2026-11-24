@@ -10,7 +10,7 @@ import {
   Star,
   Wifi,
 } from "lucide-react"
-import { call, type TaxResidence } from "../lib/api"
+import { call, type InvoiceCurrency, type TaxResidence } from "../lib/api"
 import { listResource, serverError } from "../lib/resource"
 import { toFullPath } from "../lib/routing"
 import { fmtMoney, sellsAlcohol } from "../lib/money"
@@ -101,6 +101,9 @@ interface Flow {
   /** where the guest lives, where the country taxes by it; "residence" in
    *  missing_required while check-in cannot go on without it */
   residence?: TaxResidence | null
+  /** the currency the tax invoice goes out in, where the desk picks it; the
+   *  pick goes with kamra.api.check_in */
+  invoice_currency?: InvoiceCurrency | null
   /** Soft-required steps still open — warn, allow check-in, backfill later. */
   pending_backfill: { step: string; title: string; tip: string }[]
   rooms: Room[]
@@ -330,6 +333,8 @@ export default function CheckInDialog(props: {
   // what an ID scan read beyond the form's fields; saved with the details
   const [scanned, setScanned] = useState<IdRead | null>(null)
   const [payer, setPayer] = useState("")
+  // the invoice currency the desk picked ("" = the one the pack proposes)
+  const [invoiceCurrency, setInvoiceCurrency] = useState("")
   const [room, setRoom] = useState("")
   const [changeRoom, setChangeRoom] = useState(false)
   const [upgrade, setUpgrade] = useState(false)
@@ -573,7 +578,10 @@ export default function CheckInDialog(props: {
     try {
       const out = await call<{ room: string | null; keys?: { message: string } }>(
         "kamra.api.check_in",
-        { reservation: props.reservation },
+        {
+          reservation: props.reservation,
+          invoice_currency: flow?.invoice_currency ? invoiceCurrency || flow.invoice_currency.currency : undefined,
+        },
       )
       setFinished({ room: flow?.room.room_number ?? out.room, keys: out.keys ?? null })
     } catch (e) {
@@ -1304,6 +1312,13 @@ export default function CheckInDialog(props: {
                     )
                   })}
               </ul>
+              {flow.invoice_currency && (
+                <InvoiceCurrencyChoice
+                  offer={flow.invoice_currency}
+                  picked={invoiceCurrency || flow.invoice_currency.currency}
+                  onPick={setInvoiceCurrency}
+                />
+              )}
               {flow.missing_required.length > 0 ? (
                 <p className="text-sm font-medium text-rose-700">
                   {roomReady
@@ -1399,6 +1414,46 @@ function StayInfoCard({ flow }: { flow: Flow }) {
           </a>
         )}
       </div>
+    </div>
+  )
+}
+
+
+/** The currency the tax invoice goes out in: the pack's offer, its proposal
+ *  picked until the desk picks another, and the note of the one picked (the
+ *  rate it goes out with). The pack writes the words. */
+function InvoiceCurrencyChoice(props: {
+  offer: InvoiceCurrency
+  picked: string
+  onPick: (code: string) => void
+}) {
+  const { t } = useT()
+  const title = props.offer.title || t("Invoice currency")
+  const note = props.offer.options.find((o) => o.code === props.picked)?.note
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white p-3" data-testid="checkin-invoice-currency">
+      <span className="mb-1 block text-xs font-medium text-zinc-500">{title}</span>
+      {props.offer.text && <p className="mb-2 text-sm text-zinc-600">{props.offer.text}</p>}
+      <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label={title}>
+        {props.offer.options.map((o) => (
+          <button
+            key={o.code}
+            type="button"
+            role="radio"
+            aria-checked={props.picked === o.code}
+            onClick={() => props.onPick(o.code)}
+            className={cn(
+              "rounded-lg border px-3 py-1.5 text-sm",
+              props.picked === o.code
+                ? "border-brand-600 bg-brand-50 font-medium text-brand-800"
+                : "border-zinc-300 bg-white text-zinc-700",
+            )}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      {note && <p className="mt-2 text-sm text-zinc-600" data-testid="checkin-invoice-currency-note">{note}</p>}
     </div>
   )
 }

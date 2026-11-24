@@ -23,6 +23,7 @@ from kamra_uy.pure.core_signature import verify
 from kamra_uy.pure.payments import (
 	CURRENCIES,
 	amount_to_float,
+	charged_fx,
 	link_expires_at,
 	link_purpose,
 	link_request,
@@ -148,8 +149,12 @@ def verify_webhook(settings, payload: bytes, headers: dict) -> dict | None:
 		return None
 	if event["property"] != settings.key_id:
 		frappe.throw("This event belongs to another property", frappe.PermissionError)
-	return {"link_id": event.get("link_id") or "", "reference": event["payment_id"],
-	        "amount": amount_to_float(event["amount"]), "mode": payment_mode(event)}
+	out = {"link_id": event.get("link_id") or "", "reference": event["payment_id"],
+	       "amount": amount_to_float(event["amount"]), "mode": payment_mode(event)}
+	fx = charged_fx(event)  # D-HR-68: cobrado en otra moneda; `amount` es lo que pedía el enlace
+	if fx:
+		out["fx"] = {k: fx[k] for k in ("currency", "fx_amount", "exchange_rate")}
+	return out
 
 
 def refund(settings, *, reference: str, amount: float, reason: str) -> dict:

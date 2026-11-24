@@ -42,6 +42,8 @@
   "attempts",
   "currency",
   "total",
+  "source_currency",
+  "source_fx_rate",
   "section_detail",
   "reason",
   "error",
@@ -289,6 +291,18 @@
    "read_only": 1
   },
   {
+   "fieldname": "source_currency",
+   "fieldtype": "Data",
+   "label": "Moneda de la reserva (si la factura va en otra)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_fx_rate",
+   "fieldtype": "Data",
+   "label": "Cotización de la moneda de la reserva (pesos por unidad)",
+   "read_only": 1
+  },
+  {
    "fieldname": "section_detail",
    "fieldtype": "Section Break",
    "label": "Detalle"
@@ -320,7 +334,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-11-20 12:00:00.000000",
+ "modified": "2026-11-23 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Fiscal",
  "name": "UY CFE",

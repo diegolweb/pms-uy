@@ -15,6 +15,19 @@ el total (planilla.py lo valida). La capacidad de cada tipo es de PERSONAS (el f
 capacidad, niños hasta la capacidad menos 1 (siempre un adulto) salvo que «Niños máx.» diga otro número, y el total hasta
 la capacidad (`max_total_occupants`, que Kamra aplica en `pricing.capacity_overflow`). Con «se cobra por habitación», un
 niño o un adulto más no suma nada al precio.
+
+HR-232 (D-HR-64, el fundador, 23-11: «Ponlo en 0, no pedimos garantía»): la propiedad sin depósito de garantía
+(`security_deposit_amount` = 0), pero solo si sigue con el de fábrica de Kamra (5000, property.json), como la zona
+horaria: uno puesto a mano después no se pisa, se avisa. Las propiedades ya cargadas lo reciben del patch
+`kamra_uy.patches.v1_0.garantia_a_cero`, con la misma regla.
+
+Las reservas ya tomadas (solo si se lee su pestaña): la clave de una de plataforma es su `ota_ref` (el código de la
+plataforma, «código-n» por habitación si trae varias), la misma que usa Channex, así que una revisión posterior de
+Channex la modifica o la cancela y no la duplica; la de una directa, su `idempotency_key` («planilla:<código>»). Se crean
+y no se cambian nunca: desde que está en Kamra, la reserva la llevan Kamra y Channex, y una planilla vieja no la pisa
+(una diferencia se avisa). Una que ya terminó no se carga; una en curso es un error (el check-in, en Kamra). Antes de
+escribir, la prueba cuenta por tipo y por noche lo que ya ocupa Kamra más lo nuevo frente a las habitaciones del tipo:
+si no caben, es un error y no se escribe nada.
 """
 
 import dataclasses
@@ -29,8 +42,12 @@ MODO_DE_COBRO = "Full online"
 DEPOSITO_PCT = 100
 RETENCION_MINUTOS = 120  # el valor por defecto de Kamra (Property.hold_minutes)
 ZONAS_POR_DEFECTO = ("", None, "Asia/Kolkata")  # sin zona o la que Kamra pone de fábrica (India)
+GARANTIA = 0  # D-HR-64: el hotel no pide depósito de garantía
+GARANTIA_DE_FABRICA = 5000  # la que Kamra pone en una propiedad nueva (Property.security_deposit_amount)
 
 OPS = ("crear", "cambiar", "igual", "retirar")
+CLAVE_DIRECTA = "planilla:"  # Reservation.idempotency_key de una reserva directa cargada de la planilla
+VIVAS = ("Confirmed", "Checked In", "Held", "Pending Payment")  # las que ocupan habitación (kamra.reservation_state)
 
 
 @dataclasses.dataclass
@@ -43,6 +60,10 @@ class Estado:
 	habitaciones: list
 	temporadas: list
 	tramos_cancelacion: int = 0  # filas de Property.cancellation_tiers: si las hay, mandan sobre free_cancel_days
+	# solo si se leen las reservas: las de Kamra con ota_ref o con clave de la carga (de cualquier estado), y las vivas
+	# (VIVAS) que salen después de hoy, para contar la ocupación
+	reservas_con_clave: list = dataclasses.field(default_factory=list)
+	ocupadas: list = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -91,6 +112,11 @@ def _igual(a, b) -> bool:
 	return (a or None) == (b or None)
 
 
+def garantia_de_fabrica(valor) -> bool:
+	"""El depósito de garantía sigue como lo trae Kamra de fábrica: la carga y el patch lo ponen a 0 (D-HR-64)."""
+	return valor is not None and _igual(valor, GARANTIA_DE_FABRICA)
+
+
 def _diferencias(actual: dict, deseado: dict) -> tuple[dict, dict]:
 	valores = {k: v for k, v in deseado.items() if not _igual(actual.get(k), v)}
 	return valores, {k: actual.get(k) for k in valores}
@@ -105,7 +131,7 @@ def codigo(nombre: str, usados: set[str]) -> str:
 	return out
 
 
-def planea(planilla: Planilla, estado: Estado, propiedad: str | None = None) -> Plan:
+def planea(planilla: Planilla, estado: Estado, propiedad: str | None = None, hoy: datetime.date | None = None) -> Plan:
 	nombre = propiedad or (estado.propiedad or {}).get("name") or "?"
 	pl = Plan(nombre, planilla, estado)
 	pl.avisos.extend(n.texto() for n in planilla.avisos)
@@ -123,6 +149,8 @@ def planea(planilla: Planilla, estado: Estado, propiedad: str | None = None) -> 
 	resueltos = _tipos(pl)
 	_habitaciones(pl, resueltos)
 	_temporadas(pl, resueltos)
+	if planilla.con_reservas:
+		_reservas(pl, resueltos, hoy or datetime.date.today())
 	return pl
 
 
@@ -172,6 +200,13 @@ def _propiedad(pl: Plan) -> None:
 	deseado = {"country": PAIS, "booking_payment_mode": MODO_DE_COBRO, "deposit_pct": DEPOSITO_PCT, **_condiciones(pl)}
 	if actual.get("timezone") in ZONAS_POR_DEFECTO:
 		deseado["timezone"] = HOTEL_TIMEZONE
+	if garantia_de_fabrica(actual.get("security_deposit_amount")):
+		deseado["security_deposit_amount"] = GARANTIA
+	elif not _igual(actual.get("security_deposit_amount"), GARANTIA):
+		pl.avisos.append(
+			f"«{pl.propiedad}» pide en Kamra un depósito de garantía de {_num(actual['security_deposit_amount'])}, puesto "
+			"a mano: la carga no lo toca (el hotel no pide garantía, D-HR-64)."
+		)
 	moneda = pl.planilla.moneda
 	if actual.get("currency") != moneda:
 		if pl.estado.reservas:
@@ -314,6 +349,187 @@ def _tipo_de(t: dict, resueltos: dict) -> str | None:
 	return None
 
 
+def clave_de_reserva(r) -> tuple[str, str]:
+	"""(campo de Reservation, valor) por el que Kamra reconoce una reserva de la planilla."""
+	return ("ota_ref", r.ref) if r.ota else ("idempotency_key", CLAVE_DIRECTA + r.ref)
+
+
+def _dia(v) -> datetime.date:
+	return v if isinstance(v, datetime.date) else datetime.date.fromisoformat(str(v)[:10])
+
+
+def _reservas(pl: Plan, resueltos: dict, hoy: datetime.date) -> None:
+	en_kamra: dict[tuple[str, str], list] = {}
+	for k in pl.estado.reservas_con_clave:
+		if (k.get("ota_ref") or "").strip():
+			en_kamra.setdefault(("ota_ref", k["ota_ref"].strip()), []).append(k)
+		if (k.get("idempotency_key") or "").startswith(CLAVE_DIRECTA):
+			en_kamra.setdefault(("idempotency_key", k["idempotency_key"]), []).append(k)
+	de_la_planilla = {clave_de_reserva(r) for r in pl.planilla.reservas}
+	usadas, terminadas, nuevas = set(), [], []
+	for r in pl.planilla.reservas:
+		donde = f"La reserva {r.ref} ({r.plataforma}, fila {r.fila})"
+		campo, valor = clave_de_reserva(r)
+		filas = en_kamra.get((campo, valor), [])
+		actual = next((k for k in filas if k.get("status") != "Cancelled"), filas[0] if filas else None)
+		if actual is not None:  # ya cargada (o entrada por Channex): se queda como está, pase lo que pase con sus fechas
+			usadas.add(actual["name"])
+			_compara_reserva(pl, r, actual, resueltos, donde)
+			pl.acciones.append(Accion("Reservation", "igual", {}, actual["name"], tipo=r.tipo))
+			continue
+		if r.salida <= hoy:
+			terminadas.append(r.ref)
+			continue
+		if r.llegada < hoy:
+			pl.errores.append(
+				f"{donde} empezó el {_dd(r.llegada)}: el huésped ya está en el hotel. Cárgala a mano en Kamra, con su "
+				"check-in, y quítala de la planilla."
+			)
+			continue
+		otra = _otra_forma(en_kamra, de_la_planilla, campo, ("" if r.ota else CLAVE_DIRECTA) + r.codigo)
+		if otra:
+			pl.errores.append(
+				f"{donde}: en Kamra ya está como {otra[1]} ({otra[0]}), con otro número de habitaciones. Corrige la "
+				"planilla o la reserva de Kamra para que digan lo mismo; la carga no la duplica."
+			)
+			continue
+		nuevas.append(r)
+		pl.acciones.append(Accion("Reservation", "crear", {
+			"ref": r.ref,
+			"plataforma": r.plataforma,
+			"fila": r.fila,
+			"room_type": r.tipo,
+			"habitacion": r.habitacion,
+			"check_in_date": r.llegada,
+			"check_out_date": r.salida,
+			"adults": r.adultos,
+			"children": r.ninos,
+			"source": r.origen,
+			"channel": r.plataforma if r.ota else None,
+			"ota_ref": r.ref if r.ota else None,
+			"idempotency_key": None if r.ota else CLAVE_DIRECTA + r.ref,
+			"total": r.total,
+			"huesped": r.huesped,
+			"telefono": r.telefono,
+			"correo": r.correo,
+			"notas": r.notas,
+		}, tipo=r.tipo))
+	if terminadas:
+		que = "1 reserva ya terminó" if len(terminadas) == 1 else f"{len(terminadas)} reservas ya terminaron"
+		pl.avisos.append(f"{que} (antes del {_dd(hoy)}) y no se carga{'' if len(terminadas) == 1 else 'n'}: "
+		                 f"{', '.join(terminadas)}.")
+	sobran = sorted(
+		k["name"] for k in pl.estado.reservas_con_clave
+		if k["name"] not in usadas and k.get("status") in VIVAS and _dia(k["check_out_date"]) > hoy
+	)
+	if sobran:
+		que = "1 reserva" if len(sobran) == 1 else f"{len(sobran)} reservas"
+		pl.avisos.append(f"En Kamra hay {que} de plataforma o de la carga que la planilla no trae: {', '.join(sobran)} "
+		                 "(no se tocan).")
+	for codigo, plataforma, ota in pl.planilla.canceladas:
+		campo, base = ("ota_ref", codigo) if ota else ("idempotency_key", CLAVE_DIRECTA + codigo)
+		viva = _otra_forma(en_kamra, set(), campo, base)
+		if viva:
+			pl.avisos.append(
+				f"La reserva {codigo} ({plataforma}) está cancelada en la planilla y viva en Kamra ({viva[0]}): cancélala "
+				"en Kamra si es así (la carga no cancela)."
+			)
+	_cabe(pl, resueltos, nuevas, hoy)
+
+
+def _compara_reserva(pl: Plan, r, actual: dict, resueltos: dict, donde: str) -> None:
+	"""Una reserva ya cargada no se toca: si Kamra la tiene distinta, o cancelada, se avisa."""
+	if actual.get("status") == "Cancelled":
+		pl.avisos.append(f"{donde} está cancelada en Kamra ({actual['name']}): la carga no la reabre.")
+		return
+	distinto = [
+		nombre for nombre, a, b in (
+			("el tipo", actual.get("room_type"), resueltos.get(r.tipo)),
+			("la llegada", str(actual.get("check_in_date")), str(r.llegada)),
+			("la salida", str(actual.get("check_out_date")), str(r.salida)),
+			("los adultos", int(actual.get("adults") or 0), r.adultos),
+			("los niños", int(actual.get("children") or 0), r.ninos),
+		) if a != b
+	]
+	if distinto:
+		lista = ", ".join(distinto[:-1]) + f" y {distinto[-1]}" if len(distinto) > 1 else distinto[0]
+		pl.avisos.append(
+			f"{donde} ya está en Kamra ({actual['name']}) con otr{'os datos' if len(distinto) > 1 else 'o dato'}: "
+			f"{lista}. La carga no la toca: desde que está en Kamra, la llevan Kamra y Channex."
+		)
+
+
+def _otra_forma(en_kamra: dict, de_la_planilla: set, campo: str, base: str) -> tuple[str, str] | None:
+	"""(nombre en Kamra, su clave) de una reserva viva de la misma reserva de la planilla guardada con otro número de
+	habitaciones («X» frente a «X-0», «X-1»), que la planilla no trae con esa clave."""
+	for (c, valor), filas in en_kamra.items():
+		if c != campo or (c, valor) in de_la_planilla:
+			continue
+		if valor == base or (valor.startswith(base + "-") and valor[len(base) + 1:].isdigit()):
+			viva = next((k for k in filas if k.get("status") != "Cancelled"), None)
+			if viva:
+				return viva["name"], valor.removeprefix(CLAVE_DIRECTA)
+	return None
+
+
+def _cabe(pl: Plan, resueltos: dict, nuevas: list, hoy: datetime.date) -> None:
+	"""Por tipo y noche, lo que ya ocupa Kamra más las reservas nuevas no puede pasar de las habitaciones del tipo; y una
+	habitación con número no puede tener dos reservas la misma noche."""
+	if not nuevas:
+		return
+	tipo_de = {v: k for k, v in resueltos.items() if v}
+	numeros = {h.numero for h in pl.planilla.habitaciones}
+	numero_de = {h["name"]: str(h.get("room_number")) for h in pl.estado.habitaciones}
+	cupo: dict[str, int] = {}
+	for h in pl.planilla.habitaciones:
+		cupo[h.tipo] = cupo.get(h.tipo, 0) + 1
+	for h in pl.estado.habitaciones:
+		t = tipo_de.get(h.get("room_type"))
+		if t and str(h.get("room_number")) not in numeros:
+			cupo[t] = cupo.get(t, 0) + 1
+	por_tipo: dict[tuple[str, datetime.date], list] = {}
+	por_habitacion: dict[tuple[str, datetime.date], list] = {}
+
+	def suma(destino: dict, clave: str, desde, hasta, quien: str | None) -> None:
+		d = max(_dia(desde), hoy)
+		while d < _dia(hasta):
+			destino.setdefault((clave, d), []).append(quien)
+			d += datetime.timedelta(days=1)
+
+	for o in pl.estado.ocupadas:
+		t = tipo_de.get(o.get("room_type"))
+		if t:
+			suma(por_tipo, t, o["check_in_date"], o["check_out_date"], None)
+		if o.get("room") in numero_de:
+			suma(por_habitacion, numero_de[o["room"]], o["check_in_date"], o["check_out_date"], o["name"])
+	for r in nuevas:
+		suma(por_tipo, r.tipo, r.llegada, r.salida, r.ref)
+		if r.habitacion:
+			suma(por_habitacion, r.habitacion, r.llegada, r.salida, r.ref)
+	refs = {r.ref for r in nuevas}
+	vistos = set()
+	for (tipo, d), quienes in sorted(por_tipo.items(), key=lambda x: (x[0][1], x[0][0])):
+		hay = cupo.get(tipo, 0)
+		if tipo in vistos or len(quienes) <= hay:
+			continue
+		vistos.add(tipo)
+		nuevas_ahi = [q for q in quienes if q]
+		ya = len(quienes) - len(nuevas_ahi)
+		pl.errores.append(
+			f"La noche del {_dd(d)} no caben las reservas de {tipo}: hay {hay} habitaciones y {len(quienes)} reservas "
+			f"({ya} ya en Kamra y {len(nuevas_ahi)} de la planilla: {', '.join(nuevas_ahi)}). Corrígelo antes de cargar."
+		)
+	repetidas = set()
+	for (numero, d), quienes in sorted(por_habitacion.items(), key=lambda x: (x[0][1], x[0][0])):
+		if numero in repetidas or len(quienes) < 2 or not refs & set(quienes):
+			continue
+		repetidas.add(numero)
+		pl.errores.append(
+			f"La habitación {numero} tiene {len(quienes)} reservas la noche del {_dd(d)}: {', '.join(quienes)}. "
+			"Deja en blanco la habitación de una (se asigna después en Kamra) o corrígelo antes de cargar."
+		)
+
+
 def _dd(d) -> str:
 	if isinstance(d, datetime.date):
 		return d.strftime("%d-%m-%Y")
@@ -321,6 +537,10 @@ def _dd(d) -> str:
 		return datetime.date.fromisoformat(str(d)).strftime("%d-%m-%Y")
 	except ValueError:
 		return str(d)
+
+
+def _personas(n: int, quien: str) -> str:
+	return f"{n} {quien}{'' if n == 1 else 's'}"
 
 
 def _num(v) -> str:
@@ -331,7 +551,10 @@ _VERBOS = {
 	False: {"crear": "crearía", "cambiar": "cambiaría", "igual": "igual", "retirar": "retiraría"},
 	True: {"crear": "creados", "cambiar": "cambiados", "igual": "igual", "retirar": "retirados"},
 }
-_TITULOS = {"Property": "Propiedad", "Room Type": "Tipos", "Room": "Habitaciones", "Season": "Temporadas"}
+_TITULOS = {
+	"Property": "Propiedad", "Room Type": "Tipos", "Room": "Habitaciones", "Season": "Temporadas",
+	"Reservation": "Reservas",
+}
 _SIGNOS = {"crear": "+", "cambiar": "~", "retirar": "-"}
 
 
@@ -351,6 +574,12 @@ def _linea(pl: Plan, a: Accion) -> list[str]:
 			piso = f", piso {v['floor']}" if v.get("floor") else ""
 			return [f"  + {v['room_number']}: {v['room_type']}{piso}"]
 		return [f"  ~ {a.nombre}: " + ", ".join(f"{k} {a.antes.get(k) or '(vacío)'} → {x}" for k, x in v.items())]
+	if a.doctype == "Reservation":  # solo se crean; ni el nombre ni el contacto del huésped salen en el informe
+		hab = f", habitación {v['habitacion']}" if v.get("habitacion") else ""
+		gente = _personas(v["adults"], "adulto") + (f" y {_personas(v['children'], 'niño')}" if v.get("children") else "")
+		precio = f"total {_num(v['total'])} {moneda}" if v.get("total") else "al precio de Kamra"
+		return [f"  + {v['ref']} ({v['plataforma']}): {v['room_type']}{hab}, {_dd(v['check_in_date'])} → "
+		        f"{_dd(v['check_out_date'])}, {gente}, {precio}"]
 	if a.op == "retirar":
 		return [f"  - {a.nombre} (se desactiva: la planilla ya no la trae con esas fechas)"]
 	minimo = v["minimum_nights"] if a.op == "crear" else v.get("minimum_nights")
@@ -372,6 +601,14 @@ def _texto(pl: Plan, aplicado: bool) -> str:
 		f"Planilla: {r['habitaciones']} habitaciones ({tipos}) · {r['temporadas']} temporadas con fechas "
 		f"({r['filas_de_precio']} precios) · {pl.planilla.moneda or 'moneda ?'}"
 	)
+	if pl.planilla.con_reservas and "reservas" in r:
+		linea = f"Reservas en la planilla: {r['reservas']}"
+		if r["reservas_por_plataforma"]:
+			linea += " (" + ", ".join(f"{k} {n}" for k, n in r["reservas_por_plataforma"].items()) + ")"
+		if r["reservas_canceladas"]:
+			n = r["reservas_canceladas"]
+			linea += " · 1 cancelada (no se carga)" if n == 1 else f" · {n} canceladas (no se cargan)"
+		out.append(linea)
 	recuento = pl.recuento()
 	for doctype, titulo in _TITULOS.items():
 		if doctype not in recuento:

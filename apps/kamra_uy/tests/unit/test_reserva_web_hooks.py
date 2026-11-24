@@ -55,7 +55,13 @@ def test_los_campos_se_crean_al_instalar_y_en_cada_migrate() -> None:
     hooks = _hooks()
     for hook in ("after_install", "after_migrate"):
         assert hooks[hook] == ["kamra_uy.notifications.confirmation.ensure_fields",
-                               "kamra_uy.booking.residence.ensure_fields"], hook
+                               "kamra_uy.booking.residence.ensure_fields",
+                               "kamra_uy.contact.form.ensure_fields"], hook  # HR-314: el destinatario de la web
+
+
+def test_las_consultas_de_la_web_salen_de_la_cola_cada_hora() -> None:
+    # HR-314: kamra_uy/contact/form.py borra las consultas ya enviadas (y las no enviadas a los 7 días)
+    assert _hooks()["scheduler_events"]["hourly"] == ["kamra_uy.contact.form.purge"]
 
 
 def test_el_iva_de_lo_declarado_va_antes_que_el_del_check_in() -> None:

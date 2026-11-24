@@ -1,11 +1,13 @@
 """La planilla del hotel (HR-6) leída y validada para la carga en Kamra (HR-33). Sin frappe.
 
-Hoy se cargan tres pestañas: «Habitaciones», «Temporadas y precios» y «Seña y cancelación» (HR-290). Las demás crecen aquí cuando el fundador las
-rellene (una función `_<pestaña>` y su nombre en PESTANAS); las de datos personales no se abren nunca desde este
-módulo salvo para la carga de su ficha, con su propia revisión. Las columnas se buscan por su cabecera, no por su
-letra: insertar una columna no rompe la carga. Cada error dice pestaña, fila y columna, en español.
+Siempre se leen tres pestañas: «Habitaciones», «Temporadas y precios» y «Seña y cancelación» (HR-290). Las de datos
+personales no se abren salvo que se pidan: «Reservas desde 15-nov» (o la que empiece por «Reservas»), solo con
+`lee(..., reservas=True)`, y «Personal», nunca (los usuarios los crea el fundador en Kamra, D-HR-65). Las columnas se
+buscan por su cabecera, no por su letra: insertar una columna no rompe la carga. Cada error dice pestaña, fila y
+columna, en español; los de la pestaña de reservas no copian el nombre, el teléfono ni el correo del huésped.
 
-Para validar una planilla sin Kamra: `python3 -m kamra_uy.setup.planilla <planilla.xlsx>` (desde apps/kamra_uy).
+Para validar una planilla sin Kamra: `python3 -m kamra_uy.setup.planilla <planilla.xlsx> [--reservas]` (desde
+apps/kamra_uy).
 """
 
 import dataclasses
@@ -20,6 +22,8 @@ HABITACIONES = "Habitaciones"
 TEMPORADAS = "Temporadas y precios"
 SENA = "Seña y cancelación"
 PESTANAS = (HABITACIONES, TEMPORADAS, SENA)
+RESERVAS = "Reservas desde 15-nov"  # la de la planilla del hotel; vale otra cuyo nombre empiece por «Reservas»
+DIRECTA = "Directa"  # la «plataforma» de una reserva que no vino de una plataforma
 
 _FECHA = re.compile(r"^\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\s*$")
 _FECHA_ISO = re.compile(r"^\s*(\d{4})-(\d{1,2})-(\d{1,2})\s*$")
@@ -99,6 +103,30 @@ class Condiciones:
 
 
 @dataclasses.dataclass
+class Reserva:
+	"""Una fila de la pestaña de reservas: una habitación de una reserva ya tomada."""
+
+	codigo: str  # tal cual en la planilla (sin los puntos de «4123.456.789»)
+	ref: str  # la clave en Kamra: el código, o «código-n» si la reserva trae varias habitaciones (como Channex)
+	plataforma: str  # Booking.com, Expedia, Airbnb, Despegar, Agoda o «Directa»
+	ota: bool  # vino de una plataforma: su `ref` va a Reservation.ota_ref
+	origen: str  # Reservation.source: OTA, Phone o Manual
+	huesped: str
+	telefono: str | None
+	correo: str | None
+	llegada: datetime.date
+	salida: datetime.date
+	tipo: str
+	habitacion: str | None
+	adultos: int
+	ninos: int
+	total: float | None  # lo que se cobró (impuestos incluidos), en la moneda de la planilla; None: lo calcula Kamra
+	notas: str | None
+	fila: int
+	sin_adultos: bool = False  # la planilla no dice cuántos: van 2, como una reserva de plataforma que no lo dice
+
+
+@dataclasses.dataclass
 class Planilla:
 	moneda: str | None = None
 	condiciones: Condiciones = dataclasses.field(default_factory=Condiciones)
@@ -108,18 +136,29 @@ class Planilla:
 	sin_fechas: list = dataclasses.field(default_factory=list)
 	avisos: list = dataclasses.field(default_factory=list)
 	errores: list = dataclasses.field(default_factory=list)
+	con_reservas: bool = False  # se leyó la pestaña de reservas (solo si se pide)
+	reservas: list = dataclasses.field(default_factory=list)
+	canceladas: list = dataclasses.field(default_factory=list)  # (código, plataforma, ota) de las «Cancelada»
 
 	def recuento(self) -> dict:
 		por_tipo: dict[str, int] = {}
 		for h in self.habitaciones:
 			por_tipo[h.tipo] = por_tipo.get(h.tipo, 0) + 1
-		return {
+		out = {
 			"habitaciones": len(self.habitaciones),
 			"por_tipo": dict(sorted(por_tipo.items())),
 			"temporadas": len({(t.nombre, t.desde, t.hasta) for t in self.temporadas}),
 			"filas_de_precio": len(self.temporadas),
 			"sin_fechas": list(self.sin_fechas),
 		}
+		if self.con_reservas:
+			por_plataforma: dict[str, int] = {}
+			for r in self.reservas:
+				por_plataforma[r.plataforma] = por_plataforma.get(r.plataforma, 0) + 1
+			out["reservas"] = len(self.reservas)
+			out["reservas_por_plataforma"] = dict(sorted(por_plataforma.items()))
+			out["reservas_canceladas"] = len(self.canceladas)
+		return out
 
 
 def _clave(texto: str) -> str:
@@ -145,15 +184,24 @@ class _Pestana:
 		self.cabeceras: dict[str, str] = {}
 		self.fila_cabecera = None
 		self.datos = []
-		buscadas = {**requeridas, **opcionales}
+		# cada campo, con uno o varios comienzos posibles; manda el que casa más largo («Tipo de habitación» gana a
+		# «Tipo de pago» para el tipo), y a igualdad, la primera columna
+		buscadas = {c: (p,) if isinstance(p, str) else p for c, p in {**requeridas, **opcionales}.items()}
 		for n, celdas in filas:
 			if self.fila_cabecera is None:
-				encontradas = {}
+				pares = []
 				for col, valor in celdas.items():
 					t = _texto(valor)
-					for campo, prefijo in buscadas.items():
-						if t and _clave(t).startswith(prefijo) and campo not in encontradas:
-							encontradas[campo] = (col, t)
+					k = _clave(t) if t else ""
+					for campo, prefijos in buscadas.items():
+						largo = max((len(x) for x in prefijos if k and k.startswith(x)), default=0)
+						if largo:
+							pares.append((largo, campo, col, t))
+				encontradas, usadas = {}, set()
+				for _, campo, col, t in sorted(pares, key=lambda x: -x[0]):
+					if campo not in encontradas and col not in usadas:
+						encontradas[campo] = (col, t)
+						usadas.add(col)
 				if all(c in encontradas for c in requeridas):
 					self.fila_cabecera = n
 					for campo, (col, t) in encontradas.items():
@@ -197,16 +245,34 @@ _TEM_VISIBLE = {
 }
 
 
-def lee(ruta) -> Planilla:
+def pestana_de_reservas(nombres: list[str]) -> str | None:
+	"""La pestaña de las reservas ya tomadas: «Reservas desde 15-nov», o la primera cuyo nombre empiece por «Reservas»."""
+	if RESERVAS in nombres:
+		return RESERVAS
+	return next((n for n in nombres if _clave(n or "").startswith("reservas")), None)
+
+
+def lee(ruta, reservas: bool = False) -> Planilla:
+	"""La planilla leída y validada. Con `reservas`, también la pestaña de las reservas ya tomadas (datos personales:
+	solo se abre si se pide)."""
 	try:
-		libro = xlsx.lee(ruta, list(PESTANAS))
+		pestanas = list(PESTANAS)
+		nombre = None
+		if reservas:
+			nombre = pestana_de_reservas(xlsx.nombres(ruta))
+			if nombre is None:
+				raise xlsx.PlanillaIlegible(f"La planilla no tiene la pestaña «{RESERVAS}» (ni otra que empiece por "
+				                            "«Reservas»).")
+			pestanas.append(nombre)
+		libro = xlsx.lee(ruta, pestanas)
 	except xlsx.PlanillaIlegible as e:
-		return Planilla(errores=[Nota("Planilla", None, None, None, str(e))])
-	return analiza(libro)
+		return Planilla(errores=[Nota("Planilla", None, None, None, str(e))], con_reservas=reservas)
+	return analiza(libro, reservas=nombre)
 
 
-def analiza(libro: xlsx.Libro) -> Planilla:
-	p = Planilla()
+def analiza(libro: xlsx.Libro, reservas: str | None = None) -> Planilla:
+	"""`reservas`: el nombre de la pestaña de reservas, si se leyó."""
+	p = Planilla(con_reservas=reservas is not None)
 	hab = _Pestana(HABITACIONES, libro.filas(HABITACIONES), _HAB_REQ, _HAB_OPC, _HAB_VISIBLE, p.errores)
 	tem = _Pestana(TEMPORADAS, libro.filas(TEMPORADAS), _TEM_REQ, {}, _TEM_VISIBLE, p.errores)
 	sen = _Pestana(SENA, libro.filas(SENA), _SEN_REQ, {}, _SEN_VISIBLE, p.errores)
@@ -218,6 +284,10 @@ def analiza(libro: xlsx.Libro) -> Planilla:
 		_temporadas(tem, libro, p)
 	if hab.fila_cabecera is not None and tem.fila_cabecera is not None:
 		_cuadra_tipos(hab, p)
+	if reservas is not None:
+		res = _Pestana(reservas, libro.filas(reservas), _RES_REQ, _RES_OPC, _RES_VISIBLE, p.errores)
+		if res.fila_cabecera is not None and hab.fila_cabecera is not None:
+			_reservas(res, libro, p)
 	return p
 
 
@@ -638,11 +708,260 @@ def _hora(bruto, clave: str) -> str | None:
 	return f"{int(m.group(1)):02d}:{int(m.group(2) or 0):02d}:00"
 
 
+# --- la pestaña de reservas ya tomadas (HR-33): una fila por habitación reservada. Sus cabeceras, por varios
+# comienzos posibles (la pestaña la rellena el fundador); una columna va al que casa más largo.
+_RES_REQ = {
+	"codigo": ("codigo", "cod.", "numero de reserva", "no de reserva", "n de reserva", "nro de reserva", "nro. de reserva",
+	           "n reserva", "localizador", "referencia", "ref", "id de reserva", "confirmacion"),
+	"plataforma": ("plataforma", "canal", "origen", "reservado via", "via", "ota"),
+	"huesped": ("huesped", "nombre", "titular", "cliente", "pasajero"),
+	"llegada": ("llegada", "fecha de llegada", "entrada", "fecha de entrada", "check-in", "check in", "checkin", "desde",
+	            "ingreso"),
+	"salida": ("salida", "fecha de salida", "check-out", "check out", "checkout", "hasta", "egreso"),
+	"tipo": ("tipo de habitacion", "tipo de hab", "tipo hab", "categoria", "tipo"),
+}
+_RES_OPC = {
+	"habitacion": ("habitacion", "hab", "numero de habitacion", "no de habitacion", "n de habitacion", "nro de hab",
+	               "nro. de hab"),
+	"adultos": ("adultos",),
+	"ninos": ("ninos", "menores"),
+	"total": ("total", "importe", "monto"),  # «Precio por noche» no: no es lo cobrado por la estancia
+	"estado": ("estado",),
+	"telefono": ("telefono", "tel", "celular", "movil", "whatsapp"),
+	"correo": ("correo", "e-mail", "email", "mail"),
+	"notas": ("notas", "observaciones", "comentarios", "pedidos"),
+}
+_RES_VISIBLE = {
+	"codigo": "Código",
+	"plataforma": "Plataforma",
+	"huesped": "Huésped",
+	"llegada": "Llegada",
+	"salida": "Salida",
+	"tipo": "Tipo de habitación",
+}
+# la plataforma, por el comienzo de su nombre sin tildes, signos ni espacios → (Reservation.channel, source)
+_OTAS = (
+	("booking", "Booking.com"),
+	("expedia", "Expedia"),
+	("airbnb", "Airbnb"),
+	("despegar", "Despegar"),
+	("decolar", "Despegar"),
+	("agoda", "Agoda"),
+)
+_DIRECTAS = (
+	("telefono", "Phone"),
+	("whatsapp", "Phone"),
+	("llamada", "Phone"),
+	("directa", "Manual"),
+	("directo", "Manual"),
+	("correo", "Manual"),
+	("mail", "Manual"),
+	("email", "Manual"),
+	("web", "Manual"),
+	("paginaweb", "Manual"),
+	("mostrador", "Manual"),
+	("recepcion", "Manual"),
+	("presencial", "Manual"),
+	("particular", "Manual"),
+)
+_CANCELADA = ("cancelada", "cancelado", "anulada", "anulado", "cancelled", "canceled")
+_CONFIRMADA = ("confirmada", "confirmado", "activa", "activo", "vigente", "ok", "pagada", "pagado", "garantizada",
+               "pendiente", "pendiente de pago")
+_CORREO = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_CODIGO_NUMERICO = re.compile(r"^[\d .]+$")
+
+
+def plataforma(texto: str) -> tuple[str, bool, str] | None:
+	"""(nombre en Kamra, si es una plataforma, Reservation.source) de lo que dice la columna, o None si no la conozco."""
+	k = re.sub(r"[^a-z0-9]", "", _clave(texto))
+	for comienzo, nombre in _OTAS:
+		if k.startswith(comienzo):
+			return nombre, True, "OTA"
+	if k == "tel":
+		return DIRECTA, False, "Phone"
+	for comienzo, origen in _DIRECTAS:
+		if k.startswith(comienzo):
+			return DIRECTA, False, origen
+	return None
+
+
+def _codigo(valor) -> str | None:
+	"""El código de la reserva; uno solo de cifras pierde sus puntos y espacios («4123.456.789» → «4123456789»),
+	como lo manda Channex."""
+	t = _texto(valor)
+	if t and _CODIGO_NUMERICO.match(t):
+		t = re.sub(r"[ .]", "", t) or None
+	return t
+
+
+def _moneda_de(cabecera: str) -> str | None:
+	for patron, moneda in _MONEDAS:
+		if patron.search(cabecera):
+			return moneda
+	return None
+
+
+def _reservas(pest: _Pestana, libro: xlsx.Libro, p: Planilla) -> None:
+	tipos = {_clave(n): n for n in p.tipos}
+	numeros = {h.numero: h for h in p.habitaciones}
+	moneda = _moneda_de(pest.cabeceras["total"]) if "total" in pest.columnas else None
+	moneda_dicha = False
+	leidas = []
+	for fila, celdas in pest.datos:
+		if all(pest.valor(celdas, c) is None for c in ("codigo", "huesped", "llegada", "salida")):
+			continue  # una fila de notas o de totales: no es una reserva
+		antes = len(p.errores)
+
+		def error(campo: str | None, mensaje: str) -> None:
+			p.errores.append(pest.nota(fila, campo, mensaje))
+
+		codigo = _codigo(pest.valor(celdas, "codigo"))
+		if codigo is None:
+			error("codigo", "falta el código de la reserva (el de la plataforma; si es directa, uno vuestro).")
+		texto = _texto(pest.valor(celdas, "plataforma"))
+		plat = plataforma(texto) if texto else None
+		if texto is None:
+			error("plataforma", "falta la plataforma.")
+		elif plat is None:
+			error("plataforma", f"«{texto}» no es una plataforma que la carga conozca: escribe Booking.com, Expedia, "
+			                    "Airbnb, Despegar o Agoda, o «Directa» («Teléfono») si no vino de una plataforma.")
+		huesped = _texto(pest.valor(celdas, "huesped"))
+		if huesped is None:
+			error("huesped", "falta el nombre del huésped.")
+		fechas = {}
+		for campo in ("llegada", "salida"):
+			bruto = pest.valor(celdas, campo)
+			fecha, _ = _fecha(bruto, libro)
+			if fecha is None and bruto is None:
+				error(campo, f"falta la fecha de {campo}.")
+			elif fecha is None:
+				error(campo, f"«{_texto(bruto)}» no es una fecha (escríbela como 15/12/2026).")
+			fechas[campo] = fecha
+		llegada, salida = fechas["llegada"], fechas["salida"]
+		if llegada and salida and salida <= llegada:
+			error("salida", "la salida tiene que ser después de la llegada.")
+		tipo = None
+		bruto = _texto(pest.valor(celdas, "tipo"))
+		if bruto is None:
+			error("tipo", "falta el tipo de habitación.")
+		else:
+			tipo = tipos.get(_clave(bruto))
+			if tipo is None:
+				hay = sorted(p.tipos)
+				lista = ", ".join(hay[:-1]) + f" y {hay[-1]}" if len(hay) > 1 else "".join(hay)
+				error("tipo", f"«{bruto}» no es un tipo de la pestaña {HABITACIONES} (allí hay {lista}).")
+		numero = _texto(pest.valor(celdas, "habitacion"))
+		if numero is not None:
+			h = numeros.get(numero)
+			if h is None:
+				error("habitacion", f"la habitación {numero} no está en la pestaña {HABITACIONES}.")
+			elif tipo and h.tipo != tipo:
+				error("habitacion", f"la {numero} es {h.tipo}, no {tipo}.")
+		bruto = pest.valor(celdas, "adultos")
+		adultos, mal = (2, None) if bruto is None else _entero(bruto, 1)
+		if mal:
+			error("adultos", f"«{_texto(bruto)}» no es un número de personas.")
+		bruto = pest.valor(celdas, "ninos")
+		ninos, mal_n = (0, None) if bruto is None else _entero(bruto, 0)
+		if mal_n:
+			error("ninos", f"«{_texto(bruto)}» no es un número de personas.")
+		if tipo and not mal and not mal_n and p.tipos[tipo].adultos is not None:
+			t = p.tipos[tipo]
+			cabe_ninos = t.ninos if t.ninos is not None else max(t.adultos - 1, 0)
+			if adultos + ninos > t.adultos or ninos > cabe_ninos:
+				gente = f"{adultos} adulto{'' if adultos == 1 else 's'} y {ninos} niño{'' if ninos == 1 else 's'}"
+				error("adultos", f"{gente} no caben en una {tipo} (caben {t.adultos} personas, niños hasta "
+				                 f"{cabe_ninos}).")
+		total = None
+		bruto = pest.valor(celdas, "total")
+		if bruto is not None:
+			total = _precio(bruto)
+			if total is None:
+				error("total", f"«{_texto(bruto)}» no es un importe.")
+			elif total <= 0:
+				error("total", "el total tiene que ser mayor que 0 (o en blanco, y lo calcula Kamra).")
+				total = None
+			if not moneda_dicha and (moneda is None or (p.moneda and moneda != p.moneda)):
+				moneda_dicha = True
+				p.errores.append(pest.nota(
+					pest.fila_cabecera, "total",
+					"la cabecera no dice la moneda de los totales (p. ej. «Total (US$)»)." if moneda is None else
+					f"los totales están en {moneda} y los precios de «{TEMPORADAS}», en {p.moneda}: la carga no "
+					"convierte monedas.",
+				))
+		cancelada = False
+		estado = _texto(pest.valor(celdas, "estado"))
+		if estado is not None:
+			k = _clave(estado).rstrip(".")
+			if k in _CANCELADA:
+				cancelada = True
+			elif k not in _CONFIRMADA:
+				error("estado", f"«{estado}»: la carga entiende «Confirmada» o «Cancelada».")
+		correo = _texto(pest.valor(celdas, "correo"))
+		if correo is not None and not _CORREO.match(correo):
+			error("correo", "el correo no es válido (no lo copio aquí: es un dato del huésped).")
+		if len(p.errores) > antes:
+			continue
+		if cancelada:
+			p.canceladas.append((codigo, plat[0], plat[1]))
+			continue
+		leidas.append(Reserva(
+			codigo=codigo, ref=codigo, plataforma=plat[0], ota=plat[1], origen=plat[2], huesped=huesped,
+			telefono=_texto(pest.valor(celdas, "telefono")), correo=correo, llegada=llegada, salida=salida, tipo=tipo,
+			habitacion=numero, adultos=adultos, ninos=ninos, total=total, notas=_texto(pest.valor(celdas, "notas")),
+			fila=fila, sin_adultos=pest.valor(celdas, "adultos") is None,
+		))
+	_agrupa_reservas(pest, leidas, p)
+
+
+def _agrupa_reservas(pest: _Pestana, leidas: list, p: Planilla) -> None:
+	"""Un código en varias filas es una reserva de varias habitaciones: cada una lleva «código-n» (n desde 0, en el orden
+	de la planilla), que es como Channex manda cada habitación de una reserva múltiple. Una referencia de plataforma es
+	única en la propiedad, aunque venga de dos plataformas distintas."""
+	grupos: dict[tuple[str, str], list] = {}
+	for r in leidas:
+		grupos.setdefault((r.plataforma if r.ota else DIRECTA, r.codigo), []).append(r)
+	de_plataforma: dict[str, Reserva] = {}
+	for (plat, codigo), filas in grupos.items():
+		if plat != DIRECTA:
+			otra = de_plataforma.setdefault(codigo, filas[0])
+			if otra.plataforma != plat:
+				p.errores.append(pest.nota(
+					filas[0].fila, "codigo",
+					f"el código {codigo} sale con {otra.plataforma} (fila {otra.fila}) y con {plat}: en Kamra la "
+					"referencia de una plataforma es única; corrige uno de los dos.",
+				))
+				continue
+		if len(filas) > 1:
+			for n, r in enumerate(filas):
+				r.ref = f"{codigo}-{n}"
+			donde = ", ".join(str(r.fila) for r in filas)
+			p.avisos.append(pest.nota(
+				filas[0].fila, "codigo",
+				f"la reserva {codigo} ({plat}) sale en {len(filas)} filas ({donde}): se carga como una reserva de "
+				f"{len(filas)} habitaciones, de {codigo}-0 a {codigo}-{len(filas) - 1} (como las manda Channex).",
+			))
+		p.reservas.extend(filas)
+	p.reservas.sort(key=lambda r: r.fila)
+	sin = [r for r in p.reservas if r.sin_adultos]
+	if sin:
+		que = "1 reserva no dice" if len(sin) == 1 else f"{len(sin)} reservas no dicen"
+		p.avisos.append(Nota(pest.nombre, None, None, None,
+		                     f"{que} cuántos adultos (filas {', '.join(str(r.fila) for r in sin)}): se cargan con 2, "
+		                     "como Kamra una reserva de plataforma que no lo dice."))
+	if p.canceladas:
+		que = "1 cancelada no se carga" if len(p.canceladas) == 1 else f"{len(p.canceladas)} canceladas no se cargan"
+		p.avisos.append(Nota(pest.nombre, None, None, None,
+		                     f"{que}: {', '.join(f'{c} ({plat})' for c, plat, _ in p.canceladas)}."))
+
+
 def main(argv: list[str]) -> int:
+	reservas = "--reservas" in argv
+	argv = [a for a in argv if a != "--reservas"]
 	if len(argv) != 1:
-		print("uso: python3 -m kamra_uy.setup.planilla <planilla.xlsx>", file=sys.stderr)
+		print("uso: python3 -m kamra_uy.setup.planilla <planilla.xlsx> [--reservas]", file=sys.stderr)
 		return 2
-	p = lee(argv[0])
+	p = lee(argv[0], reservas=reservas)
 	print(f"moneda: {p.moneda or '?'} · {p.recuento()}")
 	print(f"condiciones: {dataclasses.asdict(p.condiciones)}")
 	for n in p.avisos:

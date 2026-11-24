@@ -421,6 +421,25 @@ def require_cashier_pin(property: str, pin=None):
 # Who may approve what a captain cannot do alone (voiding food the kitchen
 # has already started, say). The same roles the reason-code supervisor
 # rule accepts (kamra.ledger.require_reason).
+# Waiving a cancellation fee is the manager's call (the hotel admin), not the
+# desk's: cancel_reservation / cancel_itinerary refuse waive_fee for anyone
+# else, and the cancel panel only offers it to them. The night audit's own
+# waivers (no_show) are not a person's decision and do not ask.
+FEE_WAIVER_ROLES = ADMIN
+
+
+def can_waive_fee(user: str | None = None) -> bool:
+	return bool(set(frappe.get_roles(user)) & set(FEE_WAIVER_ROLES))
+
+
+def require_fee_waiver(waive_fee) -> None:
+	"""Refuse waive_fee from anyone who is not a hotel admin."""
+	if cint(waive_fee) and not can_waive_fee():
+		from frappe import _
+		frappe.throw(_("Only the hotel's manager can waive the cancellation fee."),
+		             frappe.PermissionError)
+
+
 SUPERVISOR_ROLES = ("Hotel Admin", "Finance", "System Manager", "Administrator")
 # At the POS only (void approvals): the F&B Manager runs the floor too, but
 # never approves folio corrections or sees full guest phones.

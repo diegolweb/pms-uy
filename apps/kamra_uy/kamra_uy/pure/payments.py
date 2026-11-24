@@ -138,7 +138,33 @@ def parse_core_event(body: bytes) -> dict:
         amount_to_float(event["refunded_total"])
     if event["currency"] not in CURRENCIES:
         raise ValueError(f"moneda no admitida: {event['currency']!r}")
+    if kind == "payment.approved" and event.get("charged") is not None:
+        charged_fx(event)
     return event
+
+
+_RATE = re.compile(r"\d+(\.\d{1,6})?")
+
+
+def charged_fx(event: dict) -> dict | None:
+    """Lo que Mercado Pago cobró en otra moneda que la del enlace (D-HR-68, `charged` del aviso), como lo guarda una
+    línea de pago en divisa de Kamra: {currency, fx_amount, exchange_rate}, con `exchange_rate` en la moneda del folio
+    por unidad de la cobrada (`amount` ÷ lo cobrado). Sin `charged`, None. ValueError si viene mal."""
+    charged = event.get("charged")
+    if charged is None:
+        return None
+    if not isinstance(charged, dict):
+        raise ValueError("charged no es un objeto")
+    fx_amount = amount_to_float(charged.get("amount"))
+    currency = charged.get("currency")
+    if currency not in CURRENCIES or currency == event.get("currency"):
+        raise ValueError(f"moneda cobrada no válida: {currency!r}")
+    rate = charged.get("exchange_rate")
+    if not isinstance(rate, str) or not _RATE.fullmatch(rate) or Decimal(rate) <= 0:
+        raise ValueError(f"cambio no válido: {rate!r}")
+    home = Decimal(event["amount"]) / Decimal(charged["amount"])
+    return {"currency": currency, "fx_amount": fx_amount, "exchange_rate": float(round(home, 9)),
+            "charged_rate": rate}
 
 
 def payment_mode(event: dict) -> str:

@@ -86,22 +86,37 @@ class Libro:
 		return base + datetime.timedelta(days=int(serie))
 
 
-def lee(ruta, pestanas: list[str]) -> Libro:
+def _abre(ruta) -> zipfile.ZipFile:
 	try:
-		z = zipfile.ZipFile(ruta)
+		return zipfile.ZipFile(ruta)
 	except (zipfile.BadZipFile, OSError) as e:
 		raise PlanillaIlegible(f"{ruta} no es un .xlsx que se pueda abrir ({e.__class__.__name__}).") from e
+
+
+def _indice(z: zipfile.ZipFile, ruta) -> tuple[list[tuple[str, str]], bool]:
+	"""[(nombre de la pestaña, su XML dentro del zip)] y si el libro cuenta las fechas desde 1904."""
+	try:
+		wb = ET.fromstring(z.read("xl/workbook.xml"))
+		rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+	except (KeyError, ET.ParseError) as e:
+		raise PlanillaIlegible(f"{ruta} no es un .xlsx de Excel válido (le falta el índice de pestañas).") from e
+	destino = {r.get("Id"): r.get("Target") for r in rels.iter(f"{_PR}Relationship")}
+	hojas = [(s.get("name"), destino.get(s.get(f"{_R}id"))) for s in wb.iter(f"{_M}sheet")]
+	pr = wb.find(f"{_M}workbookPr")
+	return hojas, pr is not None and pr.get("date1904", "false").lower() in ("1", "true")
+
+
+def nombres(ruta) -> list[str]:
+	"""Los nombres de las pestañas, del índice del libro: no abre ninguna."""
+	with _abre(ruta) as z:
+		return [n for n, _ in _indice(z, ruta)[0]]
+
+
+def lee(ruta, pestanas: list[str]) -> Libro:
+	z = _abre(ruta)
 	with z:
-		try:
-			wb = ET.fromstring(z.read("xl/workbook.xml"))
-			rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
-		except (KeyError, ET.ParseError) as e:
-			raise PlanillaIlegible(f"{ruta} no es un .xlsx de Excel válido (le falta el índice de pestañas).") from e
-		destino = {r.get("Id"): r.get("Target") for r in rels.iter(f"{_PR}Relationship")}
-		hojas = [(s.get("name"), destino.get(s.get(f"{_R}id"))) for s in wb.iter(f"{_M}sheet")]
-		pr = wb.find(f"{_M}workbookPr")
-		fecha1904 = pr is not None and pr.get("date1904", "false").lower() in ("1", "true")
-		nombres = [n for n, _ in hojas]
+		hojas, fecha1904 = _indice(z, ruta)
+		todas = [n for n, _ in hojas]
 		raices = {}
 		for nombre in pestanas:
 			target = dict(hojas).get(nombre)
@@ -121,7 +136,7 @@ def lee(ruta, pestanas: list[str]) -> Libro:
 		cadenas = cadenas_compartidas(z, wanted)
 		pct = estilos_porcentaje(z)
 	filas = {nombre: _filas(raiz, cadenas, pct) for nombre, raiz in raices.items()}
-	return Libro(nombres, fecha1904, filas)
+	return Libro(todas, fecha1904, filas)
 
 
 def _filas(raiz, cadenas: dict[int, str], pct: set[int] = frozenset()) -> list[tuple[int, dict]]:
