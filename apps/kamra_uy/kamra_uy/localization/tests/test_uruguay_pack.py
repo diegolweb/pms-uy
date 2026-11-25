@@ -233,8 +233,8 @@ def _hook_before_hr239(property, room_type_doc, nightly_rate) -> Decimal:
 
 	def _stay(self):
 		rt = make_room_type(PROP_UY, "STD", base_price=3000)
-		# en Uruguay no hay check-in sin la residencia del huésped (HR-304): la factura depende de ella
-		guest = make_guest("UT Huésped AR", residence_country="Argentina")
+		# en Uruguay no hay check-in sin el país del documento del huésped (HR-304, HR-346): la factura depende de él
+		guest = make_guest("UT Huésped AR", residence_country="Argentina", uy_document_country="Argentina")
 		res = make_reservation(PROP_UY, rt, d(-1), d(1), status="Checked In", guest=guest,
 		                       room=make_room(PROP_UY, rt, "UY101"))
 		return guest_folio(res.name)
@@ -275,6 +275,9 @@ class TestUruguayBcuRates(AuditTestCase):
 		super().setUp()
 		self.at(TODAY, "kamra.folio", "kamra.business_date", "kamra.ledger")
 		self._stack.enter_context(patch("kamra_uy.localization.uruguay.nowdate", return_value=FRIDAY))
+		# la respuesta guardada del 12-11 solo trae el dólar 2222; desde HR-348 la caja toma por defecto el 2225, que
+		# vale lo mismo (tests/unit/uy/test_bcu.py)
+		self._stack.enter_context(patch.dict(bcu.DEFAULT_CODES, {"USD": 2222}))
 		make_uy_property()
 		frappe.db.delete("Exchange Rate", {"property": PROP_UY})
 		frappe.db.delete("Property Setting", {"property": PROP_UY, "setting_key": ["like", "fx_%"]})

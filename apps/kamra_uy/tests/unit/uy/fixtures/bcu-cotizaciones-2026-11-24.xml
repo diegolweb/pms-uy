@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<SOAP-ENV:Body>
+		<wsbcucotizaciones.ExecuteResponse xmlns="Cotiza">
+			<Salida xmlns="Cotiza">
+				<respuestastatus>
+					<status>1</status>
+					<codigoerror>0</codigoerror>
+					<mensaje/>
+				</respuestastatus>
+				<datoscotizaciones>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-19</Fecha>
+						<Moneda>500</Moneda>
+						<Nombre>PESO ARGENTINO</Nombre>
+						<CodigoISO>ARS</CodigoISO>
+						<Emisor>ARGENTINA</Emisor>
+						<TCC>0.025953</TCC>
+						<TCV>0.025953</TCV>
+						<ArbAct>1564.500000</ArbAct>
+						<FormaArbitrar>0</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-20</Fecha>
+						<Moneda>500</Moneda>
+						<Nombre>PESO ARGENTINO</Nombre>
+						<CodigoISO>ARS</CodigoISO>
+						<Emisor>ARGENTINA</Emisor>
+						<TCC>0.025726</TCC>
+						<TCV>0.025726</TCV>
+						<ArbAct>1579.275800</ArbAct>
+						<FormaArbitrar>0</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-23</Fecha>
+						<Moneda>500</Moneda>
+						<Nombre>PESO ARGENTINO</Nombre>
+						<CodigoISO>ARS</CodigoISO>
+						<Emisor>ARGENTINA</Emisor>
+						<TCC>0.025785</TCC>
+						<TCV>0.025785</TCV>
+						<ArbAct>1579.275800</ArbAct>
+						<FormaArbitrar>0</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-19</Fecha>
+						<Moneda>1000</Moneda>
+						<Nombre>REAL</Nombre>
+						<CodigoISO>BRL</CodigoISO>
+						<Emisor>BRASIL</Emisor>
+						<TCC>6.866671</TCC>
+						<TCV>6.866671</TCV>
+						<ArbAct>5.913200</ArbAct>
+						<FormaArbitrar>0</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-20</Fecha>
+						<Moneda>1000</Moneda>
+						<Nombre>REAL</Nombre>
+						<CodigoISO>BRL</CodigoISO>
+						<Emisor>BRASIL</Emisor>
+						<TCC>6.840129</TCC>
+						<TCV>6.840129</TCV>
+						<ArbAct>5.939800</ArbAct>
+						<FormaArbitrar>0</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-23</Fecha>
+						<Moneda>1000</Moneda>
+						<Nombre>REAL</Nombre>
+						<CodigoISO>BRL</CodigoISO>
+						<Emisor>BRASIL</Emisor>
+						<TCC>6.862897</TCC>
+						<TCV>6.862897</TCV>
+						<ArbAct>5.933500</ArbAct>
+						<FormaArbitrar>0</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-19</Fecha>
+						<Moneda>1111</Moneda>
+						<Nombre>EURO</Nombre>
+						<CodigoISO>EURO</CodigoISO>
+						<Emisor>UNION MONET.EUROPEA</Emisor>
+						<TCC>44.579132</TCC>
+						<TCV>44.579132</TCV>
+						<ArbAct>1.097900</ArbAct>
+						<FormaArbitrar>1</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-20</Fecha>
+						<Moneda>1111</Moneda>
+						<Nombre>EURO</Nombre>
+						<CodigoISO>EURO</CodigoISO>
+						<Emisor>UNION MONET.EUROPEA</Emisor>
+						<TCC>44.565950</TCC>
+						<TCV>44.565950</TCV>
+						<ArbAct>1.096900</ArbAct>
+						<FormaArbitrar>1</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-23</Fecha>
+						<Moneda>1111</Moneda>
+						<Nombre>EURO</Nombre>
+						<CodigoISO>EURO</CodigoISO>
+						<Emisor>UNION MONET.EUROPEA</Emisor>
+						<TCC>44.349241</TCC>
+						<TCV>44.349241</TCV>
+						<ArbAct>1.089100</ArbAct>
+						<FormaArbitrar>1</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-19</Fecha>
+						<Moneda>2222</Moneda>
+						<Nombre>DOLAR USA</Nombre>
+						<CodigoISO>USD</CodigoISO>
+						<Emisor>ESTADOS UNIDOS</Emisor>
+						<TCC>40.604000</TCC>
+						<TCV>40.604000</TCV>
+						<ArbAct>1.000000</ArbAct>
+						<FormaArbitrar>1</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-20</Fecha>
+						<Moneda>2222</Moneda>
+						<Nombre>DOLAR USA</Nombre>
+						<CodigoISO>USD</CodigoISO>
+						<Emisor>ESTADOS UNIDOS</Emisor>
+						<TCC>40.629000</TCC>
+						<TCV>40.629000</TCV>
+						<ArbAct>1.000000</ArbAct>
+						<FormaArbitrar>1</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-23</Fecha>
+						<Moneda>2222</Moneda>
+						<Nombre>DOLAR USA</Nombre>
+						<CodigoISO>USD</CodigoISO>
+						<Emisor>ESTADOS UNIDOS</Emisor>
+						<TCC>40.721000</TCC>
+						<TCV>40.721000</TCV>
+						<ArbAct>1.000000</ArbAct>
+						<FormaArbitrar>1</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-19</Fecha>
+						<Moneda>2224</Moneda>
+						<Nombre>DLS. USA CABLE</Nombre>
+						<CodigoISO>DLS.</CodigoISO>
+						<Emisor>ESTADOS UNIDOS</Emisor>
+						<TCC>40.604000</TCC>
+						<TCV>40.604000</TCV>
+						<ArbAct>1.000000</ArbAct>
+						<FormaArbitrar>0</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-20</Fecha>
+						<Moneda>2224</Moneda>
+						<Nombre>DLS. USA CABLE</Nombre>
+						<CodigoISO>DLS.</CodigoISO>
+						<Emisor>ESTADOS UNIDOS</Emisor>
+						<TCC>40.629000</TCC>
+						<TCV>40.629000</TCV>
+						<ArbAct>1.000000</ArbAct>
+						<FormaArbitrar>0</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-23</Fecha>
+						<Moneda>2224</Moneda>
+						<Nombre>DLS. USA CABLE</Nombre>
+						<CodigoISO>DLS.</CodigoISO>
+						<Emisor>ESTADOS UNIDOS</Emisor>
+						<TCC>40.721000</TCC>
+						<TCV>40.721000</TCV>
+						<ArbAct>1.000000</ArbAct>
+						<FormaArbitrar>0</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-19</Fecha>
+						<Moneda>2225</Moneda>
+						<Nombre>DLS. USA BILLETE</Nombre>
+						<CodigoISO>DLS.</CodigoISO>
+						<Emisor>ESTADOS UNIDOS</Emisor>
+						<TCC>40.604000</TCC>
+						<TCV>40.604000</TCV>
+						<ArbAct>1.000000</ArbAct>
+						<FormaArbitrar>0</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-20</Fecha>
+						<Moneda>2225</Moneda>
+						<Nombre>DLS. USA BILLETE</Nombre>
+						<CodigoISO>DLS.</CodigoISO>
+						<Emisor>ESTADOS UNIDOS</Emisor>
+						<TCC>40.629000</TCC>
+						<TCV>40.629000</TCV>
+						<ArbAct>1.000000</ArbAct>
+						<FormaArbitrar>0</FormaArbitrar>
+					</datoscotizaciones.dato>
+					<datoscotizaciones.dato xmlns="Cotiza">
+						<Fecha>2026-11-23</Fecha>
+						<Moneda>2225</Moneda>
+						<Nombre>DLS. USA BILLETE</Nombre>
+						<CodigoISO>DLS.</CodigoISO>
+						<Emisor>ESTADOS UNIDOS</Emisor>
+						<TCC>40.721000</TCC>
+						<TCV>40.721000</TCV>
+						<ArbAct>1.000000</ArbAct>
+						<FormaArbitrar>0</FormaArbitrar>
+					</datoscotizaciones.dato>
+				</datoscotizaciones>
+			</Salida>
+		</wsbcucotizaciones.ExecuteResponse>
+	</SOAP-ENV:Body>
+</SOAP-ENV:Envelope>

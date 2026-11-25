@@ -15,11 +15,14 @@ REASON_VOID = "Factura anulada: {reason}"
 # recepción y Finanzas
 NOT_CONFIGURED = ("La facturación electrónica no está configurada para esta propiedad (credenciales del servicio de "
                   "facturación en Payment Gateway Settings).")
-NO_FX = "No hay tipo de cambio del peso uruguayo para hoy: cárguelo en Finanzas, Tipos de cambio."
+# HR-346: la factura toma la cotización del BCU (fiscal.fx, HR-348) y nadie la teclea; el mismo texto que fx.FX_PENDING
+FX_PENDING = ("Todavía no está la cotización del dólar del BCU del día anterior. No hace falta cargarla: el comprobante "
+              "fiscal sale solo en cuanto llegue.")
 BAD_CURRENCY = "La moneda {currency} no se puede facturar con CFE (solo UYU o USD)."
-# HR-304: sin la residencia no se factura (nunca se supone); el comprobante espera y sale solo en cuanto se indica
-RESIDENCE_MISSING = ("Falta la residencia del huésped: indique en el check-in si reside en Uruguay y, si no, su país. "
-                     "El comprobante fiscal sale en cuanto esté.")
+# HR-304 y HR-346: sin el país del documento no se factura (nunca se supone); el comprobante espera y sale solo en
+# cuanto se indica
+RESIDENCE_MISSING = ("Falta el país del documento del huésped: indique en el check-in si el documento es uruguayo y, si "
+                     "no, de qué país es. El comprobante fiscal sale en cuanto esté.")
 COPY_MISSING = ("Falta la copia del documento del huésped: sin ella no corresponde el IVA 0 de no residente.")
 POSTED_AT_OTHER_RATE = "El folio tiene {count} cargos con otro IVA que el del CFE: revíselos con Finanzas."
 
@@ -28,3 +31,5 @@ NOT_IN_CORE_YET = ("Este comprobante todavía no llegó al servicio de facturaci
                    "reintenta solo).")
 ALREADY_ISSUED = "Este comprobante ya está emitido: no hay nada que registrar."
 TYPE_PENDING = "Comprobante (tipo por decidir)"
+# HR-346: core pidió partir el CFE (422 split_required): la fila queda así y salen sus partes, cada una con su número
+SPLIT_INTO = "Partido en {count} comprobantes: {types}."

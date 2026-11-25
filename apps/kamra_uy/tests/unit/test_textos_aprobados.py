@@ -9,7 +9,8 @@ from pathlib import Path
 from kamra_uy.notifications import texts
 
 PAQUETE = Path(__file__).resolve().parents[2] / "kamra_uy"
-NUEVOS_DEL_CORREO = ("asunto", "saludo", "intro", "horario", "ayuda", "despedida", "pagado_total", "factura")
+NUEVOS_DEL_CORREO = ("asunto", "saludo", "intro", "horario", "ayuda", "despedida", "pagado_total", "factura",
+                     "recibo")
 
 # 23-11, lo pidió el fundador: el correo es el aviso del pago, no un comprobante fiscal; la factura se hace siempre en el
 # check-in. «pagado_total» solo sale si se pagó todo (confirmation.render); «factura», siempre.

@@ -18,7 +18,7 @@ from urllib.parse import quote
 import frappe
 
 from kamra.authz import require_roles
-from kamra_uy.fiscal import connector, model, texts
+from kamra_uy.fiscal import connector, forfeit, model, texts
 
 DESK = ("Front Desk", "Finance", "Hotel Admin")
 FINANCE = ("Finance", "Hotel Admin")
@@ -138,13 +138,15 @@ def preview(reservation: str):
 	try:
 		out = connector.adjust_iva(res)
 	except connector.ResidenceMissingError:
-		return {"nights": [], "residence_country": None, "residence_missing": True, "copy_on_file": None,
+		return {"nights": [], "residence_country": None, "document_country": None, "residence_missing": True,
+		        "copy_on_file": None,
 		        "buyer_type": None, "warnings": [texts.RESIDENCE_MISSING]}
 	warnings = [] if out["copy_on_file"] else [texts.COPY_MISSING]
 	return {"nights": [{"date": ln["date"], "kind": ln["kind"], "amount": ln["amount"], "rate": ln["rate"],
 	                    "reason_code": ln["reason_code"], "pending_accountant": ln["pending_accountant"]}
 	                   for ln in out["lines"]],
-	        "residence_country": out["guest"]["residence_country"], "residence_missing": False,
+	        "residence_country": out["guest"].get("residence_country"), "document_country": out["document_country"],
+	        "residence_missing": False,
 	        "copy_on_file": out["copy_on_file"], "buyer_type": out["buyer"]["type"], "warnings": warnings}
 
 
@@ -234,7 +236,9 @@ def pending(property: str, day: str | None = None) -> dict:
 			           "rate": ln.get("rate")}
 			          for ln in json.loads(r.lines_json or "[]")],
 			"in_core": bool(r.core_cfe_id), "overdue": bool(r.overdue),
-			"state": texts.NOT_IN_CORE_YET if not r.core_cfe_id else model.STATUS_TEXTS.get(r.core_status or "", ""),
+			# la seña sin el documento del comprador (HR-347) dice qué falta, no «todavía no llegó»
+			"state": forfeit.DOC_MISSING if r.error == forfeit.DOC_MISSING else
+			texts.NOT_IN_CORE_YET if not r.core_cfe_id else model.STATUS_TEXTS.get(r.core_status or "", ""),
 			"codes": model.type_codes(r.cfe_type),
 		})
 	waiting = frappe.get_all(connector.DOCTYPE, filters={"property": property, "kind": "Reconcile", "status": "Pending",

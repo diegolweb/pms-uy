@@ -7,7 +7,8 @@ FUENTES:
   reservar) es el `iva.aviso` nuevo de reservar.md (fuente «D-HR-48»). Si cambian allí, cambian aquí (la guarda es
   kamra_uy/tests/test_confirmation_mail.py).
 - Los nuevos del correo (asunto, saludo, entrada, horario, ayuda, despedida, y pagado_total y factura, que pidió el
-  fundador el 23-11: el correo es el aviso del pago y la factura se entrega en el check-in): fuente «D-HR-48». Lo que
+  fundador el 23-11: el correo es el aviso del pago y la factura se entrega en el check-in; y recibo, HR-349: el enlace
+  al recibo del hotel de ese pago, D-HR-74): fuente «D-HR-48». Lo que
   no le guste al fundador se cambia después.
 
 Aquí no va ningún dato del hotel (kamra_uy se publica como AGPL): el nombre, la dirección y el contacto salen de la
@@ -34,7 +35,7 @@ TEXTOS = {
 		"pagado": "Pagado",
 		"direccion": "Dirección",
 		"contacto": "Contacto",
-		"iva": "Los huéspedes residentes en Uruguay deberán abonar el 10% de IVA adicional al momento de la reserva "
+		"iva": "Los huéspedes con documento uruguayo deberán abonar el 10% de IVA adicional al momento de la reserva "
 		       "por las noches entre el 16 de noviembre y Semana de Turismo.",
 		# los nuevos del correo (aprobados con D-HR-48)
 		"asunto": "Tu reserva en {hotel} está confirmada",
@@ -46,6 +47,7 @@ TEXTOS = {
 		# el aviso del pago no es un comprobante fiscal (23-11, el fundador): «pagado_total» solo si se pagó todo
 		"pagado_total": "Pagaste el total de tu estadía.",
 		"factura": "La factura te la entregamos en el check-in.",
+		"recibo": "El recibo de tu pago es el {numero}.",
 	},
 	"pt": {
 		"confirmada": "Reserva confirmada",
@@ -59,7 +61,7 @@ TEXTOS = {
 		"pagado": "Pago",
 		"direccion": "Endereço",
 		"contacto": "Contato",
-		"iva": "Os hóspedes residentes no Uruguai deverão pagar 10% de IVA adicional no momento da reserva pelas "
+		"iva": "Os hóspedes com documento uruguaio deverão pagar 10% de IVA adicional no momento da reserva pelas "
 		       "noites entre 16 de novembro e a Semana de Turismo (Semana Santa).",
 		"asunto": "Sua reserva no {hotel} está confirmada",
 		"saludo": "Olá, {nombre},",
@@ -69,6 +71,7 @@ TEXTOS = {
 		"despedida": "Esperamos você no {hotel}.",
 		"pagado_total": "Você pagou o total da sua estadia.",
 		"factura": "A fatura é entregue no check-in.",
+		"recibo": "O recibo do seu pagamento é o {numero}.",
 	},
 	"en": {
 		"confirmada": "Booking confirmed",
@@ -82,8 +85,8 @@ TEXTOS = {
 		"pagado": "Paid",
 		"direccion": "Address",
 		"contacto": "Contact",
-		"iva": "Guests residing in Uruguay must pay an additional 10% VAT when booking for nights between November "
-		       "16 and Tourism Week (Holy Week).",
+		"iva": "Guests with a Uruguayan ID or passport must pay an additional 10% VAT when booking for nights between "
+		       "November 16 and Tourism Week (Holy Week).",
 		"asunto": "Your booking at {hotel} is confirmed",
 		"saludo": "Hello {nombre},",
 		"intro": "We have received your payment and your booking is confirmed. Here are the details of your stay.",
@@ -92,6 +95,7 @@ TEXTOS = {
 		"despedida": "We look forward to welcoming you at {hotel}.",
 		"pagado_total": "You have paid the full amount of your stay.",
 		"factura": "We will give you the invoice at check-in.",
+		"recibo": "Your payment receipt is {numero}.",
 	},
 }
 

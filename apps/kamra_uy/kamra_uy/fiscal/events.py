@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import frappe
 
-from kamra_uy.fiscal import connector, texts
+from kamra_uy.fiscal import connector, forfeit, texts
 
 # lo que, si cambia con el huésped en casa, cambia el IVA de las noches
 IVA_INPUTS = ("status", "check_in_date", "check_out_date", "guest", "id_document", "id_document_discarded",
               "company", "room_type")
-GUEST_INPUTS = ("residence_country", "id_type", "id_number", "id_file")
+GUEST_INPUTS = ("residence_country", "uy_document_country", "id_type", "id_number", "id_file")
 
 
 def _safe(title: str, fn, *args):
@@ -60,6 +60,9 @@ def on_folio_update(doc, method=None):
 	if doc.get("folio_type") == "Account":
 		return
 	res = frappe.get_doc("Reservation", doc.reservation)
+	if res.status in forfeit.STATUSES:
+		# lo de una reserva que no se alojó es la seña retenida: la factura fiscal.forfeit (HR-347), no la cuenta
+		return
 	_safe("ajuste al cerrar la cuenta", connector.queue_task, res, "Close", doc.name)
 
 
@@ -69,6 +72,9 @@ def on_invoice_cancelled(doc, method=None):
 	if not reservation:
 		return
 	res = frappe.get_doc("Reservation", reservation)
+	if res.status in forfeit.STATUSES:
+		# anular la factura de Kamra no cambia lo retenido (HR-347): la nota de crédito la decide forfeit
+		return
 	reason = texts.REASON_VOID.format(reason=(doc.reason or "").strip()) if doc.reason else texts.REASON_CHECK_IN_UNDONE
 	_safe("nota de crédito al anular", connector.queue_task, res, "Void", doc.folio, reason)
 

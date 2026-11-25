@@ -1,7 +1,8 @@
 """La lógica del conector fiscal de Uruguay (HR-28), sin frappe: se prueba sola (tests/unit/fiscal).
 
-- Residencia y documento: lo que el motor de IVA de core (`determineIva`) y el CFE necesitan del huésped, a partir de
-  lo que guarda Kamra (`Guest.residence_country`, `id_type`, `id_number` y la copia del documento).
+- El documento: lo que el motor de IVA de core (`determineIva`) y el CFE necesitan del huésped, a partir de lo que
+  guarda Kamra (`id_type`, `id_number`, el país del documento `Guest.uy_document_country` y la copia del documento).
+  Manda el país del documento, no dónde vive (D-HR-74, preguntas 1 y 2; HR-346).
 - Conciliación: Kamra pide a core lo que FALTA facturar. Las líneas deseadas (la estancia al check-in, o lo que dice
   la cuenta al cerrarla) se comparan, tasa a tasa, con lo que cubren los CFE ya pedidos menos sus notas de crédito.
   Lo que sobra sale en un CFE nuevo y lo que falta en una nota de crédito. El check-in (nada cubierto), la prolongación,
@@ -38,6 +39,8 @@ TYPE_TITLES = {
 	"e-factura": "e-Factura",
 	"nc-e-ticket": "Nota de crédito de e-Ticket",
 	"nc-e-factura": "Nota de crédito de e-Factura",
+	"e-factura-exportacion": "e-Factura de Exportación",
+	"nc-e-factura-exportacion": "Nota de crédito de e-Factura de Exportación",
 }
 STATUS_TEXTS = {
 	"pending": "Comprobante fiscal pendiente: el servicio de facturación no respondió y se reintenta solo.",
@@ -68,60 +71,131 @@ def _rate_key(rate) -> str:
 	return format(dec(rate).normalize(), "f")
 
 
-# ── residencia y documento ───────────────────────────────────────────────────────────────────────────────────────
-def document(id_type: str | None, id_number: str | None, residence: str | None) -> dict | None:
-	"""El documento del huésped en el formato del CFE, o None si no se puede decir de qué país es.
+# ── el documento (D-HR-74: manda el país del documento) ─────────────────────────────────────────────────────────────
+# los tipos de Kamra cuyo país no hay que preguntar: la cédula («National ID» en el paquete de Uruguay) es uruguaya y el
+# RG, brasileño; el pasaporte, el DNI y los demás llevan el país que indica recepción en el check-in
+FIXED_DOCUMENT_COUNTRY = {"National ID": HOME_COUNTRY, "RG": "BR"}
 
-	Kamra no guarda el país del documento: la cédula («National ID» en el paquete de Uruguay) es uruguaya y el RG es
-	brasileño; para el DNI, el pasaporte y los demás se toma el país de residencia."""
+
+def document_country(id_type: str | None, country: str | None) -> str | None:
+	"""El país (ISO) que emitió el documento del huésped: el del tipo, si el tipo lo dice; si no, el que indicó
+	recepción (`Guest.uy_document_country`). Nunca el de residencia. None si no se sabe: el check-in lo pide."""
+	return FIXED_DOCUMENT_COUNTRY.get(id_type or "") or (country or "").strip().upper() or None
+
+
+def document(id_type: str | None, id_number: str | None, country: str | None) -> dict | None:
+	"""El documento del huésped en el formato del CFE, o None sin número o sin país. `country`: el país del documento
+	que indicó recepción (`document_country`)."""
 	number = (id_number or "").strip()[:40]
-	if not number:
+	country = document_country(id_type, country)
+	if not number or not country:
 		return None
-	residence = (residence or "").strip().upper() or None
+	return {"doc_type": doc_type(id_type, country), "country": country, "doc_number": number}
+
+
+def doc_type(id_type: str | None, country: str) -> str:
+	"""El tipo de documento de la DGI: la cédula, el DNI (solo de AR, BR, CL o PY: tipo 6), el pasaporte u otro."""
 	if id_type == "National ID":
-		doc_type, country = "ci", HOME_COUNTRY
-	elif id_type == "RG":
-		doc_type, country = "dni", "BR"
-	elif id_type == "DNI":
-		doc_type, country = "dni", residence if residence in DNI_COUNTRIES else None
-	elif id_type == "Passport":
-		doc_type, country = "passport", residence
-	else:
-		doc_type, country = "other", residence
-	if not country:
-		return None
-	return {"doc_type": doc_type, "country": country, "doc_number": number}
+		return "ci"
+	if id_type == "RG" or (id_type == "DNI" and country in DNI_COUNTRIES):
+		return "dni"
+	return "passport" if id_type == "Passport" else "other"
 
 
 class ResidenceMissing(ValueError):
-	"""Sin el país de residencia del huésped no se factura (HR-304): nunca se supone."""
+	"""Sin el país del documento del huésped no se factura (HR-304, HR-346): nunca se supone."""
 
 
-# lo que el huésped declaró al reservar (kamra_uy.pure.uy_tax.RESIDENT; el valor del campo uy_declared_residence)
+# lo que el huésped declaró al reservar (kamra_uy.pure.uy_tax.RESIDENT; el valor del campo uy_declared_residence). El
+# valor guardado no cambió con D-HR-74: «Reside en Uruguay» quiere decir «documento uruguayo» (HR-350, HR-346)
 DECLARED_RESIDENT = "Reside en Uruguay"
 
 
 def invoice_residence(country: str | None, declared: str | None) -> str | None:
-	"""El país de residencia (ISO) con que se factura: el del huésped (`Guest.residence_country`, lo que recepción ve en
-	el check-in con el documento); sin él, Uruguay si el huésped declaró al reservar que reside allí (lo dijo él, no se
-	supone). Si no, None: sabemos, como mucho, que no reside, pero no dónde, y el check-in lo pide."""
+	"""El país de residencia (ISO) del huésped o, sin él, Uruguay si declaró al reservar que reside allí. Ya no decide
+	el IVA (D-HR-74: manda `document_country`); se manda a determineIva como dato."""
 	country = (country or "").strip().upper()
 	if country:
 		return country
 	return HOME_COUNTRY if (declared or "").strip() == DECLARED_RESIDENT else None
 
 
-def guest_facts(residence: str | None, id_type: str | None, id_number: str | None, copy_on_file: bool) -> dict:
-	"""`guest` de determineIva. Sin país de residencia, ResidenceMissing: antes se tomaba Uruguay, y un extranjero en
-	alta temporada pagaba el 10 % (HR-304)."""
-	country = (residence or "").strip().upper()
+def guest_facts(doc_country: str | None, id_type: str | None, copy_on_file: bool,
+                residence: str | None = None) -> dict:
+	"""`guest` de determineIva: el documento (su tipo, su país y si su copia está en el archivo) y, como dato, la
+	residencia. Sin el país del documento, ResidenceMissing: nunca se supone (HR-304)."""
+	country = document_country(id_type, doc_country)
 	if not country:
-		raise ResidenceMissing("sin país de residencia")
-	guest = {"residence_country": country}
-	doc = document(id_type, id_number, country)
-	if doc:
-		guest["document"] = {"type": doc["doc_type"], "country": doc["country"], "copy_on_file": bool(copy_on_file)}
+		raise ResidenceMissing("sin país del documento")
+	doc = {"country": country, "copy_on_file": bool(copy_on_file)}
+	if id_type:
+		doc = {"type": doc_type(id_type, country), **doc}
+	guest = {"document": doc}
+	residence = (residence or "").strip().upper()
+	if residence:
+		guest["residence_country"] = residence
 	return guest
+
+
+# lo que el huésped declaró al reservar frente al documento del check-in (D-HR-47: se cobra o se devuelve la diferencia)
+def declared_mismatch(declared: str | None, doc_country: str | None) -> str | None:
+	"""«collect» si declaró documento extranjero y el del check-in es uruguayo (paga el IVA que no pagó), «refund» si
+	declaró documento uruguayo y es extranjero, None si coinciden o no hay declaración."""
+	if not declared or not doc_country:
+		return None
+	said_home = declared.strip() == DECLARED_RESIDENT
+	is_home = doc_country.strip().upper() == HOME_COUNTRY
+	if said_home == is_home:
+		return None
+	return "collect" if is_home else "refund"
+
+
+# ── el anexo de huéspedes (D-HR-74, pregunta 5; Decreto 220/998, art. 34, num. 14, lit. c) ─────────────────────────
+# la categoría que da determineIva a la exportación (`tax_category`; iva-rules.uy.yaml): Kamra la guarda en sus líneas y
+# no la manda en las del CFE, que core deduce de la regla
+EXPORT_CATEGORY = "export_and_assimilated"
+# lo que Kamra guarda de cada línea y no va en la petición del CFE (CfeLine no lo admite)
+KAMRA_ONLY = ("source_amount", "tax_category")
+
+
+def annex_entry(name: str | None, nationality: str | None, doc: dict | None) -> dict | None:
+	"""Un huésped del anexo (`guests_annex`): nombre, nacionalidad y documento. Solo los de documento extranjero; sin
+	nombre o sin documento, None. Sin nacionalidad reconocible, la del país del documento (que es quien lo emitió)."""
+	name = (name or "").strip()[:150]
+	if not name or not doc or doc["country"] == HOME_COUNTRY:
+		return None
+	return {"name": name, "nationality": (nationality or "").strip().upper() or doc["country"],
+	        "country": doc["country"], "doc_type": doc["doc_type"], "doc_number": doc["doc_number"]}
+
+
+# la nacionalidad que guarda Kamra es un texto: la del país (el gentilicio del paquete, «Uruguayan»), el nombre de un
+# país o el código de 3 letras que lee el escaneo del pasaporte (kamra.id_scan, ICAO 9303). Los de 3 letras del mercado
+# del hotel; uno que no está aquí toma el país del documento (annex_entry)
+ISO3 = {"URY": "UY", "ARG": "AR", "BRA": "BR", "CHL": "CL", "PRY": "PY", "BOL": "BO", "PER": "PE", "COL": "CO",
+        "VEN": "VE", "ECU": "EC", "MEX": "MX", "CRI": "CR", "PAN": "PA", "CUB": "CU", "DOM": "DO", "USA": "US",
+        "CAN": "CA", "ESP": "ES", "PRT": "PT", "ITA": "IT", "FRA": "FR", "D": "DE", "DEU": "DE", "GBR": "GB",
+        "IRL": "IE", "CHE": "CH", "AUT": "AT", "NLD": "NL", "BEL": "BE", "LUX": "LU", "DNK": "DK", "SWE": "SE",
+        "NOR": "NO", "FIN": "FI", "POL": "PL", "CZE": "CZ", "HUN": "HU", "GRC": "GR", "RUS": "RU", "UKR": "UA",
+        "ISR": "IL", "TUR": "TR", "CHN": "CN", "JPN": "JP", "KOR": "KR", "IND": "IN", "AUS": "AU", "NZL": "NZ",
+        "ZAF": "ZA"}
+
+
+def nationality_code(value: str | None, home_demonym: str, codes: set[str], names: dict[str, str]) -> str | None:
+	"""El país (ISO) de una nacionalidad de Kamra, o None. `codes`: los ISO de 2 letras que existen; `names`: {nombre
+	del país en minúsculas: ISO}."""
+	value = (value or "").strip()
+	if not value:
+		return None
+	if value == home_demonym:
+		return HOME_COUNTRY
+	if len(value) == 2 and value.upper() in codes:
+		return value.upper()
+	return ISO3.get(value.upper()) or names.get(value.lower())
+
+
+def needs_annex(buyer_block: dict, lines: list[dict]) -> bool:
+	"""El anexo va en la factura a una empresa (RUT) que lleva noches de exportación."""
+	return buyer_block.get("type") == "rut" and any(ln.get("tax_category") == EXPORT_CATEGORY for ln in lines)
 
 
 def kind_for(charge_type: str | None) -> str:
@@ -162,6 +236,8 @@ def with_rates(lines: list[dict], determined: dict) -> list[dict]:
 			raise ValueError(f"el motor de IVA no contestó la línea {ln['line_id']}")
 		row = {**ln, "rate": str(d["rate"]), "reason_code": d["reason_code"], "rule_id": d.get("rule_id"),
 		       "pending_accountant": bool(d.get("pending_accountant"))}
+		if d.get("tax_category"):
+			row["tax_category"] = d["tax_category"]
 		if d.get("rebate"):
 			row["rebate"] = d["rebate"]
 		out.append(row)
@@ -233,6 +309,8 @@ def _cfe_line(line_id: str, description: str, amount, src: dict) -> dict:
 		del out["rule_id"]
 	if src.get("rebate"):
 		out["rebate"] = src["rebate"]
+	if src.get("tax_category"):
+		out["tax_category"] = src["tax_category"]
 	return out
 
 
@@ -294,7 +372,8 @@ def buyer(name: str | None, doc: dict | None, rut: str | None = None) -> dict:
 
 
 def cfe_request(property_code: str, folio: str, reference_number: str, buyer_block: dict, currency: str, fx: str,
-                lines: list[dict], payments: list[dict], rules_version: str | None) -> dict:
+                lines: list[dict], payments: list[dict], rules_version: str | None,
+                annex: list[dict] | None = None) -> dict:
 	body = {
 		"property": property_code,
 		"folio": folio,
@@ -302,20 +381,69 @@ def cfe_request(property_code: str, folio: str, reference_number: str, buyer_blo
 		"buyer": buyer_block,
 		"currency": currency,
 		"fx_rate": fx,
-		"lines": [{k: v for k, v in ln.items() if k != "source_amount"} for ln in lines],
+		"lines": [{k: v for k, v in ln.items() if k not in KAMRA_ONLY} for ln in lines],
 		"payments": [{"mode": p["mode"], "amount": money(p["amount"])} for p in _positive_payments(payments)],
 		"prices_include_iva": False,
 	}
 	if rules_version:
 		body["rules_version"] = rules_version
+	if annex and needs_annex(buyer_block, lines):
+		body["guests_annex"] = annex[:200]
 	return body
+
+
+# ── lo que core no emite en un solo comprobante (HR-345: 422 `split_required` en /body/lines) ──────────────────────────
+SPLIT_REASON = "split_required"
+
+
+def split_parts(errors: list | None) -> list[dict] | None:
+	"""Las partes de un 422 `split_required` de createCfe ([{type, line_ids}], dos o más), o None si el error es otro."""
+	for e in errors or []:
+		if isinstance(e, dict) and e.get("reason") == SPLIT_REASON and len(e.get("parts") or []) >= 2:
+			return [{"type": p.get("type"), "line_ids": list(p.get("line_ids") or [])} for p in e["parts"]]
+	return None
+
+
+def _share(payments: list[dict], weight: Decimal, total: Decimal, last: bool, given: dict[int, Decimal]) -> list[dict]:
+	out = []
+	for i, p in enumerate(payments):
+		whole = dec(p["amount"])
+		amount = whole - given.get(i, Decimal(0)) if last else dec(money(whole * weight / total)) if total else Decimal(0)
+		given[i] = given.get(i, Decimal(0)) + amount
+		if amount > 0:
+			out.append({**p, "amount": money(amount)})
+	return out
+
+
+def split_request(body: dict, lines: list[dict], parts: list[dict]) -> list[dict]:
+	"""Cada parte de un CFE que core pide partir: {"lines": las líneas guardadas (con `source_amount`), "body": la
+	petición sin `invoice_number`}. Cada línea va en una sola parte y todas en alguna (si no, ValueError: core contestó
+	con otras líneas); los pagos se reparten en proporción al importe de cada parte, con el redondeo en la última."""
+	by_id = {ln["line_id"]: ln for ln in lines}
+	wanted = [lid for p in parts for lid in p["line_ids"]]
+	if sorted(wanted) != sorted(by_id):
+		raise ValueError("core pidió partir el CFE con otras líneas que las que se le mandaron")
+	sent = {ln["line_id"]: ln for ln in body["lines"]}
+	total = sum((dec(ln["unit_amount"]) * dec(ln.get("quantity") or 1) for ln in body["lines"]), Decimal(0))
+	given: dict[int, Decimal] = {}
+	out = []
+	for n, part in enumerate(parts):
+		part_lines = [sent[lid] for lid in part["line_ids"]]
+		weight = sum((dec(ln["unit_amount"]) * dec(ln.get("quantity") or 1) for ln in part_lines), Decimal(0))
+		piece = {**body, "lines": part_lines,
+		         "payments": _share(body.get("payments") or [], weight, total, n == len(parts) - 1, given)}
+		piece.pop("invoice_number", None)
+		if "guests_annex" in body and not needs_annex(body["buyer"], [by_id[lid] for lid in part["line_ids"]]):
+			piece.pop("guests_annex")
+		out.append({"lines": [by_id[lid] for lid in part["line_ids"]], "body": piece})
+	return out
 
 
 # ── la moneda de la factura (HR-316, D-HR-57 y D-HR-60) ─────────────────────────────────────────────────────────
 # Los precios van siempre en la moneda de la reserva (dólares: la tarifa, la web, la reserva y lo que cotiza
 # recepción); solo la factura puede ir en la otra. Recepción la elige antes del check-in, que es cuando sale el CFE
-# (D-HR-32). La conversión usa la cotización del BCU que carga Kamra (Exchange Rate): qué día y qué tipo pide la DGI
-# lo confirma el contador (HUECO H16 de docs/operacion/huecos.md).
+# (D-HR-32). La conversión usa la cotización fiscal del BCU (kamra_uy.fiscal.fx, HR-348): el dólar interbancario
+# comprador billete del día hábil anterior, el que toma Gsoft (D-HR-74, pregunta 7). Nunca el Exchange Rate de la caja.
 INVOICE_CURRENCIES = ("USD", "UYU")
 CURRENCY_TITLE = "Moneda de la factura"
 CURRENCY_LABELS = {"USD": "Dólares (USD)", "UYU": "Pesos uruguayos (UYU)"}
@@ -379,12 +507,12 @@ def _day_text(value) -> str:
 def currency_choice(home: str, check_in, fx, fx_day) -> dict:
 	"""Lo que recepción ve en el check-in (kamra.localization, «the currency a stay is invoiced in»): las dos monedas,
 	la propuesta y, en cada una, con qué cotización sale. `home`: la moneda de la reserva; `fx`: pesos por dólar (la
-	cotización del BCU que carga Kamra) y `fx_day`, su día; sin ella, el aviso de cargarla."""
+	cotización fiscal del BCU, fiscal.fx) y `fx_day`, su día; sin ella, que todavía no está y sale sola (nadie la teclea)."""
 	proposed = proposed_currency(check_in)
 	options = []
 	for code in INVOICE_CURRENCIES:
 		if not fx:
-			note = texts.NO_FX
+			note = texts.FX_PENDING
 		elif code == home:
 			note = FX_NOTE.format(currency=code, rate=_rate_text(fx), day=_day_text(fx_day)) if code != "UYU" else ""
 		else:
@@ -574,7 +702,8 @@ def desk_block(rows: list[dict], tasks: list[dict], pending_url: str) -> dict | 
 # ── las facturas pendientes que recepción registra a mano (HR-304) ─────────────────────────────────────────────────
 # el código de cada tipo (Tabla A; services/core/config/cfe.uy.yaml: cfe_types y contingency_types): el electrónico y
 # el de contingencia, los dos que admite manual-issue
-TYPE_CODES = {"e-ticket": (101, 201), "nc-e-ticket": (102, 202), "e-factura": (111, 211), "nc-e-factura": (112, 212)}
+TYPE_CODES = {"e-ticket": (101, 201), "nc-e-ticket": (102, 202), "e-factura": (111, 211), "nc-e-factura": (112, 212),
+              "e-factura-exportacion": (121, 221), "nc-e-factura-exportacion": (122, 222)}
 MANUAL_VIAS = ("portal", "paper")
 # Uruguay no tiene horario de verano desde 2015: lo que recepción escribe es hora de Montevideo
 MONTEVIDEO_OFFSET = "-03:00"

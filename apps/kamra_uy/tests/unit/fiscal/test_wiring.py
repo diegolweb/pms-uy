@@ -30,13 +30,20 @@ def test_check_in_closing_voiding_and_guest_changes_are_hooked() -> None:
     events = _hooks()["doc_events"]
     assert "kamra_uy.fiscal.events.on_reservation_validate" in _flat(events["Reservation"]["validate"])
     assert "kamra_uy.fiscal.events.on_reservation_update" in _flat(events["Reservation"]["on_update"])
-    assert _flat(events["Folio"]["on_update"]) == ["kamra_uy.fiscal.events.on_folio_update"]
+    folio = _flat(events["Folio"]["on_update"])
+    assert folio[0] == "kamra_uy.fiscal.events.on_folio_update"
+    assert "kamra_uy.fiscal.forfeit.on_folio_update" in folio
+    assert "kamra_uy.receipts.issue.on_folio_update" in folio
     assert _flat(events["Cancelled Invoice"]["after_insert"]) == ["kamra_uy.fiscal.events.on_invoice_cancelled"]
-    assert _flat(events["Guest"]["on_update"]) == ["kamra_uy.fiscal.events.on_guest_update"]
+    assert _flat(events["Guest"]["on_update"]) == ["kamra_uy.fiscal.events.on_guest_update",
+                                                    "kamra_uy.fiscal.forfeit.on_guest_update"]
+    # HR-347: la seña retenida, al cancelar (el no-show de la auditoría llega por el folio)
+    assert "kamra_uy.fiscal.forfeit.on_reservation_update" in _flat(events["Reservation"]["on_update"])
 
 
 def test_the_sweep_has_who_starts_it() -> None:
-    assert _hooks()["scheduler_events"]["cron"]["*/5 * * * *"] == ["kamra_uy.fiscal.sync.sweep"]
+    assert _hooks()["scheduler_events"]["cron"]["*/5 * * * *"] == ["kamra_uy.fiscal.sync.sweep",
+                                                                  "kamra_uy.fiscal.forfeit.sweep"]
 
 
 def test_every_hooked_handler_exists() -> None:
@@ -55,7 +62,8 @@ def test_the_uy_cfe_doctype_lives_in_the_fiscal_module() -> None:
         assert (PACKAGE / path).is_file(), path
     fields = {f["fieldname"]: f for f in doc["fields"]}
     assert fields["core_cfe_id"]["unique"] == 1
-    assert set(fields["status"]["options"].split("\n")) == {"Pending", "Sent", "Done", "Not needed", "Needs attention"}
+    assert set(fields["status"]["options"].split("\n")) == {"Pending", "Queued", "Sent", "Done", "Not needed",
+                                                          "Needs attention"}
     assert all(f.get("read_only") for f in doc["fields"] if f["fieldtype"] not in ("Section Break", "Column Break"))
 
 

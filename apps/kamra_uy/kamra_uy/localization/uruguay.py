@@ -18,7 +18,9 @@ Qué cubre:
   genéricos y los instantáneos; fixtures/property_setter.json los añade a los Select de Kamra que guardan el modo.
 - `market_rates(home)`: las cotizaciones del BCU para la carga de cambio de Kamra (`ledger._fetch_rates`), con su
   margen, su respaldo manual y su caché de siempre. Qué código, qué lado (TCC/TCV) y qué día usa se configura en
-  `site_config.json`, clave `kamra_uy_bcu` = {"codes": {...}, "side": "TCC", "day_offset": 1}, sin tocar código.
+  `site_config.json`, clave `kamra_uy_bcu` = {"codes": {...}, "side": "TCC", "day_offset": 1}, sin tocar código. Es el
+  cambio de la caja, no el de la factura: el CFE lleva la cotización fija de D-HR-74 (kamra_uy.fiscal.fx, HR-348), que
+  no lee esa clave ni el Exchange Rate.
 
 - La residencia del huésped en recepción (HR-304; kamra.localization, «where the guest lives»): `guest_residence`,
   `declare_residence`, `residence_on_new_booking`, `quote_residence` y `save_residence_country`, de
@@ -39,7 +41,6 @@ Qué NO cubre (otras fichas): el IVA de cada noche, que decide el motor de IVA d
 huésped (`Guest.residence_country`), las fechas y el comprador; el CFE y su envío a DGI. Mercado Pago es la pasarela
 de `PAYMENT_GATEWAYS` (kamra_uy/payments, HR-30).
 
-Tasas y cotización pendientes del contador (HR-7).
 """
 
 from datetime import timedelta
@@ -51,8 +52,10 @@ from frappe.utils import getdate, nowdate
 from kamra_uy.pure import bcu, uy_tax, words_es
 
 DEFAULT_CURRENCY = "UYU"
-# las monedas que más traen los huéspedes; Settings, Finance, Exchange rates las cambia
-FX_CURRENCIES = ["USD", "ARS", "BRL", "EUR"]
+# las monedas que más traen los huéspedes; Settings, Finance, Exchange rates las cambia. El peso va también: en una
+# propiedad en dólares es la moneda extranjera que más se cobra, y sin él la carga diaria no traía nunca su cambio
+# (HR-348; Kamra quita de la lista la moneda de la propiedad)
+FX_CURRENCIES = ["UYU", "USD", "ARS", "BRL", "EUR"]
 DEFAULT_TIMEZONE = "America/Montevideo"
 DEFAULT_NATIONALITY = "Uruguayan"
 # el código de país que usa la MRZ de un pasaporte o una cédula uruguaya
@@ -163,28 +166,34 @@ def _bcu_config() -> tuple[dict[str, int], str, int]:
 	return codes, side, day_offset
 
 
-def market_rates(home: str) -> tuple[dict, str | None]:
-	"""Las cotizaciones del BCU como unidades de `home` por 1 unidad extranjera, y la fecha de la cotización usada.
-	Lo llama `kamra.ledger` en vez de su proveedor abierto. La respuesta es ajena: con tope de tiempo y de tamaño, sin
-	redirecciones; ante cualquier fallo, el mismo aviso de respaldo manual de Kamra."""
+def bcu_quotes(codes, since, until) -> list[bcu.BcuQuote]:
+	"""Las cotizaciones del BCU de `codes` entre dos fechas. La respuesta es ajena: con tope de tiempo y de tamaño, sin
+	redirecciones. Cualquier fallo lanza (de red, HTTP o una respuesta que no es la esperada)."""
 	import requests
 
 	from kamra.ledger import FX_MAX_BYTES, FX_TIMEOUT_S
 
+	body = bcu.request_body(sorted({int(c) for c in codes}), since, until)
+	r = requests.post(bcu.BCU_URL, data=body, timeout=FX_TIMEOUT_S, stream=True, allow_redirects=False,
+	                  headers={"Content-Type": "text/xml; charset=utf-8", "SOAPAction": bcu.SOAP_ACTION})
+	r.raise_for_status()
+	reply = r.raw.read(FX_MAX_BYTES + 1, decode_content=True)
+	if len(reply) > FX_MAX_BYTES:
+		raise ValueError("reply too large")
+	return bcu.parse_cotizaciones(reply)
+
+
+def market_rates(home: str) -> tuple[dict, str | None]:
+	"""Las cotizaciones del BCU como unidades de `home` por 1 unidad extranjera, y la fecha de la cotización usada.
+	Lo llama `kamra.ledger` en vez de su proveedor abierto (la caja de recepción; la factura usa otra, la de
+	kamra_uy.fiscal.fx). Ante cualquier fallo, el mismo aviso de respaldo manual de Kamra."""
 	try:
 		home = (home or "").strip().upper()
 		if not (len(home) == 3 and home.isalpha()):
 			raise ValueError(f"home currency {home!r} is not an ISO code")
 		codes, side, day_offset = _bcu_config()
 		today = getdate(nowdate())
-		body = bcu.request_body(sorted(set(codes.values())), today - timedelta(days=BCU_LOOKBACK_DAYS), today)
-		r = requests.post(bcu.BCU_URL, data=body, timeout=FX_TIMEOUT_S, stream=True, allow_redirects=False,
-		                  headers={"Content-Type": "text/xml; charset=utf-8", "SOAPAction": bcu.SOAP_ACTION})
-		r.raise_for_status()
-		reply = r.raw.read(FX_MAX_BYTES + 1, decode_content=True)
-		if len(reply) > FX_MAX_BYTES:
-			raise ValueError("reply too large")
-		quotes = bcu.parse_cotizaciones(reply)
+		quotes = bcu_quotes(codes.values(), today - timedelta(days=BCU_LOOKBACK_DAYS), today)
 		wanted = [*codes, bcu.HOME]
 		rates = bcu.rates_for_home(quotes, home, wanted, codes, side, today, day_offset)
 		if not rates:

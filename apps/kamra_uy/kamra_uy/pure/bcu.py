@@ -2,12 +2,19 @@
 
 El BCU cotiza cada moneda en pesos uruguayos por unidad extranjera, con un tipo comprador (TCC) y uno vendedor (TCV)
 por día hábil. Las monedas se identifican por su código numérico del BCU, NUNCA por su `CodigoISO`: el euro llega como
-«EURO». Qué código, qué lado y qué día usa la factura lo decide el contador (HR-7): todo es un parámetro.
+«EURO» y el dólar billete como «DLS.».
+
+Dos usos:
+- La carga de cambio de Kamra (`rates_for_home`, la caja de recepción): código, lado y día son parámetros
+  (`site_config` `kamra_uy_bcu`).
+- La cotización de la FACTURA (`fiscal_quote`, HR-348): la fija el estudio contable (D-HR-74, respuesta 7) y no se
+  configura: dólar interbancario comprador billete (serie 2225, TCC) del último día hábil del BCU ANTERIOR al día de la
+  operación. Es la que toma Gsoft; nunca se teclea.
 """
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from xml.etree import ElementTree
 from xml.sax.saxutils import escape
@@ -16,9 +23,18 @@ BCU_URL = "https://cotizaciones.bcu.gub.uy/wscotizaciones/servlet/awsbcucotizaci
 SOAP_ACTION = "Cotizaaction/AWSBCUCOTIZACIONES.Execute"
 NAMESPACE = "Cotiza"
 HOME = "UYU"
-# 2222 DOLAR USA (2225 billete y 2224 cable son otras cotizaciones del dólar), 500 PESO ARGENTINO, 1000 REAL, 1111 EURO
-DEFAULT_CODES = {"USD": 2222, "ARS": 500, "BRL": 1000, "EUR": 1111}
+# 2225 «DLS. USA BILLETE», el dólar interbancario billete que pide el estudio (D-HR-74; 2222 «DOLAR USA» y 2224
+# «DLS. USA CABLE» son otras series del dólar), 500 PESO ARGENTINO, 1000 REAL, 1111 EURO
+DEFAULT_CODES = {"USD": 2225, "ARS": 500, "BRL": 1000, "EUR": 1111}
 SIDES = ("TCC", "TCV")
+# la cotización de la factura (D-HR-74, respuesta 7): solo el dólar, la otra moneda que admite el CFE además del peso
+FISCAL_CODES = {"USD": 2225}
+FISCAL_SIDE = "TCC"
+# cuántos días hacia atrás se piden: cubre la semana de Turismo con sus dos fines de semana
+FISCAL_LOOKBACK_DAYS = 15
+# desde esta hora del día de la operación, un día hábil sin cotización es un feriado del BCU y no una que aún no publicó
+# (el 24-11-2026 a las 16:42 todavía no estaba la del día)
+SETTLED_HOUR = 12
 _NINE = Decimal("1e-9")
 
 
@@ -166,3 +182,23 @@ def as_of(quotes: Iterable[BcuQuote], on: date, day_offset: int = 1) -> date | N
 	cutoff = on - timedelta(days=day_offset)
 	days = [q.day for q in quotes if q.day <= cutoff]
 	return max(days) if days else None
+
+
+def fiscal_window(on: date) -> tuple[date, date]:
+	"""Las fechas que se piden al BCU para la factura de una operación del día `on`: hasta el día anterior."""
+	return on - timedelta(days=FISCAL_LOOKBACK_DAYS), on - timedelta(days=1)
+
+
+def fiscal_quote(quotes: Iterable[BcuQuote], code: int, on: date, now: datetime) -> BcuQuote | None:
+	"""La cotización con que se factura una operación del día `on` (D-HR-74): la del último día hábil del BCU ANTERIOR a
+	`on`. `now` es la hora local de la propiedad. None mientras no se sepa cuál es: sin ninguna anterior, o si entre ella y
+	`on` queda un día de semana sin cotización y todavía no son las SETTLED_HOUR del día de la operación (puede ser un
+	feriado o una que el BCU aún no publicó; los sábados y domingos no cotiza nunca)."""
+	before = [q for q in quotes if q.code == code and q.day < on]
+	if not before:
+		return None
+	last = max(before, key=lambda q: q.day)
+	gap = [last.day + timedelta(days=k) for k in range(1, (on - last.day).days)]
+	if all(day.weekday() >= 5 for day in gap) or now >= datetime.combine(on, time(SETTLED_HOUR)):
+		return last
+	return None

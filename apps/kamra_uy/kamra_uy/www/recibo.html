@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>{{ title | e }}</title>
+<style>
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #f6f5f2;
+         color: #1f2328; }
+  main { max-width: 40rem; margin: 1.5rem auto; padding: 2rem; background: #fff; border-radius: 0.75rem;
+         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
+  h1 { margin: 0 0 1rem 0; font-size: 1.5rem; line-height: 2rem; }
+  table.recibo { width: 100%; border-collapse: collapse; }
+  table.recibo th, table.recibo td { padding: 0.5rem 0; border-bottom: 1px solid #e4e1ec; vertical-align: top;
+                                     text-align: left; font-size: 1rem; line-height: 1.5; }
+  table.recibo th { font-weight: 400; padding-right: 1rem; white-space: nowrap; color: #57606a; }
+  table.recibo td { font-weight: 600; }
+  p { margin: 1.25rem 0 0 0; font-size: 1rem; line-height: 1.5; }
+  @media print {
+    body { background: #fff; }
+    main { box-shadow: none; margin: 0; max-width: none; padding: 0; }
+  }
+</style>
+</head>
+<body>
+<main>{% if found %}{{ body }}{% else %}<p role="status">{{ message | e }}</p>{% endif %}</main>
+</body>
+</html>

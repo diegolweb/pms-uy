@@ -4,6 +4,7 @@ aviso cfe.updated, bloque CFE del folio y el descuento de la estancia repartido 
 
 import json
 import uuid
+from decimal import Decimal
 from unittest.mock import patch
 from urllib.parse import quote
 
@@ -21,7 +22,7 @@ from kamra.tests.audit_fixtures import (
 	make_room_type,
 )
 
-from kamra_uy.fiscal import api, connector, model, sync, texts, webhook
+from kamra_uy.fiscal import api, connector, fx, model, sync, texts, webhook
 from kamra_uy.payments.tests.fixtures import CODE, PROP, SECRET, gateway_settings, make_uy_property, signed
 
 CORE = "http://core.test"
@@ -53,6 +54,9 @@ class FakeCore:
 		# sin ninguno de los dos, todas las noches lo son
 		self.season: set[str] | None = None
 		self.seasons = False
+		# HR-345: lo que no se emite en un solo comprobante responde 422 split_required (aquí, líneas de más de un
+		# motivo); Kamra manda cada parte por separado (HR-346)
+		self.split = False
 
 	def _high_season(self, day: str) -> bool:
 		if self.season is not None:
@@ -60,10 +64,13 @@ class FakeCore:
 		return not self.seasons or high_season(day)
 
 	def _rate(self, guest: dict, buyer: dict, day: str) -> tuple[str, str, str]:
-		if buyer.get("type") == "rut":  # el comprador con RUT paga el 10 todo el año, resida donde resida
+		# D-HR-74 (HR-344): manda el país del documento, no dónde vive; el documento extranjero con su copia es
+		# exportación también facturado a un RUT (la regla 1 de iva-rules.uy.yaml no mira el comprador)
+		document = guest.get("document") or {}
+		if document.get("country") not in (None, "UY") and document.get("copy_on_file"):
+			return "0", "no_residente", "export_and_assimilated"
+		if buyer.get("type") == "rut":  # el comprador con RUT paga el 10 todo el año
 			return "10", "residente_hospedaje", "minimum"
-		if guest["residence_country"] != "UY" and (guest.get("document") or {}).get("copy_on_file"):
-			return "0", "no_residente", "exempt"
 		if not self._high_season(day):
 			return "0", "hospedaje_fuera_temporada", "exempt"
 		return "10", "residente_hospedaje", "minimum"
@@ -116,9 +123,18 @@ class FakeCore:
 			return _Resp(422, {"code": "validation_failed", "status": 422, "title": "x", "type": "about:blank",
 			                   "request_id": "r", "errors": [{"path": "/body/lines", "message":
 			                                                  "un descuento no puede dejar en negativo el total de una tasa"}]})
+		own = "e-factura" if (body or {}).get("buyer", {}).get("type") == "rut" else "e-ticket"
+		reasons = {ln["reason_code"] for ln in body["lines"]} if path == "/v1/fiscal/cfe" and method == "POST" else set()
+		if self.split and len(reasons) > 1:
+			parts = [{"type": "e-factura-exportacion" if r == "no_residente" else own,
+			          "line_ids": [ln["line_id"] for ln in body["lines"] if ln["reason_code"] == r]} for r in sorted(reasons)]
+			return _Resp(422, {"code": "validation_failed", "status": 422, "title": "x", "type": "about:blank",
+			                   "request_id": "r", "errors": [{"path": "/body/lines", "message": "en dos comprobantes",
+			                                                  "reason": "split_required", "parts": parts}]})
 		if path == "/v1/fiscal/cfe" and method == "POST":
 			total = sum(float(ln["unit_amount"]) * float(ln["quantity"]) for ln in body["lines"])
-			kind = "e-factura" if body["buyer"]["type"] == "rut" else "e-ticket"
+			# la e-Factura de Exportación lleva solo exportación (HR-345)
+			kind = "e-factura-exportacion" if reasons == {"no_residente"} else own
 			out = self._cfe("original", total, type=kind, folio=body["folio"], invoice_number=body["invoice_number"],
 			                currency=body["currency"])
 		elif path.endswith("/credit-note"):
@@ -158,15 +174,27 @@ class FiscalCase(AuditTestCase):
 		# Kamra no deja hacer el check-in sin habitación asignada (Reservation._occupied_rooms): como en recepción
 		self.room = make_room(PROP, self.rt, "UYF-101")
 		gateway_settings()
+		# la caja tiene un cambio tecleado de 50 pesos por dólar; la factura toma la cotización fiscal del BCU, 40
+		# (fiscal.fx, HR-348; cableada en connector.fx_quote por HR-346): un CFE con 40 no leyó la caja
 		frappe.get_doc({"doctype": "Exchange Rate", "property": PROP, "currency": "UYU", "rate_date": d(0),
-		                "buy_rate": 0.025, "sell_rate": 0.025, "market_rate": 0.025}).insert(ignore_permissions=True)
+		                "buy_rate": 0.02, "sell_rate": 0.02, "market_rate": 0.02}).insert(ignore_permissions=True)
+		if not hasattr(self, "bcu"):  # test_fx.FxCase pide al BCU simulado de verdad
+			self.bcu_rate = self._stack.enter_context(patch.object(fx, "fiscal_rate", side_effect=self._fiscal_rate))
 		self.core = FakeCore()
 		self._stack.enter_context(patch.object(connector, "_session", return_value=self.core))
 		self._stack.enter_context(patch.object(connector, "core_base_url", return_value=CORE))
 		self.enqueue = self._stack.enter_context(patch.object(connector.frappe, "enqueue"))
 
+	@staticmethod
+	def _fiscal_rate(property, currency, on=None):
+		if currency == "UYU":
+			return fx.FiscalRate(Decimal(1), None)
+		return fx.FiscalRate(Decimal(40), frappe.utils.getdate(d(-1)))
+
 	def stay(self, residence="Argentina", copy=True, nights=2):
-		fields = {"residence_country": residence, "id_type": "DNI", "id_number": "30111222"}
+		# el país del documento (HR-346) y el de residencia, el mismo salvo que la prueba diga otra cosa
+		fields = {"residence_country": residence, "uy_document_country": residence, "id_type": "DNI",
+		          "id_number": "30111222"}
 		if copy:
 			fields["id_file"] = "/private/files/ut-dni.png"
 		guest = make_guest("UT Huésped Fiscal", **fields)
@@ -221,7 +249,8 @@ class TestCheckIn(FiscalCase):
 		block = api.folio_cfe(connector._guest_folio(res.name))
 		self.assertFalse(block["contingency"])
 		[doc] = block["documents"]
-		self.assertEqual((doc["title"], doc["serie"], doc["number"]), ("e-Ticket", "A", cfe.number))
+		# el no residente va en e-Factura de Exportación (D-HR-74, pregunta 6; HR-345)
+		self.assertEqual((doc["title"], doc["serie"], doc["number"]), ("e-Factura de Exportación", "A", cfe.number))
 		self.assertTrue(doc["qr_url"].startswith("https://www.dgi.gub.uy/"))
 
 	def test_without_the_copy_of_the_document_the_guest_pays_the_resident_rate(self):
@@ -231,7 +260,8 @@ class TestCheckIn(FiscalCase):
 
 	def booked(self, residence="Argentina", copy=True, nights=3, **fields):
 		"""Una reserva confirmada, antes del check-in: lo que cotizó Kamra (la web, recepción)."""
-		guest = {"residence_country": residence, "id_type": "DNI", "id_number": "30111222"}
+		guest = {"residence_country": residence, "uy_document_country": residence, "id_type": "DNI",
+		         "id_number": "30111222"}
 		if copy:
 			guest["id_file"] = "/private/files/ut-dni.png"
 		return make_reservation(PROP, self.rt, d(0), d(nights), room=self.room,
@@ -285,7 +315,9 @@ class TestCheckIn(FiscalCase):
 	def test_a_buyer_with_rut_pays_the_10_on_every_night(self):
 		company = frappe.get_doc({"doctype": "Corporate Account", "company_name": "UT Viajes SA",
 		                          "gstin": "21-999999-0016"}).insert(ignore_permissions=True).name
-		res = self.booked(company=company)  # el huésped es extranjero con la copia: sin el RUT, pagaría 0
+		# el huésped trae cédula: fuera de la temporada, sin el RUT, pagaría 0
+		res = self.booked(company=company)
+		frappe.db.set_value("Guest", res.guest, {"id_type": "National ID", "uy_document_country": None})
 		self.assert_quoted_without_iva(res)
 		self.core.season = {d(1)}  # el RUT no mira la temporada
 		charged, billed = self.check_in_and_bill(res)
@@ -328,12 +360,95 @@ class TestCheckIn(FiscalCase):
 		self.assertFalse(api.folio_cfe(connector._guest_folio(res.name))["contingency"])
 
 
+class TestTheDocumentDecides(FiscalCase):
+	"""D-HR-74 en Kamra (HR-346): manda el país del documento, no dónde vive; la copia queda unida al CFE; la factura a
+	una empresa lleva el anexo de huéspedes; lo que core no emite junto sale en un CFE por parte; la cotización es la
+	fiscal del BCU y sin ella el CFE espera."""
+
+	def checked_in(self, nights=2, company=None, **guest):
+		fields = {"id_type": "Passport", "id_number": "P123", "id_file": "/private/files/ut-pasaporte.png", **guest}
+		room = make_room(PROP, self.rt, f"D{uuid.uuid4().hex[:5]}")
+		res = make_reservation(PROP, self.rt, d(0), d(nights), room=room, company=company,
+		                       guest=make_guest("UT Documento", **fields))
+		res.status = "Checked In"
+		res.save(ignore_permissions=True)
+		return frappe.get_doc("Reservation", res.name)
+
+	def test_the_country_of_the_document_decides_not_where_the_guest_lives(self):
+		# un extranjero que vive en Uruguay, con pasaporte argentino y su copia: exportación, 0
+		res = self.checked_in(residence_country="Uruguay", uy_document_country="Argentina")
+		self.assertEqual(self.core.bodies("/v1/fiscal/iva/determine")[-1]["guest"],
+		                 {"residence_country": "UY", "document": {"type": "passport", "country": "AR",
+		                                                          "copy_on_file": True}})
+		self.assertEqual({float(r.gst_rate) for r in res.night_rates}, {0.0})
+		# un uruguayo que vive afuera, con su cédula: residente, el 10 en la temporada
+		res = self.checked_in(residence_country="Argentina", id_type="National ID", id_number="12345678")
+		self.assertEqual(self.core.bodies("/v1/fiscal/iva/determine")[-1]["guest"]["document"],
+		                 {"type": "ci", "country": "UY", "copy_on_file": True})
+		self.assertEqual({float(r.gst_rate) for r in res.night_rates}, {10.0})
+
+	def test_a_company_invoice_with_export_nights_carries_the_foreign_adults_and_the_copy(self):
+		company = frappe.get_doc({"doctype": "Corporate Account", "company_name": "UT Empresa Anexo",
+		                          "gstin": "21-999999-0016"}).insert(ignore_permissions=True).name
+		res = self.checked_in(company=company, uy_document_country="Argentina", nationality="ARG")
+		for o in ({"full_name": "UT Acompañante BR", "age": 40, "id_type": "Passport", "id_number": "BR777",
+		           "nationality": "Brazil"},
+		          {"full_name": "UT Acompañante UY", "age": 35, "id_type": "National ID", "id_number": "11112222",
+		           "nationality": "Uruguayan"},
+		          {"full_name": "UT Menor", "age": 8, "id_type": "Passport", "id_number": "AR999", "nationality": "ARG"}):
+			frappe.get_doc({"doctype": "Stay Occupant", "parent": res.name, "parenttype": "Reservation",
+			                "parentfield": "occupants", **o}).db_insert()
+		connector.process_reservation(res.name)
+		[sent] = self.core.bodies("/v1/fiscal/cfe")
+		self.assertEqual(sent["buyer"]["type"], "rut")
+		self.assertEqual({ln["rate"] for ln in sent["lines"]}, {"0"})
+		titular = frappe.db.get_value("Guest", res.guest, "full_name")
+		self.assertEqual(sent["guests_annex"], [
+			{"name": titular, "nationality": "AR", "country": "AR", "doc_type": "passport", "doc_number": "P123"},
+			{"name": "UT Acompañante BR", "nationality": "BR", "country": "BR", "doc_type": "passport",
+			 "doc_number": "BR777"}])
+		self.assertTrue(all("tax_category" not in ln for ln in sent["lines"]))
+		[cfe] = self.documents(res)
+		self.assertEqual(cfe.document_copy, "/private/files/ut-pasaporte.png")
+
+	def test_what_core_will_not_issue_together_goes_out_in_one_cfe_per_part(self):
+		self.core.split = True
+		self.core.season = {d(1)}
+		# con cédula, la primera noche fuera de la temporada y la segunda al 10: el core simulado no las junta
+		res = self.checked_in(id_type="National ID", id_number="12345678")
+		out = connector.process_reservation(res.name)
+		self.assertEqual(out, {"sent": 2, "pending": 0, "attention": 0})
+		asked, *parts = self.documents(res, kind="Original")
+		self.assertEqual((asked.status, asked.error),
+		                 ("Not needed", texts.SPLIT_INTO.format(count=2, types="e-Ticket, e-Ticket")))
+		self.assertEqual([(p.status, p.reference_number) for p in parts],
+		                 [("Sent", f"{res.name}/2"), ("Sent", f"{res.name}/3")])
+		first, *sent = self.core.bodies("/v1/fiscal/cfe")
+		self.assertEqual([b["invoice_number"] for b in sent], [f"{res.name}/2", f"{res.name}/3"])
+		self.assertEqual(sorted(ln["line_id"] for b in sent for ln in b["lines"]),
+		                 sorted(ln["line_id"] for ln in first["lines"]))
+		self.assertEqual([{ln["rate"] for ln in b["lines"]} for b in sent], [{"0"}, {"10"}])
+		# y lo facturado en las partes cuenta: al cerrar la cuenta no sale nada más
+		self.settle_and_close(res, 2)
+		connector.process_reservation(res.name)
+		self.assertEqual(len(self.core.bodies("/v1/fiscal/cfe")), 3)
+
+	def test_without_the_bcu_rate_the_cfe_waits_and_nobody_is_asked_to_type_it(self):
+		self.bcu_rate.side_effect = lambda p, c, on=None: fx.FiscalRate(Decimal(1), None) if c == "UYU" else None
+		res = self.checked_in(uy_document_country="Argentina")
+		out = connector.process_reservation(res.name)
+		self.assertEqual(out, {"sent": 0, "pending": 1, "attention": 0})
+		self.assertEqual([t.error for t in self.waiting(res)], [fx.FX_PENDING])
+		self.assertEqual({o["note"] for o in api.invoice_currency(res.name)["options"]}, {fx.FX_PENDING})
+
+
 class TestClosingAndVoiding(FiscalCase):
 	def test_without_the_residence_the_cfe_waits_and_goes_out_once_the_desk_gives_it(self):
 		# HR-304: un huésped en casa sin país de residencia (de antes de HR-304, o borrado después) no se factura como
 		# residente: la tarea espera, el folio lo dice, y sale en cuanto recepción indica el país
 		res = self.stay()
-		frappe.db.set_value("Guest", res.guest, "residence_country", None)  # sin ganchos, como un dato viejo
+		# sin ganchos, como un dato viejo: el DNI no dice de qué país es y la residencia no vale (HR-346)
+		frappe.db.set_value("Guest", res.guest, "uy_document_country", None)
 		connector.process_reservation(res.name)
 		self.assertEqual(self.core.bodies("/v1/fiscal/cfe"), [])
 		pending = self.waiting(res)
@@ -345,7 +460,7 @@ class TestClosingAndVoiding(FiscalCase):
 
 		self.enqueue.reset_mock()
 		guest = frappe.get_doc("Guest", res.guest)
-		guest.residence_country = "Argentina"
+		guest.uy_document_country = "Argentina"
 		guest.save(ignore_permissions=True)
 		self.assertTrue(any(c.kwargs.get("reservation") == res.name for c in self.enqueue.call_args_list))
 		connector.process_reservation(res.name)
@@ -361,27 +476,28 @@ class TestClosingAndVoiding(FiscalCase):
 		connector.process_reservation(res.name)
 		[item] = [i for i in api.pending(PROP)["items"] if i["reservation"] == res.name]
 		self.assertTrue(item["in_core"])
-		self.assertEqual(item["codes"], [101, 201])
-		self.assertEqual(item["title"], "e-Ticket")
+		# la e-Factura de Exportación del no residente se registra a mano como 121 o, en contingencia, 221 (HR-346)
+		self.assertEqual(item["codes"], [121, 221])
+		self.assertEqual(item["title"], "e-Factura de Exportación")
 		self.assertTrue(item["lines"])
 		self.assertEqual(item["state"], model.STATUS_TEXTS["contingency"])
 		self.assertEqual(api.pending(PROP, "2000-01-01")["items"], [])
 		desk = ensure_user("recepcion-facturas@roosevelt.test", ["Front Desk"])
 		frappe.set_user(desk)  # nosemgrep: frappe-setuser -- test fixture
 		try:
-			out = api.record_manual(item["name"], "portal", 201, "a", "0001234", "2026-12-07T10:30")
+			out = api.record_manual(item["name"], "portal", 121, "a", "0001234", "2026-12-07T10:30")
 		finally:
 			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test fixture
 		self.assertEqual((out["serie"], out["number"], out["core_status"]), ("A", "1234", "issued"))
 		core_id = frappe.db.get_value(connector.DOCTYPE, item["name"], "core_cfe_id")
 		[body] = self.core.bodies(f"/v1/fiscal/cfe/{core_id}/manual-issue")
-		self.assertEqual(body, {"via": "portal", "type_code": 201, "serie": "A", "number": "1234",
+		self.assertEqual(body, {"via": "portal", "type_code": 121, "serie": "A", "number": "1234",
 		                        "issued_at": "2026-12-07T10:30:00-03:00"})
 		self.assertNotIn(res.name, [i["reservation"] for i in api.pending(PROP)["items"]])
 		with self.assertRaises(frappe.ValidationError):
-			api.record_manual(item["name"], "portal", 201, "A", "1235", "2026-12-07T10:31")
+			api.record_manual(item["name"], "portal", 121, "A", "1235", "2026-12-07T10:31")
 		with self.assertRaises(frappe.ValidationError):
-			api.record_manual(item["name"], "fax", 201, "A", "1235", "2026-12-07T10:31")
+			api.record_manual(item["name"], "fax", 121, "A", "1235", "2026-12-07T10:31")
 
 	def test_the_page_of_pending_invoices_is_for_hotel_staff(self):
 		from kamra_uy.www import facturas as page
@@ -421,7 +537,8 @@ class TestClosingAndVoiding(FiscalCase):
 		connector.process_reservation(res.name)
 		original, credit = self.documents(res)
 		self.assertEqual((credit.kind, credit.status, credit.references_cfe), ("Credit note", "Sent", original.name))
-		self.assertEqual(credit.cfe_type, "nc-e-ticket")
+		# la nota de crédito de una e-Factura de Exportación es la suya (122), no la del e-ticket (HR-346)
+		self.assertEqual(credit.cfe_type, "nc-e-factura-exportacion")
 		self.assertIn("Nombre equivocado", credit.reason)
 		sent = self.core.bodies(f"/v1/fiscal/cfe/{original.core_cfe_id}/credit-note")[0]
 		self.assertEqual(sum(float(ln["amount"]) for ln in sent["lines"]), float(original.total))
@@ -457,7 +574,7 @@ class TestTheCfeOnTheFolio(FiscalCase):
 		                 (model.DESK_TITLE, "issued", "", None))
 		[doc] = card["documents"]
 		self.assertEqual((doc["label"], doc["state"], doc["number"]),
-		                 ("e-Ticket", "issued", f"Serie A, número {cfe.number}"))
+		                 ("e-Factura de Exportación", "issued", f"Serie A, número {cfe.number}"))
 		# la factura de Kamra sigue siendo provisional y no lleva bloque impreso: el CFE no es el de ZATCA
 		self.assertIsNone(bill["statutory"])
 		self.assertFalse(bill["document"]["is_final"])
@@ -473,7 +590,7 @@ class TestTheCfeOnTheFolio(FiscalCase):
 		self.assertEqual(card["link"], {"label": model.PENDING_PAGE, "url": self.PAGE})
 
 		[item] = [i for i in api.pending(PROP)["items"] if i["reservation"] == res.name]
-		api.record_manual(item["name"], "portal", 201, "A", "0001234", "2026-12-07T10:30")
+		api.record_manual(item["name"], "portal", 121, "A", "0001234", "2026-12-07T10:30")
 		card = self.card(res)
 		self.assertEqual((card["state"], card["link"]), ("issued", None))
 		self.assertEqual(card["documents"][0]["number"], "Serie A, número 1234")
@@ -488,7 +605,8 @@ class TestTheCfeOnTheFolio(FiscalCase):
 
 	def test_without_the_residence_the_folio_says_what_to_do(self):
 		res = self.stay()
-		frappe.db.set_value("Guest", res.guest, "residence_country", None)  # sin ganchos, como un dato viejo
+		# sin ganchos, como un dato viejo: el DNI no dice de qué país es y la residencia no vale (HR-346)
+		frappe.db.set_value("Guest", res.guest, "uy_document_country", None)
 		connector.process_reservation(res.name)
 		card = self.card(res)
 		self.assertEqual((card["state"], card["notice"], card["documents"]), ("pending", texts.RESIDENCE_MISSING, []))
@@ -691,7 +809,8 @@ class TestInvoiceCurrency(FiscalCase):
 	invoice_in = None
 
 	def foreigner(self):
-		return make_guest("UT Huésped Moneda", residence_country="Argentina", id_type="DNI", id_number="30111222",
+		return make_guest("UT Huésped Moneda", residence_country="Argentina", uy_document_country="Argentina",
+		                  id_type="DNI", id_number="30111222",
 		                  id_file="/private/files/ut-dni.png")
 
 	def checked_in(self, check_in: str, check_out: str):

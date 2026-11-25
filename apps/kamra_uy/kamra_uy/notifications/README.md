@@ -41,6 +41,9 @@ sin ese, español.
 - El horario de check-in y check-out, la dirección y el contacto de la Property. Responder va al correo de la Property
   (Reply-To).
 
+- El enlace al recibo del hotel de ese pago (HR-349, D-HR-74: «El recibo de tu pago es el R-n.»), a la página
+  `/recibo` (`kamra_uy/receipts/README.md`).
+
 Nunca lleva un dato del pago: ni el modo, ni la referencia, ni la tarjeta. La identidad (logo, letra, colores y pie) se
 la pone HR-32 con `kamra_uy.branding.correo.envolver`; sin marca aplicada, el cuerpo sale tal cual.
 

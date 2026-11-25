@@ -33,6 +33,18 @@
   "insert_after": "nationality",
   "module": "Kamra UY",
   "options": "Country",
-  "description": "País donde reside el huésped: lo usa el IVA de no residentes al facturar."
+  "description": "País donde reside el huésped. Es un dato: el IVA lo decide el país del documento (D-HR-74)."
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "Guest-uy_document_country",
+  "dt": "Guest",
+  "fieldname": "uy_document_country",
+  "fieldtype": "Link",
+  "label": "País del documento",
+  "insert_after": "id_number",
+  "module": "Kamra UY",
+  "options": "Country",
+  "description": "El país que emitió el documento de identidad. Decide el IVA (D-HR-74): documento uruguayo, residente; documento extranjero con su copia, no residente. La cédula es uruguaya sin preguntarlo."
  }
 ]

@@ -39,12 +39,12 @@ PAY_1 = "7a2b0c11-1111-4222-8333-555555555555"
 # El aviso del IVA a residentes, el `iva.aviso` de reservar.md (HR-266, D-HR-47: el 10 % se paga al reservar): aprobado
 # con todos los textos el 22-11 (D-HR-48), literal también aquí.
 IVA = {
-	"es": "Los huéspedes residentes en Uruguay deberán abonar el 10% de IVA adicional al momento de la reserva por las "
+	"es": "Los huéspedes con documento uruguayo deberán abonar el 10% de IVA adicional al momento de la reserva por las "
 	      "noches entre el 16 de noviembre y Semana de Turismo.",
-	"pt": "Os hóspedes residentes no Uruguai deverão pagar 10% de IVA adicional no momento da reserva pelas noites entre "
+	"pt": "Os hóspedes com documento uruguaio deverão pagar 10% de IVA adicional no momento da reserva pelas noites entre "
 	      "16 de novembro e a Semana de Turismo (Semana Santa).",
-	"en": "Guests residing in Uruguay must pay an additional 10% VAT when booking for nights between November 16 and "
-	      "Tourism Week (Holy Week).",
+	"en": "Guests with a Uruguayan ID or passport must pay an additional 10% VAT when booking for nights between "
+	      "November 16 and Tourism Week (Holy Week).",
 }
 # Los textos de la web que el correo repite (texts.DE_LA_WEB), literales de web/content/{es,pt,en}/reservar.md: el
 # contenedor de Kamra no tiene web/, así que la guarda vive aquí.

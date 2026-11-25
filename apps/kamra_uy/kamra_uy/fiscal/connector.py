@@ -2,8 +2,8 @@
 nota de crédito al anularla.
 
 Cuándo (D-HR-32: la factura sale en el CHECK-IN, por la estancia entera):
-- `adjust_iva` (validate de la reserva en casa): pregunta a core qué IVA lleva cada noche (`determineIva`, con el país
-  de residencia, el documento y si su copia está en el archivo) y lo deja en `night_rates`, que es lo que Kamra cobra.
+- `adjust_iva` (validate de la reserva en casa): pregunta a core qué IVA lleva cada noche (`determineIva`, con el
+  documento, su país y si su copia está en el archivo: D-HR-74) y lo deja en `night_rates`, que es lo que Kamra cobra.
   Si core no contesta, la reserva sigue con el IVA del paquete y el CFE lo vuelve a preguntar.
 - `queue_task` (check-in, cierre de la cuenta, cuenta anulada, check-in deshecho): deja una tarea «Reconcile» en
   UY CFE dentro de la misma transacción y la encola tras el commit. Una tarea compara lo que debería estar facturado
@@ -51,8 +51,9 @@ class FiscalError(Exception):
 
 
 class ResidenceMissingError(FiscalError):
-	"""Sin la residencia del huésped no se factura (HR-304): la fila espera, «Pending», hasta que recepción la indique
-	(fiscal.events.on_guest_update la vuelve a procesar)."""
+	"""Sin el país del documento del huésped no se factura (HR-304, HR-346): la fila espera, «Pending», hasta que
+	recepción lo indique (fiscal.events.on_guest_update la vuelve a procesar). También la espera de la cotización
+	(fx.FxPendingError)."""
 
 
 # ── propiedad y credenciales ─────────────────────────────────────────────────────────────────────────────────────
@@ -82,27 +83,81 @@ def _iso(country: str | None) -> str | None:
 	return (code or "").strip().upper() or None
 
 
+def _nationality(value: str | None) -> str | None:
+	"""El país (ISO) de la nacionalidad que guarda Kamra (model.nationality_code), o None."""
+	from kamra_uy.localization import uruguay
+
+	value = (value or "").strip()
+	codes, names = set(), {}
+	if len(value) == 2 and frappe.db.exists("Country", {"code": value.lower()}):
+		codes = {value.upper()}
+	elif len(value) > 3:
+		code = frappe.db.get_value("Country", value, "code")
+		names = {value.lower(): code.upper()} if code else {}
+	return model.nationality_code(value, uruguay.DEFAULT_NATIONALITY, codes, names)
+
+
+def _adult(occupant, adult_age: int) -> bool:
+	age = occupant.age if occupant.age not in (None, "", 0) else occupant.guest_stated_age
+	return not age or int(age) >= adult_age
+
+
+def guests_annex(res, titular: dict) -> list[dict]:
+	"""El anexo de huéspedes de la reserva (D-HR-74, pregunta 5): el titular y cada adulto que la comparte, solo los de
+	documento extranjero. El IVA de la habitación va por el documento del titular (B, KICKOFF D-HR-74); la lista lleva
+	a los demás. El país del documento de un acompañante (Stay Occupant no lo guarda) es el de su tipo o el de su
+	nacionalidad: el pasaporte lo emite el país del que es."""
+	from kamra.localization import adult_age, pack_for
+
+	entries = [model.annex_entry(titular["name"], titular["nationality"], titular["doc"])]
+	limit = adult_age(pack_for(res.property))
+	for o in res.get("occupants") or []:
+		if not _adult(o, limit):
+			continue
+		nationality = _nationality(o.nationality)
+		entries.append(model.annex_entry(o.full_name, nationality, model.document(o.id_type, o.id_number, nationality)))
+	out, seen = [], set()
+	for e in entries:
+		if e and (e["country"], e["doc_number"]) not in seen:
+			seen.add((e["country"], e["doc_number"]))
+			out.append(e)
+	return out
+
+
+def document_copy(res, guest_file: str | None) -> str | None:
+	"""La copia del documento del huésped (la de la reserva, si no se descartó, o la de su ficha): la que va unida a
+	la factura del no residente (D-HR-74, pregunta 1)."""
+	if res.get("id_document") and not res.get("id_document_discarded"):
+		return res.id_document
+	return guest_file or None
+
+
 def guest_inputs(res) -> dict:
-	"""guest (para determineIva), copy_on_file, buyer (para el CFE). La residencia es la del huésped o, sin ella, la
-	declarada al reservar si reside en Uruguay (`model.invoice_residence`); si no hay, ResidenceMissingError: nunca se
-	supone (HR-304)."""
+	"""guest (para determineIva), copy_on_file, buyer y el anexo de huéspedes (para el CFE) y la copia del documento.
+	Manda el país del documento (D-HR-74): el del tipo (la cédula es uruguaya) o el que indicó recepción
+	(`Guest.uy_document_country`), nunca el de residencia, que va como dato. Sin él, ResidenceMissingError: nunca se
+	supone (HR-304, HR-346)."""
 	g = frappe._dict()
 	if res.get("guest"):
 		g = frappe.db.get_value("Guest", res.guest, ["full_name", "id_type", "id_number", "residence_country",
-		                                             "id_file"], as_dict=True) or frappe._dict()
-	residence = model.invoice_residence(_iso(g.residence_country), res.get("uy_declared_residence"))
-	if not residence:
+		                                             "uy_document_country", "nationality", "id_file"],
+		                        as_dict=True) or frappe._dict()
+	doc_country = model.document_country(g.id_type, _iso(g.uy_document_country))
+	if not doc_country:
 		raise ResidenceMissingError(texts.RESIDENCE_MISSING)
-	copy = bool((res.get("id_document") and not res.get("id_document_discarded")) or g.id_file)
-	facts = model.guest_facts(residence, g.id_type, g.id_number, copy)
-	doc = model.document(g.id_type, g.id_number, residence)
+	copy_url = document_copy(res, g.id_file)
+	facts = model.guest_facts(doc_country, g.id_type, bool(copy_url), residence=_iso(g.residence_country))
+	doc = model.document(g.id_type, g.id_number, doc_country)
 	rut, name = None, g.full_name or res.get("guest_name")
 	if res.get("company"):
 		company = frappe.db.get_value("Corporate Account", res.company, ["company_name", "gstin"], as_dict=True)
 		if company and model.valid_rut("".join(ch for ch in (company.gstin or "") if ch.isdigit())):
 			rut, name = company.gstin, company.company_name
-	return {"guest": facts, "copy_on_file": copy,
-	        "buyer": model.buyer(name, doc, rut=rut)}
+	buyer = model.buyer(name, doc, rut=rut)
+	annex = guests_annex(res, {"name": g.full_name or res.get("guest_name"), "doc": doc,
+	                           "nationality": _nationality(g.nationality)}) if buyer["type"] == "rut" else []
+	return {"guest": facts, "copy_on_file": bool(copy_url), "copy_url": copy_url, "document_country": doc_country,
+	        "buyer": buyer, "annex": annex}
 
 
 def _currency(property: str) -> str:
@@ -113,20 +168,12 @@ def _currency(property: str) -> str:
 
 
 def fx_quote(property: str, currency: str) -> tuple[str, str | None]:
-	"""Pesos uruguayos por unidad de `currency` y el día de la cotización: la del BCU que carga Kamra (Exchange Rate,
-	unidades de la moneda de la propiedad por unidad de la otra). En pesos, «1». Qué día y qué tipo pide la DGI lo
-	confirma el contador (HUECO H16)."""
-	if currency == "UYU":
-		return "1", None
-	home = _currency(property)
-	quoted = "UYU" if home == currency else currency
-	rows = frappe.get_all("Exchange Rate", filters={"property": property, "currency": quoted, "disabled": 0},
-	                      fields=["market_rate", "buy_rate", "rate_date"], order_by="rate_date desc", limit=1)
-	rate = (rows[0].market_rate or rows[0].buy_rate) if rows else None
-	if not rate:
-		raise FiscalError(texts.NO_FX)
-	value = Decimal(1) / Decimal(str(rate)) if home == currency else Decimal(str(rate))
-	return model.fx_text(value), str(rows[0].rate_date)
+	"""Pesos uruguayos por unidad de `currency` y el día de la cotización: la fiscal del BCU (kamra_uy.fiscal.fx,
+	HR-348), el dólar interbancario comprador billete del día hábil anterior. Nunca el Exchange Rate de la caja. Sin
+	cotización, fx.FxPendingError: la fila queda «Pending» y sale sola cuando llegue (cierra el HUECO H16)."""
+	from kamra_uy.fiscal import fx
+
+	return fx.quote(property, currency)
 
 
 def fx_rate(property: str, currency: str) -> str:
@@ -410,10 +457,11 @@ def _run_task(task, res, client, core_property) -> None:
 		converted = {"source_currency": home, "source_fx_rate": source_fx} if invoiced_in != home else {}
 		created.append({"kind": "Original", "reference_number": model.reference(res.name, n),
 		                "currency": invoiced_in, **converted, "lines_json": json.dumps(lines),
+		                "document_copy": inputs["copy_url"],
 		                "request_json": json.dumps(model.cfe_request(
 		                    core_property, task.folio or res.name, model.reference(res.name, n), inputs["buyer"],
 		                    invoiced_in, fx, lines, model.convert_payments(_payments(task.folio), rate),
-		                    rules_version))})
+		                    rules_version, annex=inputs["annex"]))})
 	reason = (task.reason or "").strip() or texts.REASON_CLOSE
 	for credit in plan["credits"]:
 		# la nota de crédito, en la moneda de su factura (core le pone la del CFE original)
@@ -452,6 +500,28 @@ def store_cfe(name: str, cfe: dict, status: str | None = None) -> None:
 	frappe.db.set_value(DOCTYPE, name, values)
 
 
+def split(row, parts: list[dict]) -> int:
+	"""Core no emite lo pedido en un solo comprobante (422 `split_required`, HR-345): cada parte sale en su propio CFE,
+	con su número de factura y sus líneas, en filas nuevas «Pending»; la fila pedida queda «Not needed» con el motivo
+	(ya no cuenta como cubierta). Devuelve cuántas partes."""
+	pieces = model.split_request(json.loads(row.request_json), _lines(row) or [], parts)
+	n = len(_rows(row.reservation, kind="Original"))
+	for piece in pieces:
+		n += 1
+		number = model.reference(row.reservation, n)
+		frappe.get_doc({"doctype": DOCTYPE, "kind": "Original", "status": "Pending", "property": row.property,
+		                "reservation": row.reservation, "folio": row.folio, "task": row.task, "purpose": row.purpose,
+		                "reference_number": number, "currency": row.currency, "source_currency": row.source_currency,
+		                "source_fx_rate": row.source_fx_rate, "document_copy": row.get("document_copy"),
+		                "lines_json": json.dumps(piece["lines"]),
+		                "request_json": json.dumps({**piece["body"], "invoice_number": number})}
+		               ).insert(ignore_permissions=True)
+	titles = ", ".join(model.TYPE_TITLES.get(p["type"] or "", p["type"] or "") for p in parts)
+	frappe.db.set_value(DOCTYPE, row.name, {"status": "Not needed",
+	                                        "error": texts.SPLIT_INTO.format(count=len(parts), types=titles)})
+	return len(parts)
+
+
 def _fail(row, error: Exception, status: str) -> None:
 	frappe.db.set_value(DOCTYPE, row.name, {"status": status, "error": str(error)[:1000],
 	                                        "attempts": (row.attempts or 0) + 1})
@@ -482,6 +552,12 @@ def process_reservation(reservation: str) -> dict:
 				store_cfe(row.name, _send(row, client), status="Sent")
 				out["sent"] += 1
 		except CoreError as e:
+			parts = model.split_parts(e.errors) if e.status == 422 and row.kind == "Original" else None
+			if parts:
+				# lo que core no emite junto (HR-345): sale en un CFE por parte, y se sigue con la primera
+				split(row, parts)
+				commit()
+				continue
 			retry = e.retryable or e.status is None
 			_fail(row, e, "Pending" if retry else "Needs attention")
 			out["pending" if retry else "attention"] += 1

@@ -16,7 +16,8 @@ La página de confirmada de la web promete «Te enviamos la confirmación por em
 
 Un solo correo por reserva: lo marca `uy_confirmation_mail_on` al encolarlo; otro aviso del mismo pago, otro pago, otro
 guardado o una vuelta a retenida y otra confirmación no lo repiten. Nunca lleva un dato del pago (ni el modo, ni la
-referencia, ni la tarjeta): solo importes de la reserva. Y nunca frena la confirmación: si no se puede montar o
+referencia, ni la tarjeta): solo importes de la reserva y el enlace al recibo del hotel de ese pago (HR-349,
+kamra_uy.receipts). Y nunca frena la confirmación: si no se puede montar o
 encolar (sin cuenta de correo saliente, sendmail LANZA), se deshace solo el correo y su porqué (el tipo del error, sin
 datos personales) va al Error Log de la reserva (HR-224).
 
@@ -164,10 +165,19 @@ def compose(res) -> dict | None:
 		"telefono": (prop.phone or "").strip(),
 		"correo": (prop.email or "").strip(),
 		"cancelacion": _cancelacion(res, prop),
+		"recibo": _recibo(res.name),
 	}
 	subject, html = render(datos, idioma)
 	return {"to": to, "subject": subject, "message": correo.envolver(html, idioma), "reply_to": datos["correo"] or None,
 	        "idioma": idioma}
+
+
+def _recibo(reservation: str) -> dict | None:
+	"""El recibo del hotel del pago que confirmó la reserva (HR-349: lo emite el mismo guardado del folio que asienta el
+	pago, antes de confirmar): {numero, url}, o None si no hay."""
+	from kamra_uy.receipts import issue
+
+	return issue.for_reservation(reservation)
 
 
 def _cancelacion(res, prop) -> dict:
@@ -227,6 +237,11 @@ def render(datos: dict, idioma: str) -> tuple[str, str]:
 	# que lo pagado es el total, solo si se pagó todo (la misma condición que la fila «Total · Pagado»)
 	pago = [t["pagado_total"]] if pagado_todo else []
 	partes.append(f"<p data-factura>{escape(' '.join([*pago, t['factura']]))}</p>")
+	# HR-349 (D-HR-74): el recibo del hotel de ese pago, con su enlace (la página /recibo, que se puede imprimir)
+	if datos.get("recibo"):
+		antes, _, despues = t["recibo"].partition("{numero}")
+		enlace = correo.enlace(datos["recibo"]["numero"], datos["recibo"]["url"])
+		partes.append(f"<p data-recibo>{escape(antes)}{enlace}{escape(despues)}</p>")
 	if aviso_iva_residentes(datos["llegada"], datos["salida"]):
 		partes.append(f'<p data-aviso="iva">{escape(t["iva"])}</p>')
 	if datos["entrada"] and datos["salida_hora"]:

@@ -15,8 +15,11 @@ de datos si reside en Uruguay (es la única forma: el documento se ve en el chec
   (`uy_tax.booking_room_rates`, la misma regla que services/core/config/iva-rules.uy.yaml) y corrige el total: Kamra
   calcula con él lo que se paga al reservar (`advance_due`), y de ahí salen el enlace de pago, la tarjeta y el saldo de
   Mercado Pago (kamra_uy.payments). Lo hace mientras la reserva no esté en casa: en el check-in manda core.
-- En el check-in core decide con el documento (fiscal.connector.adjust_iva). Si coincide con lo declarado, las tasas no
-  cambian y no se cobra nada. Si lo contradice, `on_reservation_update` apunta en la cuenta del huésped la diferencia
+- Lo declarado es si el DOCUMENTO es uruguayo (D-HR-74: manda el país del documento, no dónde vive; HR-350 cambió la
+  pregunta de la web y HR-346 la de recepción). El valor guardado no cambió («Reside en Uruguay» = documento uruguayo).
+- En el check-in core decide con el documento (fiscal.connector.adjust_iva): recepción indica de qué país es (el paso
+  «residence» de Kamra guarda `Guest.uy_document_country`; la cédula es uruguaya sin preguntarlo) y sin él no hay
+  check-in. Si coincide con lo declarado, las tasas no cambian y no se cobra nada. Si lo contradice, `on_reservation_update` apunta en la cuenta del huésped la diferencia
   de IVA a cobrar o a devolver (un comentario; las noches se cargan de una en una con la auditoría nocturna, así que el
   saldo del folio aún no la enseña entera). La factura (CFE) sigue saliendo en el check-in.
 - `booking_status` y `book` devuelven el desglose (`uy_iva`): sin IVA, IVA, total, la tasa y cuántas noches la llevan.
@@ -46,32 +49,36 @@ AT_HOME = ("Checked In", "Checked Out")
 
 FIELDS = {
 	"Reservation": [
-		{"fieldname": FIELD, "label": "Residencia declarada al reservar", "fieldtype": "Select",
+		{"fieldname": FIELD, "label": "Documento declarado al reservar", "fieldtype": "Select",
 		 "options": "\n".join(["", uy_tax.RESIDENT, uy_tax.NON_RESIDENT]), "no_copy": 1, "print_hide": 1,
 		 "insert_after": "source", "module": MODULE,
-		 "description": "Lo que el huésped declaró en la reserva en línea. Con ella la reserva lleva desde que se crea el "
-		                "IVA de cada noche (10 % al residente del 16 de noviembre al domingo de Pascua; 0 al "
-		                "extranjero). En el check-in manda el documento: si no coincide, la cuenta apunta la diferencia."},
+		 "description": "Lo que el huésped declaró en la reserva en línea: «Reside en Uruguay» es documento uruguayo y «No "
+		                "reside en Uruguay», documento extranjero. Con eso la reserva lleva desde que se crea el IVA de "
+		                "cada noche (10 % con documento uruguayo del 16 de noviembre al domingo de Pascua; 0 con documento "
+		                "extranjero). En el check-in manda el documento: si no coincide, se cobra o se devuelve la "
+		                "diferencia."},
 	],
 }
 
 # El motivo del rechazo, en el idioma de la página (aprobado con todos los textos el 22-11, D-HR-48). La web no lo enseña
 # nunca (la pregunta es obligatoria en su formulario); sí una llamada sin ella.
 MISSING = {
-	"es": "Indica si resides en Uruguay: el IVA de tu reserva depende de eso.",
-	"pt": "Informe se você reside no Uruguai: o IVA da sua reserva depende disso.",
-	"en": "Tell us whether you live in Uruguay: the VAT on your booking depends on it.",
+	"es": "Indica si tu documento es uruguayo: el IVA de tu reserva depende de eso.",
+	"pt": "Informe se o seu documento é uruguaio: o IVA da sua reserva depende disso.",
+	"en": "Tell us whether your ID document is Uruguayan: the VAT on your booking depends on it.",
 }
 
 # La nota de recepción en la cuenta del huésped (aprobada con D-HR-48): el escritorio va en español.
 NOTE = ("IVA: al reservar, el huésped declaró «{declared}», pero el documento del check-in no coincide. "
         "Diferencia de IVA {word}: {amount}.")
-# HR-304: el check-in de una propiedad de Uruguay no se hace sin la residencia (nunca se supone; aprobado con D-HR-48)
-CHECK_IN_NEEDS = ("Antes del check-in, indique si el huésped reside en Uruguay y, si no reside, su país: de eso depende "
-                  "el IVA de la factura.")
+# lo declarado, como lo lee recepción en la nota (el valor guardado no cambió con D-HR-74)
+DECLARED_TEXT = {uy_tax.RESIDENT: "documento uruguayo", uy_tax.NON_RESIDENT: "documento extranjero"}
+# HR-304 y HR-346: el check-in de una propiedad de Uruguay no se hace sin el país del documento (nunca se supone)
+CHECK_IN_NEEDS = ("Antes del check-in, indique si el documento del huésped es uruguayo y, si no, de qué país es: de eso "
+                  "depende el IVA de la factura.")
 UNKNOWN_COUNTRY = "No se reconoce el país «{country}»: elíjalo de la lista."
-AT_HOME_DECLARED = ("El huésped ya está en el hotel: indique la residencia en el check-in (su país de residencia), no "
-                    "en la reserva.")
+AT_HOME_DECLARED = ("El huésped ya está en el hotel: indique el país del documento en el check-in, no en la "
+                    "reserva.")
 COLLECT_WORD = "a cobrar"
 REFUND_WORD = "a devolver"
 
@@ -233,7 +240,8 @@ def on_reservation_update(doc, method=None) -> None:
 	frappe.db.savepoint(sp)
 	try:
 		currency = frappe.get_cached_value("Property", doc.property, "currency")
-		text = NOTE.format(declared=doc.get(FIELD), word=COLLECT_WORD if diff > 0 else REFUND_WORD,
+		text = NOTE.format(declared=DECLARED_TEXT.get(doc.get(FIELD), doc.get(FIELD)),
+		                   word=COLLECT_WORD if diff > 0 else REFUND_WORD,
 		                   amount=fmt_money(float(abs(diff)), currency=currency))
 		folio = connector._guest_folio(doc.name)
 		frappe.get_doc({"doctype": "Comment", "comment_type": "Comment",
@@ -244,28 +252,38 @@ def on_reservation_update(doc, method=None) -> None:
 		frappe.log_error(title="kamra_uy: diferencia de IVA en el check-in")
 
 
-# ── recepción (HR-304): lo que el paquete de Uruguay le da a Kamra (kamra.localization, «residence») ─────────────────
-def _guest_country(res) -> str | None:
-	return frappe.db.get_value("Guest", res.guest, "residence_country") if res.get("guest") else None
+# ── recepción (HR-304, HR-346): lo que el paquete de Uruguay le da a Kamra (kamra.localization, «residence») ───────
+# El paso de Kamra se llama «residence», pero en Uruguay lo que pregunta es el país del DOCUMENTO (D-HR-74): «home» es
+# documento uruguayo y el país de «abroad», el que emitió el documento. Lo guarda Guest.uy_document_country; el país de
+# residencia (Guest.residence_country) queda como dato.
+def document_country(res) -> str | None:
+	"""El país (ISO) del documento del huésped de la reserva (model.document_country), o None si no se sabe."""
+	if not res.get("guest"):
+		return None
+	g = frappe.db.get_value("Guest", res.guest, ["id_type", "uy_document_country"], as_dict=True) or {}
+	return model.document_country(g.get("id_type"), connector._iso(g.get("uy_document_country")))
+
+
+def _country_name(code: str | None) -> str | None:
+	return frappe.db.get_value("Country", {"code": code.lower()}, "name") if code else None
 
 
 def desk_residence(reservation: str) -> dict | None:
-	"""Lo que recepción ve de la residencia de una reserva de Uruguay (None fuera de Uruguay): lo declarado al
-	reservar (`declared`, «resident», «non_resident» o None), el país de residencia del huésped (`country`, el de
-	Guest.residence_country), si aún se puede declarar en la reserva (`can_declare`: antes del check-in) y si falta para
-	facturar (`missing`: sin país y sin declarar que reside en Uruguay; el check-in no se hace así)."""
+	"""Lo que recepción ve en el paso del documento de una reserva de Uruguay (None fuera de Uruguay): lo declarado al
+	reservar (`declared`, «resident» = documento uruguayo, «non_resident» = extranjero, o None), el país del documento
+	(`country`, el nombre del país), si aún se puede declarar en la reserva (`can_declare`: antes del check-in) y si
+	falta para facturar (`missing`: sin el país del documento; el check-in no se hace así, HR-346)."""
 	res = frappe.db.get_value("Reservation", reservation, ["name", "property", "status", "guest", FIELD],
 	                          as_dict=True) if _has_field() else None
 	if not res or not applies(res.property):
 		return None
-	country = _guest_country(res)
-	declared = res.get(FIELD)
+	country = document_country(res)
 	return {
 		"home_country": connector.COUNTRY,
-		"declared": {uy_tax.RESIDENT: "resident", uy_tax.NON_RESIDENT: "non_resident"}.get(declared),
-		"country": country or None,
+		"declared": {uy_tax.RESIDENT: "resident", uy_tax.NON_RESIDENT: "non_resident"}.get(res.get(FIELD)),
+		"country": _country_name(country),
 		"can_declare": res.status not in AT_HOME,
-		"missing": model.invoice_residence(connector._iso(country), declared) is None,
+		"missing": country is None,
 	}
 
 
@@ -308,7 +326,7 @@ def quote_for(quote: dict, resident: bool, inputs: dict) -> dict:
 
 
 def save_country(guest: str, country: str) -> None:
-	"""El país de residencia del huésped que recepción indica en el check-in (Guest.residence_country): el nombre del
+	"""El país del documento del huésped que recepción indica en el check-in (Guest.uy_document_country): el nombre del
 	país o su código ISO; uno que no existe se rechaza. Cambiarlo con el huésped en casa reajusta el IVA de las noches
 	que faltan y saca el comprobante que esperaba (fiscal.events.on_guest_update)."""
 	value = (country or "").strip()
@@ -317,18 +335,18 @@ def save_country(guest: str, country: str) -> None:
 	if not name:
 		frappe.throw(UNKNOWN_COUNTRY.format(country=value))
 	doc = frappe.get_doc("Guest", guest)
-	if doc.get("residence_country") != name:
-		doc.residence_country = name
+	if doc.get("uy_document_country") != name:
+		doc.uy_document_country = name
 		doc.save()
 
 
 def require_at_check_in(doc, method=None) -> None:
-	"""validate de Reservation (el primero): en Uruguay, el check-in no se hace sin la residencia del huésped
-	(`model.invoice_residence`): la factura sale en el check-in y nunca supone que reside (HR-304)."""
+	"""validate de Reservation (el primero): en Uruguay, el check-in no se hace sin el país del documento del huésped
+	(`document_country`): la factura sale en el check-in y nunca supone de dónde es (HR-304, HR-346)."""
 	if doc.get("status") != "Checked In" or not applies(doc.get("property")):
 		return
 	before = doc.get_doc_before_save()
 	if before is not None and before.status == "Checked In":
 		return
-	if model.invoice_residence(connector._iso(_guest_country(doc)), doc.get(FIELD)) is None:
+	if document_country(doc) is None:
 		frappe.throw(CHECK_IN_NEEDS, exc=ResidenceRequiredError)

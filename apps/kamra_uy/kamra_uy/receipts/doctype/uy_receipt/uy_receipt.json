@@ -1,0 +1,287 @@
+{
+ "actions": [],
+ "creation": "2026-11-24 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "receipt_no",
+  "kind",
+  "issued_on",
+  "amount",
+  "currency",
+  "column_break_main",
+  "property",
+  "reservation",
+  "folio",
+  "number",
+  "refund_of",
+  "section_parties",
+  "issuer_name",
+  "issuer_rut",
+  "column_break_parties",
+  "payer_name",
+  "check_in_date",
+  "check_out_date",
+  "section_payment",
+  "payment_row",
+  "payment_reference",
+  "mode",
+  "column_break_payment",
+  "charged_amount",
+  "charged_currency",
+  "exchange_rate",
+  "section_guest",
+  "language",
+  "receipt_url",
+  "access_key"
+ ],
+ "fields": [
+  {
+   "fieldname": "receipt_no",
+   "fieldtype": "Data",
+   "label": "Recibo",
+   "read_only": 1,
+   "in_list_view": 1,
+   "bold": 1
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "label": "Tipo",
+   "read_only": 1,
+   "options": "Receipt\nRefund",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "issued_on",
+   "fieldtype": "Date",
+   "label": "Fecha",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Importe",
+   "read_only": 1,
+   "options": "currency",
+   "in_list_view": 1,
+   "description": "Lo cobrado en la moneda del enlace o del folio; negativo en una constancia de devolución."
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Data",
+   "label": "Moneda",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Propiedad",
+   "read_only": 1,
+   "options": "Property",
+   "in_standard_filter": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "reservation",
+   "fieldtype": "Link",
+   "label": "Reserva",
+   "read_only": 1,
+   "options": "Reservation",
+   "in_standard_filter": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "folio",
+   "fieldtype": "Link",
+   "label": "Folio",
+   "read_only": 1,
+   "options": "Folio",
+   "search_index": 1
+  },
+  {
+   "fieldname": "number",
+   "fieldtype": "Int",
+   "label": "Número",
+   "read_only": 1,
+   "description": "Correlativo por propiedad, sin huecos: pagos y devoluciones en la misma serie."
+  },
+  {
+   "fieldname": "refund_of",
+   "fieldtype": "Link",
+   "label": "Devuelve el recibo",
+   "read_only": 1,
+   "options": "UY Receipt",
+   "depends_on": "eval:doc.kind=='Refund'"
+  },
+  {
+   "fieldname": "section_parties",
+   "fieldtype": "Section Break",
+   "label": "Emisor y pagador"
+  },
+  {
+   "fieldname": "issuer_name",
+   "fieldtype": "Data",
+   "label": "Emisor (razón social)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "issuer_rut",
+   "fieldtype": "Data",
+   "label": "RUT del emisor",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_parties",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "payer_name",
+   "fieldtype": "Data",
+   "label": "Pagador",
+   "read_only": 1
+  },
+  {
+   "fieldname": "check_in_date",
+   "fieldtype": "Date",
+   "label": "Llegada",
+   "read_only": 1
+  },
+  {
+   "fieldname": "check_out_date",
+   "fieldtype": "Date",
+   "label": "Salida",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_payment",
+   "fieldtype": "Section Break",
+   "label": "El pago"
+  },
+  {
+   "fieldname": "payment_row",
+   "fieldtype": "Data",
+   "label": "Línea de pago del folio",
+   "read_only": 1,
+   "unique": 1,
+   "no_copy": 1,
+   "description": "La línea del folio que lo originó: un pago, un recibo (el mismo aviso dos veces no hace otro)."
+  },
+  {
+   "fieldname": "payment_reference",
+   "fieldtype": "Data",
+   "label": "Referencia del pago",
+   "read_only": 1
+  },
+  {
+   "fieldname": "mode",
+   "fieldtype": "Data",
+   "label": "Modo de pago",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_payment",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "charged_amount",
+   "fieldtype": "Float",
+   "label": "Cobrado en otra moneda",
+   "read_only": 1,
+   "precision": "2"
+  },
+  {
+   "fieldname": "charged_currency",
+   "fieldtype": "Data",
+   "label": "Moneda cobrada",
+   "read_only": 1
+  },
+  {
+   "fieldname": "exchange_rate",
+   "fieldtype": "Float",
+   "label": "Cambio de la línea de pago",
+   "read_only": 1,
+   "precision": "9"
+  },
+  {
+   "fieldname": "section_guest",
+   "fieldtype": "Section Break",
+   "label": "Para el huésped"
+  },
+  {
+   "fieldname": "language",
+   "fieldtype": "Data",
+   "label": "Idioma",
+   "read_only": 1
+  },
+  {
+   "fieldname": "receipt_url",
+   "fieldtype": "Data",
+   "label": "Enlace del recibo",
+   "read_only": 1,
+   "options": "URL",
+   "no_copy": 1,
+   "description": "La página del recibo que lleva el correo de confirmación; se puede imprimir."
+  },
+  {
+   "fieldname": "access_key",
+   "fieldtype": "Data",
+   "label": "Clave",
+   "read_only": 1,
+   "hidden": 1,
+   "no_copy": 1,
+   "print_hide": 1
+  }
+ ],
+ "in_create": 1,
+ "links": [],
+ "modified": "2026-11-24 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Receipts",
+ "name": "UY Receipt",
+ "naming_rule": "By script",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "print": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "print": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "Finance",
+   "read": 1,
+   "print": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "print": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0,
+ "title_field": "receipt_no",
+ "show_title_field_in_link": 1,
+ "search_fields": "reservation,payer_name",
+ "description": "El recibo del hotel al cobrar una reserva antes del check-in (HR-349, D-HR-74). No es un CFE: la factura se emite en el check-in. Lo escribe kamra_uy.receipts.issue; nadie lo crea ni lo borra a mano."
+}

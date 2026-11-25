@@ -45,6 +45,7 @@
   "source_currency",
   "source_fx_rate",
   "section_detail",
+  "document_copy",
   "reason",
   "error",
   "lines_json",
@@ -65,7 +66,7 @@
    "fieldname": "purpose",
    "fieldtype": "Select",
    "label": "Motivo",
-   "options": "\nCheck-in\nClose\nVoid",
+   "options": "\nCheck-in\nClose\nVoid\nForfeit",
    "in_standard_filter": 1,
    "read_only": 1
   },
@@ -73,7 +74,7 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Estado en Kamra",
-   "options": "Pending\nSent\nDone\nNot needed\nNeeds attention",
+   "options": "Pending\nQueued\nSent\nDone\nNot needed\nNeeds attention",
    "default": "Pending",
    "reqd": 1,
    "in_list_view": 1,
@@ -308,6 +309,13 @@
    "label": "Detalle"
   },
   {
+   "description": "La copia del documento del huésped, unida a la factura (D-HR-74, pregunta 1): la de la reserva o la de la ficha del huésped.",
+   "fieldname": "document_copy",
+   "fieldtype": "Attach",
+   "label": "Copia del documento",
+   "read_only": 1
+  },
+  {
    "fieldname": "reason",
    "fieldtype": "Small Text",
    "label": "Motivo de la nota de crédito",
@@ -334,7 +342,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-11-23 18:00:00.000000",
+ "modified": "2026-11-24 23:00:00.000000",
  "modified_by": "Administrator",
  "module": "Fiscal",
  "name": "UY CFE",

@@ -9,50 +9,46 @@ import pytest
 from kamra_uy.fiscal import model, texts
 
 
-# ── residencia y documento ────────────────────────────────────────────────────────────────────────────────────────
-def test_a_foreign_resident_with_the_copy_goes_as_non_resident_with_document() -> None:
-    guest = model.guest_facts("AR", "DNI", "30111222", copy_on_file=True)
-    assert guest == {"residence_country": "AR", "document": {"type": "dni", "country": "AR", "copy_on_file": True}}
+# ── el documento (D-HR-74: manda el país del documento; HR-346) ──────────────────────────────────────────────────
+def test_a_foreign_document_with_the_copy_goes_with_its_country_and_the_residence_only_as_data() -> None:
+    guest = model.guest_facts("AR", "DNI", copy_on_file=True, residence="UY")
+    assert guest == {"residence_country": "UY", "document": {"type": "dni", "country": "AR", "copy_on_file": True}}
 
 
-@pytest.mark.parametrize("residence", [None, "", "  "])
-def test_without_residence_nothing_is_assumed(residence) -> None:
-    # HR-304: antes se tomaba Uruguay (10 % al extranjero en alta temporada); ahora no se factura sin ella
+def test_a_uruguayan_id_card_is_uruguayan_wherever_the_guest_lives() -> None:
+    guest = model.guest_facts(None, "National ID", copy_on_file=True, residence="AR")
+    assert guest["document"] == {"type": "ci", "country": "UY", "copy_on_file": True}
+
+
+@pytest.mark.parametrize("country", [None, "", "  "])
+def test_without_the_country_of_the_document_nothing_is_assumed(country) -> None:
+    # HR-304 y HR-346: ni la residencia ni lo declarado dicen de dónde es un pasaporte
     with pytest.raises(model.ResidenceMissing):
-        model.guest_facts(residence, "Passport", "X123", copy_on_file=True)
+        model.guest_facts(country, "Passport", copy_on_file=True, residence="UY")
 
 
-@pytest.mark.parametrize(("country", "declared", "expected"), [
-    ("AR", None, "AR"),
-    ("ar ", "Reside en Uruguay", "AR"),  # el país del huésped (el del documento, en el check-in) manda
-    (None, "Reside en Uruguay", "UY"),  # lo declaró él al reservar: no es suponer
-    ("", "Reside en Uruguay", "UY"),
-    (None, "No reside en Uruguay", None),  # sabemos que no reside, pero no dónde: el check-in pide el país
-    (None, None, None),
-    (None, "", None),
+@pytest.mark.parametrize(("declared", "country", "expected"), [
+    ("No reside en Uruguay", "UY", "collect"),  # dijo documento extranjero y trae cédula: paga el IVA
+    ("Reside en Uruguay", "AR", "refund"),  # dijo documento uruguayo y trae uno extranjero: se le devuelve
+    ("Reside en Uruguay", "UY", None),
+    ("No reside en Uruguay", "BR", None),
+    (None, "UY", None),
 ])
-def test_invoice_residence(country, declared, expected) -> None:
-    assert model.invoice_residence(country, declared) == expected
+def test_what_was_declared_against_the_document(declared, country, expected) -> None:
+    assert model.declared_mismatch(declared, country) == expected
 
 
-def test_a_guest_without_document_number_goes_without_document() -> None:
-    guest = model.guest_facts("BR", "RG", "", copy_on_file=False)
-    assert guest == {"residence_country": "BR"}
-
-
-@pytest.mark.parametrize(("id_type", "residence", "expected"), [
-    ("National ID", "AR", ("ci", "UY")),  # la cédula de Uruguay es uruguaya aunque se viva fuera
+@pytest.mark.parametrize(("id_type", "country", "expected"), [
+    ("National ID", "AR", ("ci", "UY")),  # la cédula de Uruguay es uruguaya, diga lo que diga recepción
     ("DNI", "AR", ("dni", "AR")),
-    ("DNI", "ES", None),  # el DNI solo vale para AR, BR, CL o PY
-    ("RG", "BR", ("dni", "BR")),
-    ("RG", "AR", ("dni", "BR")),
+    ("DNI", "ES", ("other", "ES")),  # el tipo DNI de la DGI solo vale para AR, BR, CL o PY
+    ("RG", None, ("dni", "BR")),
     ("Passport", "US", ("passport", "US")),
     ("Other", "FR", ("other", "FR")),
-    ("Aadhaar", "IN", ("other", "IN")),
     ("Passport", None, None),
 ])
-def test_the_kamra_document_maps_to_the_dgi_document(id_type, residence, expected) -> None:
-    doc = model.document(id_type, "AB123", residence)
+def test_the_kamra_document_maps_to_the_dgi_document(id_type, country, expected) -> None:
+    doc = model.document(id_type, "AB123", country)
     assert (None if doc is None else (doc["doc_type"], doc["country"])) == expected
 
 
@@ -361,7 +357,9 @@ def test_is_pending(row, expected) -> None:
 def test_type_codes_are_the_electronic_and_the_contingency_one() -> None:
     assert model.type_codes("e-ticket") == [101, 201]
     assert model.type_codes("nc-e-factura") == [112, 212]
-    assert model.type_codes(None) == [101, 201, 102, 202, 111, 211, 112, 212]
+    assert model.type_codes("e-factura-exportacion") == [121, 221]
+    assert model.type_codes("nc-e-factura-exportacion") == [122, 222]
+    assert model.type_codes(None) == [101, 201, 102, 202, 111, 211, 112, 212, 121, 221, 122, 222]
 
 
 def test_manual_issue_builds_the_body_of_manual_issue() -> None:
@@ -582,7 +580,7 @@ def test_the_desk_sees_the_choice_with_the_proposal_and_the_rate() -> None:
 
 def test_without_a_rate_the_desk_is_told_to_load_it_before_invoicing() -> None:
     block = model.currency_choice("USD", "2026-12-20", None, None)
-    assert {o["note"] for o in block["options"]} == {texts.NO_FX}
+    assert {o["note"] for o in block["options"]} == {texts.FX_PENDING}
 
 
 def test_a_hotel_in_pesos_converts_to_dollars_only_for_the_dollar_invoice() -> None:
@@ -596,3 +594,79 @@ def test_the_rate_note_of_an_invoice_reads_like_the_desk_writes_it() -> None:
     assert model.fx_note("UYU", "USD", "1", "40.123") == model.CONVERTED_LINE.format(source="USD", rate="40,123")
     assert model.fx_note("UYU", "UYU", "1", None) == ""
     assert model.fx_note("USD", "", "39.5", None) == model.FX_LINE.format(currency="USD", rate="39,5")
+
+
+# ── el anexo de huéspedes de la empresa (D-HR-74, pregunta 5; HR-346) ───────────────────────────────────────────────
+RUT_BUYER = {"type": "rut", "name": "Empresa SA", "rut": "210000000017"}
+EXPORT = {"line_id": "n1", "rate": "0", "reason_code": "no_residente", "tax_category": "export_and_assimilated",
+          "quantity": "1", "unit_amount": "100.00", "description": "x"}
+TAXED = {"line_id": "m1", "rate": "10", "reason_code": "residente_hospedaje", "quantity": "1", "unit_amount": "20.00",
+         "description": "y"}
+
+
+def test_the_annex_lists_foreign_documents_only() -> None:
+    passport = model.document("Passport", "X1", "AR")
+    assert model.annex_entry("Ana", None, passport) == {"name": "Ana", "nationality": "AR", "country": "AR",
+                                                        "doc_type": "passport", "doc_number": "X1"}
+    assert model.annex_entry("Ana", "BR", passport)["nationality"] == "BR"
+    assert model.annex_entry("Juan", "UY", model.document("National ID", "12345678", None)) is None
+    assert model.annex_entry("", "AR", passport) is None
+
+
+def test_the_annex_goes_only_on_a_company_invoice_with_export_nights() -> None:
+    annex = [model.annex_entry("Ana", "AR", model.document("Passport", "X1", "AR"))]
+    body = model.cfe_request("P", "F", "R/1", RUT_BUYER, "USD", "40", [EXPORT, TAXED], [], None, annex=annex)
+    assert body["guests_annex"] == annex
+    assert "guests_annex" not in model.cfe_request("P", "F", "R/1", RUT_BUYER, "USD", "40", [TAXED], [], None,
+                                                   annex=annex)
+    consumer = {"type": "consumer", "name": "Ana"}
+    assert "guests_annex" not in model.cfe_request("P", "F", "R/1", consumer, "USD", "40", [EXPORT], [], None,
+                                                   annex=annex)
+
+
+@pytest.mark.parametrize(("value", "expected"), [
+    ("Uruguayan", "UY"), ("ARG", "AR"), ("D", "DE"), ("br", "BR"), ("Argentina", "AR"), ("Martian", None), ("", None),
+])
+def test_the_nationality_kamra_keeps_becomes_a_country(value, expected) -> None:
+    assert model.nationality_code(value, "Uruguayan", {"BR"}, {"argentina": "AR"}) == expected
+
+
+# ── el CFE que core pide partir (HR-345: 422 split_required; HR-346 manda las partes) ──────────────────────────────
+PARTS = [{"type": "e-factura-exportacion", "line_ids": ["n1"]}, {"type": "e-ticket", "line_ids": ["m1"]}]
+
+
+def test_only_a_split_required_error_has_parts() -> None:
+    errors = [{"path": "/body/lines", "message": "x", "reason": "split_required", "parts": PARTS}]
+    assert model.split_parts(errors) == PARTS
+    assert model.split_parts([{"path": "/body/lines", "message": "un descuento…"}]) is None
+    assert model.split_parts(None) is None
+
+
+def test_each_part_takes_its_lines_and_its_share_of_the_payments() -> None:
+    lines = [{**EXPORT, "source_amount": "100.00"}, {**TAXED, "source_amount": "20.00"}]
+    body = model.cfe_request("P", "F", "R/1", {"type": "consumer", "name": "Ana"}, "USD", "40",
+                             lines, [{"mode": "Tarjeta", "amount": "131.00"}], "v1")
+    export, rest = model.split_request(body, lines, PARTS)
+    assert [ln["line_id"] for ln in export["body"]["lines"]] == ["n1"]
+    assert [ln["line_id"] for ln in rest["body"]["lines"]] == ["m1"]
+    assert export["lines"][0]["source_amount"] == "100.00" and "source_amount" not in export["body"]["lines"][0]
+    assert "tax_category" not in export["body"]["lines"][0]  # CfeLine no la admite: es de Kamra
+    # 131 en proporción 100/120 y lo que queda: entre las dos, lo pagado al centavo
+    assert export["body"]["payments"] == [{"mode": "Tarjeta", "amount": "109.17"}]
+    assert rest["body"]["payments"] == [{"mode": "Tarjeta", "amount": "21.83"}]
+    assert "invoice_number" not in export["body"] and export["body"]["rules_version"] == "v1"
+
+
+def test_a_split_with_other_lines_than_the_ones_sent_is_refused() -> None:
+    body = model.cfe_request("P", "F", "R/1", {"type": "consumer", "name": "Ana"}, "USD", "40", [EXPORT, TAXED], [],
+                             None)
+    with pytest.raises(ValueError):
+        model.split_request(body, [EXPORT, TAXED], [PARTS[0], {"type": "e-ticket", "line_ids": ["zz"]}])
+
+
+def test_the_annex_stays_only_with_the_part_that_has_the_export_nights() -> None:
+    annex = [model.annex_entry("Ana", "AR", model.document("Passport", "X1", "AR"))]
+    body = model.cfe_request("P", "F", "R/1", RUT_BUYER, "USD", "40", [EXPORT, TAXED], [], None, annex=annex)
+    export, rest = model.split_request(body, [EXPORT, TAXED], [
+        {"type": "e-factura-exportacion", "line_ids": ["n1"]}, {"type": "e-factura", "line_ids": ["m1"]}])
+    assert export["body"]["guests_annex"] == annex and "guests_annex" not in rest["body"]

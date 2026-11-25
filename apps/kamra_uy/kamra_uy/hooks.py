@@ -36,11 +36,13 @@ permission_query_conditions = {
 	"UY Contingency Settings": "kamra.authz.property_query_conditions",
 	"UY Contingency Snapshot": "kamra.authz.property_query_conditions",
 	"UY Core Event": "kamra.authz.property_query_conditions",
+	"UY Receipt": "kamra.authz.property_query_conditions",
 }
 has_permission = {
 	"UY Contingency Settings": "kamra.authz.property_has_permission",
 	"UY Contingency Snapshot": "kamra.authz.property_has_permission",
 	"UY Core Event": "kamra.authz.property_has_permission",
+	"UY Receipt": "kamra.authz.property_has_permission",
 }
 
 # Modo contingencia sin sincronización (HR-34). El informe diario sale a las 07:00 de la propiedad: Frappe evalúa los
@@ -53,7 +55,7 @@ scheduler_events = {
 	"cron": {
 		"* * * * *": ["kamra_uy.health.beat.heartbeat"],
 		"0 * * * *": ["kamra_uy.contingency.alerts.daily_report"],
-		"*/5 * * * *": ["kamra_uy.fiscal.sync.sweep"],
+		"*/5 * * * *": ["kamra_uy.fiscal.sync.sweep", "kamra_uy.fiscal.forfeit.sweep"],
 	},
 	# HR-314: las consultas del formulario de contacto de la web, fuera de la cola de correo en cuanto salen
 	# (kamra_uy/contact/form.py)
@@ -61,7 +63,9 @@ scheduler_events = {
 }
 
 # Conector fiscal (HR-28, D-HR-32): el IVA de la estancia y su CFE en el check-in, el ajuste al cerrar la cuenta y la
-# nota de crédito al anularla o al deshacer el check-in (kamra_uy/fiscal/events.py; nunca paran a recepción).
+# nota de crédito al anularla o al deshacer el check-in (kamra_uy/fiscal/events.py; nunca paran a recepción). HR-347: la
+# seña que retiene una reserva cancelada o un no-show, en e-Ticket al 22 % con el IVA dentro, y su nota de crédito si
+# se devuelve (kamra_uy/fiscal/forfeit.py: al cancelar, al cambiar su cuenta, al cargar el documento y en el barrido).
 # Correo de confirmación de la reserva en línea (HR-227): la reserva web guarda al crearse el idioma de la página
 # (before_insert) y, cuando un pago la confirma, encola un solo correo al huésped en ese idioma; nunca frena la
 # confirmación (kamra_uy/notifications/confirmation.py).
@@ -70,6 +74,8 @@ scheduler_events = {
 # check-in); al entrar en casa, si el documento no coincide, la cuenta apunta la diferencia (on_update)
 # (kamra_uy/booking/residence.py). HR-304: en Uruguay el check-in no se hace sin la residencia del huésped
 # (require_at_check_in, el primero del validate): la factura sale en el check-in y nunca la supone.
+# El recibo del hotel al cobrar la reserva antes del check-in (HR-349, D-HR-74): cada cobro nuevo del folio de una
+# reserva que todavía no llegó deja su recibo, y la devolución de ese pago, su constancia (kamra_uy/receipts/issue.py).
 doc_events = {
 	"Reservation": {
 		"before_insert": [
@@ -85,15 +91,17 @@ doc_events = {
 		"on_update": [
 			"kamra_uy.contingency.alerts.on_reservation_change",
 			"kamra_uy.fiscal.events.on_reservation_update",
+			"kamra_uy.fiscal.forfeit.on_reservation_update",
 			"kamra_uy.notifications.confirmation.on_reservation_update",
 			"kamra_uy.booking.residence.on_reservation_update",
 		],
 		"on_cancel": "kamra_uy.contingency.alerts.on_reservation_change",
 		"on_trash": "kamra_uy.contingency.alerts.on_reservation_change",
 	},
-	"Folio": {"on_update": "kamra_uy.fiscal.events.on_folio_update"},
+	"Folio": {"on_update": ["kamra_uy.fiscal.events.on_folio_update", "kamra_uy.fiscal.forfeit.on_folio_update",
+	                      "kamra_uy.receipts.issue.on_folio_update"]},
 	"Cancelled Invoice": {"after_insert": "kamra_uy.fiscal.events.on_invoice_cancelled"},
-	"Guest": {"on_update": "kamra_uy.fiscal.events.on_guest_update"},
+	"Guest": {"on_update": ["kamra_uy.fiscal.events.on_guest_update", "kamra_uy.fiscal.forfeit.on_guest_update"]},
 	# Monitoreo (HR-21): cada Error Log a Sentry, sin datos personales (kamra_uy/health/sentry.py)
 	"Error Log": {"after_insert": "kamra_uy.health.sentry.on_error_log"},
 }
@@ -124,3 +132,6 @@ override_whitelisted_methods = {
 	# HR-337: la cotización pública con presupuesto por IP y ráfaga, medidos por noches (sin tope de noches: D-HR-49)
 	"kamra.public_api.search_stay": "kamra_uy.booking.stay_search.search_stay",
 }
+
+# HR-349: los recibos de la reserva, en sus conexiones del escritorio (kamra_uy/receipts/issue.py)
+override_doctype_dashboards = {"Reservation": ["kamra_uy.receipts.issue.reservation_dashboard"]}

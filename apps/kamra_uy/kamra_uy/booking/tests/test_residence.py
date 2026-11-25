@@ -252,8 +252,9 @@ class TestResidence(AuditTestCase):
 
 	def check_in(self, declared: str, core_rate: float):
 		"""Una reserva web de hoy a pasado mañana con lo declarado; en el check-in, core contesta `core_rate` por noche.
-		El huésped tiene el país de residencia que dice su documento (HR-304: sin él no hay check-in)."""
-		guest = make_guest("UT Huésped Residencia", residence_country="Uruguay" if core_rate else "Argentina")
+		El huésped trae el documento del país que decide la tasa (HR-346: sin el país del documento no hay check-in)."""
+		guest = make_guest("UT Huésped Residencia", id_type="Passport", id_number="X1",
+		                   uy_document_country="Uruguay" if core_rate else "Argentina")
 		res = make_reservation(PROP, self.rt, d(0), d(2), room=self.room, source="Website", guest=guest,
 		                       **{residence.FIELD: declared})
 
@@ -285,6 +286,8 @@ class TestResidence(AuditTestCase):
 		self.assertEqual(len(notes), 1, notes)
 		self.assertIn(residence.COLLECT_WORD, notes[0])
 		self.assertIn("20", notes[0])
+		# recepción lee lo que declaró con las palabras de hoy, no el valor guardado (D-HR-74, HR-346)
+		self.assertIn("«documento extranjero»", notes[0])
 		folio = frappe.db.get_value("Folio", {"reservation": res.name, "folio_type": "Guest"})
 		if folio:
 			self.assertTrue(frappe.db.exists("Comment", {"reference_doctype": "Folio", "reference_name": folio}))
@@ -369,17 +372,21 @@ class TestResidenceAtTheDesk(AuditTestCase):
 		                        "missing": True})
 		out = api.declare_residence(res.name, "1")
 		self.assertEqual(out["declared"], "resident")
-		self.assertFalse(out["missing"])
+		# lo declarado pone el IVA de cada noche, pero para facturar falta el país del documento (HR-346)
+		self.assertTrue(out["missing"])
 		self.assertEqual(self.rates(frappe.get_doc("Reservation", res.name)), [0.0, 0.0, 0.0, 10.0, 10.0, 10.0])
 		api.declare_residence(res.name, "0")
 		self.assertEqual(set(self.rates(frappe.get_doc("Reservation", res.name))), {0.0})
 		with self.assertRaises(frappe.ValidationError):
 			api.declare_residence(res.name, "sí")
+		frappe.db.set_value("Guest", res.guest, "uy_document_country", "Argentina")
+		seen = api.reservation_detail(res.name)["residence"]
+		self.assertEqual((seen["country"], seen["missing"]), ("Argentina", False))
 
 	def test_con_el_huesped_en_casa_ya_no_se_declara_en_la_reserva(self):
 		from kamra import api
 
-		guest = make_guest("UT En Casa", residence_country="Argentina")
+		guest = make_guest("UT En Casa", uy_document_country="Argentina")
 		res = make_reservation(PROP, self.rt, d(0), d(2), room=self.room, status="Checked In", guest=guest)
 		self.assertFalse(api.reservation_detail(res.name)["residence"]["can_declare"])
 		with self.assertRaises(frappe.ValidationError):
@@ -396,16 +403,18 @@ class TestResidenceAtTheDesk(AuditTestCase):
 			res.save(ignore_permissions=True)
 		return res
 
-	def test_sin_residencia_no_hay_check_in(self):
-		for fields in ({}, {residence.FIELD: uy_tax.NON_RESIDENT}):
+	def test_sin_el_pais_del_documento_no_hay_check_in(self):
+		# HR-346: ni lo declarado al reservar ni el país de residencia dicen de dónde es un pasaporte
+		for fields in ({}, {residence.FIELD: uy_tax.NON_RESIDENT}, {residence.FIELD: uy_tax.RESIDENT}):
 			with self.assertRaises(residence.ResidenceRequiredError) as cm:
-				self.check_in(make_guest("UT Sin País"), **fields)
+				self.check_in(make_guest("UT Sin País", id_type="Passport", residence_country="Uruguay"), **fields)
 			self.assertEqual(str(cm.exception), residence.CHECK_IN_NEEDS)
 
-	def test_con_la_residencia_declarada_o_el_pais_del_huesped_si(self):
-		self.assertEqual(self.check_in(make_guest("UT Declaró"), **{residence.FIELD: uy_tax.RESIDENT}).status,
-		                 "Checked In")
-		self.assertEqual(self.check_in(make_guest("UT Con País", residence_country="Brazil")).status, "Checked In")
+	def test_con_el_pais_del_documento_o_una_cedula_si(self):
+		self.assertEqual(self.check_in(make_guest("UT Con País", id_type="Passport",
+		                                          uy_document_country="Brazil")).status, "Checked In")
+		# la cédula es uruguaya: no se pregunta
+		self.assertEqual(self.check_in(make_guest("UT Cédula", id_type="National ID")).status, "Checked In")
 
 	def test_el_flujo_del_check_in_la_pide_y_la_guarda_en_el_huesped(self):
 		from kamra import checkin
@@ -416,7 +425,9 @@ class TestResidenceAtTheDesk(AuditTestCase):
 		self.assertIn("residence", flow["missing_required"])
 		self.assertTrue(flow["vocabulary"]["asks_residence"])
 		flow = checkin.save_guest_details(res.name, residence_country="ar")
-		self.assertEqual(frappe.db.get_value("Guest", guest, "residence_country"), "Argentina")
+		# el paso «residence» de Kamra guarda, en Uruguay, el país del DOCUMENTO (HR-346); la residencia no se toca
+		self.assertEqual(frappe.db.get_value("Guest", guest, ["uy_document_country", "residence_country"]),
+		                 ("Argentina", None))
 		self.assertNotIn("residence", flow["missing_required"])
 		self.assertEqual(flow["residence"]["country"], "Argentina")
 		with self.assertRaises(frappe.ValidationError):
