@@ -12,6 +12,7 @@ from kamra.tests.audit_fixtures import d, make_guest, make_reservation
 
 from kamra_uy.fiscal import api, connector, forfeit
 from kamra_uy.fiscal.tests.test_connector import FakeCore, FiscalCase, _Resp
+from kamra_uy.payments import payer, webhook
 from kamra_uy.payments.tests.fixtures import PROP
 
 
@@ -201,3 +202,43 @@ class TestForfeit(FiscalCase):
 		self.assertEqual(row.status, "Sent")
 		buyer = self.sent_forfeits()[-1]["buyer"]
 		self.assertEqual((buyer["country"], buyer["doc_type"], buyer["doc_number"]), ("UY", "passport", "UY765432"))
+
+	# --- el documento de quien pagó por Mercado Pago (HR-360) -----------------------------------------------------------
+
+	def with_payer(self, res, kind="ci", number="48765431"):
+		frappe.db.set_value("Reservation", res.name, {payer.TYPE_FIELD: kind, payer.NUMBER_FIELD: number})
+		return frappe.get_doc("Reservation", res.name)
+
+	def test_over_the_cap_without_the_guest_document_it_goes_out_with_the_payer_one(self):
+		res = self.with_payer(self.booked(guest=make_guest("UT Seña Pagador")))
+		res = self.cancel_late(res)
+		self.core.cap = 1.0
+		forfeit.process(res.name)
+		[row] = self.forfeits(res)
+		self.assertEqual(row.status, "Sent")
+		buyer = self.sent_forfeits()[-1]["buyer"]
+		self.assertEqual((buyer["type"], buyer["country"], buyer["doc_type"], buyer["doc_number"]),
+		                 ("consumer", "UY", "ci", "48765431"))
+		self.assertNotIn(res.name, [i["reservation"] for i in api.pending(PROP)["items"]])
+
+	def test_with_the_guest_document_loaded_the_guest_one_wins_over_the_payer(self):
+		res = self.cancel_late(self.with_payer(self.booked()))
+		self.core.cap = 1.0
+		forfeit.process(res.name)
+		buyer = self.sent_forfeits()[-1]["buyer"]
+		self.assertEqual((buyer["country"], buyer["doc_type"], buyer["doc_number"]), ("AR", "passport", "AB123456"))
+
+	def test_a_payer_document_that_arrives_while_it_waits_sends_it(self):
+		res = self.cancel_late(self.booked(guest=make_guest("UT Seña Espera Pagador")))
+		self.core.cap = 1.0
+		forfeit.process(res.name)
+		[row] = self.forfeits(res)
+		self.assertEqual(row.error, forfeit.DOC_MISSING)
+		self.enqueue.reset_mock()
+		webhook._remember_payer(connector._guest_folio(res.name),
+		                        {"purpose": "deposit", "payer": {"doc_type": "ci", "doc_number": "48765431"}})
+		self.assertIn("kamra_uy.fiscal.forfeit.process", [c.args[0] for c in self.enqueue.call_args_list])
+		forfeit.process(res.name)
+		old, new = self.forfeits(res)
+		self.assertEqual((old.status, new.status), ("Not needed", "Sent"))
+		self.assertEqual(self.sent_forfeits()[-1]["buyer"]["doc_number"], "48765431")

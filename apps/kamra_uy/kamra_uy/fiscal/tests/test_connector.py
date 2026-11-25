@@ -780,6 +780,123 @@ class TestDiscountByNight(FiscalCase):
 		self.assertEqual(lines(charge("dto", "Discount", -60, "2025-11-14")), [("dto", "2025-11-14", "-60.00")])
 
 
+class TestGroupMasterFolio(FiscalCase):
+	"""HR-362: el folio maestro de un grupo (folio «Group», que Kamra ancla a la reserva principal) lleva las noches de
+	todas las habitaciones. Cada cargo cuenta para su habitación (connector.owner): el ajuste de cierre de la principal
+	no factura las noches que ya facturó el check-in de las otras, lo cargado solo al maestro sale una vez al pagador
+	del grupo, y al cerrar el maestro se concilia cada habitación."""
+
+	def setUp(self):
+		super().setUp()
+		self.company = frappe.get_doc({"doctype": "Corporate Account", "company_name": f"UT Grupo {uuid.uuid4().hex[:6]}",
+		                               "gstin": "21-999999-0016"}).insert(ignore_permissions=True).name
+		self.gb = frappe.get_doc({"doctype": "Group Booking", "property": PROP, "group_name": "UT Grupo Fiscal",
+		                          "company": self.company, "check_in_date": d(0), "check_out_date": d(2),
+		                          "status": "Confirmed"}).insert(ignore_permissions=True)
+		# dos habitaciones del grupo, a nombre de su empresa (kamra.api.pickup_group_room les pone la del grupo), con
+		# pasaporte argentino y su copia: exportación, a un RUT
+		self.main, self.other = (
+			make_reservation(PROP, self.rt, d(0), d(2), status="Checked In", room=make_room(PROP, self.rt, f"G{n}"),
+			                 company=self.company, group_booking=self.gb.name,
+			                 guest=make_guest(name, id_type="Passport", id_number=doc, uy_document_country="Argentina",
+			                                  residence_country="Argentina", nationality="ARG",
+			                                  id_file="/private/files/ut-pasaporte.png"))
+			for n, name, doc in (("101", "UT Principal", "PA-1"), ("102", "UT Segunda", "PB-2")))
+		# la habitación principal paga la habitación de todas: Kamra lleva cada noche al folio maestro
+		self.gb.db_set({"master_reservation": self.main.name, "master_pays": "Room only"})
+		for res in (self.main, self.other):
+			connector.process_reservation(res.name)
+
+	def post_nights(self, res, nights: int = 2) -> None:
+		from kamra.folio import post_room_night
+
+		res = frappe.get_doc("Reservation", res.name)
+		for i in range(nights):
+			post_room_night(res, d(i))
+
+	def master(self) -> str:
+		return frappe.db.get_value("Folio", {"group_booking": self.gb.name, "folio_type": "Group"})
+
+	@staticmethod
+	def settle(folio_name: str) -> None:
+		from kamra.folio import _recalculate, close_folio
+
+		folio = frappe.get_doc("Folio", folio_name)
+		_recalculate(folio)
+		if folio.balance:
+			folio.append("payments", {"posting_date": d(0), "payment_kind": "Payment", "mode": "Tarjeta extranjera",
+			                          "amount": folio.balance})
+			_recalculate(folio)
+			folio.save(ignore_permissions=True)
+		close_folio(folio.name)
+
+	def check_out(self, res) -> None:
+		frappe.db.set_value("Reservation", res.name, "status", "Checked Out", update_modified=False)
+		self.settle(connector._guest_folio(res.name))
+		connector.process_reservation(res.name)
+
+	def close_master(self) -> None:
+		self.settle(self.master())
+		for res in (self.main, self.other):
+			connector.process_reservation(res.name)
+
+	def test_closing_the_master_bills_no_night_that_each_check_in_already_billed(self):
+		self.post_nights(self.main)
+		self.post_nights(self.other)
+		master = frappe.get_doc("Folio", self.master())
+		self.assertEqual(master.reservation, self.main.name)
+		self.assertEqual(sorted(c.reservation for c in master.charges if c.charge_type == "Room"),
+		                 sorted([self.main.name] * 2 + [self.other.name] * 2))
+		# la otra habitación se va antes de cobrar el maestro (que sigue abierto, kamra.checkout): sus noches no se
+		# devuelven
+		self.check_out(self.other)
+		self.close_master()
+		for res in (self.main, self.other):
+			[cfe] = self.documents(res)
+			self.assertEqual(cfe.purpose, "Check-in")
+		self.assertEqual(len(self.core.bodies("/v1/fiscal/cfe")), 2)
+		self.assertFalse([p for p in self.core.paths() if p.endswith("/credit-note")])
+		self.assertEqual([t.status for t in self.documents(self.other, kind="Reconcile")],
+		                 ["Done", "Not needed", "Not needed"])
+
+	def test_what_is_charged_only_to_the_master_goes_out_once_to_the_group_payer(self):
+		self.post_nights(self.main)
+		self.post_nights(self.other)
+		kamra_api.add_folio_charge(self.master(), "Food & Beverage", "UT Cena del grupo", 300, posting_date=d(0))
+		self.close_master()
+		self.check_out(self.main)
+		self.check_out(self.other)
+		self.assertEqual(len(self.documents(self.other)), 1)
+		_check_in, dinner = self.documents(self.main)
+		sent = json.loads(dinner.request_json)
+		self.assertEqual((sent["buyer"]["type"], sent["buyer"]["rut"]), ("rut", "219999990016"))
+		# lo de la reserva principal ya facturado va a la misma tasa: la cena sale en la línea de ajuste
+		self.assertEqual([(ln["description"], ln["unit_amount"]) for ln in sent["lines"]],
+		                 [(model.ADJUSTMENT_TEXT, "300.00")])
+		self.assertEqual(len(self.core.bodies("/v1/fiscal/cfe")), 3)
+
+	def test_the_annex_carries_the_guests_of_the_room_each_cfe_bills(self):
+		frappe.get_doc({"doctype": "Stay Occupant", "parent": self.other.name, "parenttype": "Reservation",
+		                "parentfield": "occupants", "full_name": "UT Acompañante BR", "age": 40,
+		                "id_type": "Passport", "id_number": "BR777", "nationality": "Brazil"}).db_insert()
+		# una noche más en cada habitación, después del check-in: el maestro la lleva y ningún check-in la facturó
+		self.post_nights(self.main, 3)
+		self.post_nights(self.other, 3)
+		master = frappe.get_doc("Folio", self.master())
+		self.close_master()
+		annex = {}
+		for res in (self.main, self.other):
+			_check_in, night = self.documents(res)
+			sent = json.loads(night.request_json)
+			self.assertEqual(({ln["rate"] for ln in sent["lines"]}, sent["buyer"]["type"]), ({"0"}, "rut"))
+			[extra] = [c for c in master.charges if c.reservation == res.name and str(c.posting_date) == d(2)]
+			self.assertEqual(sum(float(ln["unit_amount"]) for ln in sent["lines"]), float(extra.amount))
+			annex[res.name] = [g["name"] for g in sent["guests_annex"]]
+		titular = {r.name: frappe.db.get_value("Guest", r.guest, "full_name") for r in (self.main, self.other)}
+		self.assertEqual(annex, {self.main.name: [titular[self.main.name]],
+		                         self.other.name: [titular[self.other.name], "UT Acompañante BR"]})
+
+
 class TestCoreEvent(FiscalCase):
 	def test_cfe_updated_brings_the_dgi_state_and_ignores_older_or_foreign_events(self):
 		res = self.stay()

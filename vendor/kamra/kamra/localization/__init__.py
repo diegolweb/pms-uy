@@ -280,6 +280,7 @@ def front_desk_vocabulary(pack) -> dict:
 		"adult_age": adult_age(pack),
 		"minor_ids": minor_ids(pack),
 		"asks_residence": asks_residence(pack),
+		"residence_basis": residence_basis(pack),
 	}
 
 
@@ -302,13 +303,31 @@ def front_desk_vocabulary(pack) -> dict:
 #   save_residence_country(guest, country)            at check-in
 #
 # A pack without them never asks: the desk screens show nothing.
+#
+# What the question is about is the pack's RESIDENCE_BASIS: "residence"
+# (the default: where the guest lives) or "document" (the country that
+# issued the guest's ID: Uruguay taxes by it, not by where the guest
+# lives). The flow is the same, only the words change: "is the guest's
+# document from Uruguay?" and the country that issued it. The desk gets it
+# as `residence_basis` (vocabulary) and as `basis` (guest_residence).
+
+RESIDENCE_BASES = ("residence", "document")
+
 
 def asks_residence(pack) -> bool:
 	return callable(getattr(pack, "guest_residence", None))
 
 
+def residence_basis(pack) -> str:
+	basis = getattr(pack, "RESIDENCE_BASIS", None)
+	return basis if basis in RESIDENCE_BASES else RESIDENCE_BASES[0]
+
+
 def guest_residence(pack, reservation: str):
-	return pack.guest_residence(reservation) if asks_residence(pack) else None
+	if not asks_residence(pack):
+		return None
+	out = pack.guest_residence(reservation)
+	return {**out, "basis": residence_basis(pack)} if isinstance(out, dict) else out
 
 
 def _resident(value) -> bool | None:

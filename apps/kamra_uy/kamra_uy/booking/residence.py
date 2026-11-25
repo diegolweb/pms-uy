@@ -16,7 +16,8 @@ de datos si reside en Uruguay (es la única forma: el documento se ve en el chec
   calcula con él lo que se paga al reservar (`advance_due`), y de ahí salen el enlace de pago, la tarjeta y el saldo de
   Mercado Pago (kamra_uy.payments). Lo hace mientras la reserva no esté en casa: en el check-in manda core.
 - Lo declarado es si el DOCUMENTO es uruguayo (D-HR-74: manda el país del documento, no dónde vive; HR-350 cambió la
-  pregunta de la web y HR-346 la de recepción). El valor guardado no cambió («Reside en Uruguay» = documento uruguayo).
+  pregunta de la web, HR-346 lo que guarda recepción y HR-361 su pregunta). El valor guardado no cambió («Reside en
+  Uruguay» = documento uruguayo).
 - En el check-in core decide con el documento (fiscal.connector.adjust_iva): recepción indica de qué país es (el paso
   «residence» de Kamra guarda `Guest.uy_document_country`; la cédula es uruguaya sin preguntarlo) y sin él no hay
   check-in. Si coincide con lo declarado, las tasas no cambian y no se cobra nada. Si lo contradice, `on_reservation_update` apunta en la cuenta del huésped la diferencia
@@ -254,7 +255,9 @@ def on_reservation_update(doc, method=None) -> None:
 
 # ── recepción (HR-304, HR-346): lo que el paquete de Uruguay le da a Kamra (kamra.localization, «residence») ───────
 # El paso de Kamra se llama «residence», pero en Uruguay lo que pregunta es el país del DOCUMENTO (D-HR-74): «home» es
-# documento uruguayo y el país de «abroad», el que emitió el documento. Lo guarda Guest.uy_document_country; el país de
+# documento uruguayo y el país de «abroad», el que emitió el documento. Desde HR-361 también lo DICE: el paquete lleva
+# `RESIDENCE_BASIS = "document"` (localization/uruguay.py) y Kamra pregunta «¿El documento del huésped es de Uruguay?»,
+# ofrece «Documento extranjero» con el «País del documento», y la reserva enseña «Declaró al reservar: documento …». Lo guarda Guest.uy_document_country; el país de
 # residencia (Guest.residence_country) queda como dato.
 def document_country(res) -> str | None:
 	"""El país (ISO) del documento del huésped de la reserva (model.document_country), o None si no se sabe."""

@@ -18,6 +18,7 @@ import HkLaundry from "./HkLaundry"
 import { serverError } from "../lib/resource"
 import { cur } from "../lib/money"
 import { useT, t as translate } from "../lib/i18n"
+import { hasPerm } from "../lib/can"
 
 
 /** The housekeeper's phone app - big targets, one thumb, zero training. */
@@ -93,7 +94,7 @@ export default function HkApp() {
       .then((w) => {
         setSupervisor(
           w.user === "Administrator" ||
-            (w.roles ?? []).some((r: string) => SUPERVISOR_ROLES.includes(r)),
+            hasPerm(w.can ?? null, w.roles ?? [], "Housekeeping Task", "supervise", SUPERVISOR_ROLES),
         )
         setAuth(w.user === "Guest" ? "anon" : "ok")
       })

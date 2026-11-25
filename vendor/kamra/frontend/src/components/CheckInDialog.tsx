@@ -423,6 +423,9 @@ export default function CheckInDialog(props: {
   const step = flow?.steps.find((s) => s.step_key === nav.current) ?? null
   const roomReady = !!flow && !flow.missing_required.some((k) => k !== "residence")
   const residenceMissing = !!flow?.missing_required.includes("residence")
+  // the country asks for the country that issued the guest's ID, not where
+  // the guest lives (Uruguay): the same step, its own words
+  const byDocument = flow?.residence?.basis === "document"
 
   // the country list for "lives abroad", once, where the country asks it
   const asksResidence = !!flow?.residence
@@ -481,7 +484,7 @@ export default function CheckInDialog(props: {
   async function saveDetails() {
     if (!detailsDirty) return true
     if (residenceDirty && residence.where === "abroad" && !residence.country.trim()) {
-      setError(t("Pick the country where the guest lives."))
+      setError(byDocument ? t("Pick the country that issued the guest's document.") : t("Pick the country where the guest lives."))
       return false
     }
     const f = await run<Flow>("kamra.checkin.save_guest_details", {
@@ -827,13 +830,17 @@ export default function CheckInDialog(props: {
                   data-testid="checkin-residence"
                 >
                   <span className="mb-1 block text-xs font-medium text-zinc-500">
-                    {t("Does the guest live in {country}?", { country: flow.residence.home_country })}
+                    {byDocument
+                      ? t("Is the guest's ID document from {country}?", { country: flow.residence.home_country })
+                      : t("Does the guest live in {country}?", { country: flow.residence.home_country })}
                   </span>
                   <div className="flex flex-wrap items-center gap-2" role="radiogroup">
                     {(
                       [
-                        ["home", t("Lives there")],
-                        ["abroad", t("Lives abroad")],
+                        ["home", byDocument
+                          ? t("Document from {country}", { country: flow.residence.home_country })
+                          : t("Lives there")],
+                        ["abroad", byDocument ? t("Foreign document") : t("Lives abroad")],
                       ] as const
                     ).map(([where, label]) => (
                       <button
@@ -861,8 +868,8 @@ export default function CheckInDialog(props: {
                         <input
                           className={inputCls}
                           list="checkin-residence-countries"
-                          aria-label={t("Country of residence")}
-                          placeholder={t("Country of residence")}
+                          aria-label={byDocument ? t("Country of the document") : t("Country of residence")}
+                          placeholder={byDocument ? t("Country of the document") : t("Country of residence")}
                           value={residence.country}
                           onChange={(e) => {
                             setResidence((r) => ({ ...r, country: e.target.value }))
@@ -962,6 +969,12 @@ export default function CheckInDialog(props: {
                     id_number: read.id_number || d.id_number,
                     nationality: read.nationality ?? d.nationality,
                   }))
+                  // the document says who issued it: that is the answer
+                  if (byDocument && typeof read.issued_at_home === "boolean") {
+                    const where = read.issued_at_home ? "home" : "abroad"
+                    setResidence((r) => ({ where, country: where === "abroad" && r.where === "abroad" ? r.country : "" }))
+                    setResidenceDirty(true)
+                  }
                   setScanned(read)
                   setDetailsDirty(true)
                 }}
@@ -1360,7 +1373,9 @@ export default function CheckInDialog(props: {
               {flow.missing_required.length > 0 ? (
                 <p className="text-sm font-medium text-rose-700">
                   {roomReady
-                    ? t("Ask where the guest lives (guest details) before check-in.")
+                    ? byDocument
+                      ? t("Enter the country of the guest's ID document (guest details) before check-in.")
+                      : t("Ask where the guest lives (guest details) before check-in.")
                     : t("Assign a room before check-in.")}
                 </p>
               ) : softPending > 0 ? (

@@ -1,9 +1,13 @@
 """El recibo del hotel al cobrar la reserva (HR-349, D-HR-74), contra la base: un pago aprobado deja un recibo
 numerado por Property y sin huecos; el mismo aviso dos veces, uno solo; la devolución, su constancia negativa; y el
-correo de confirmación lo enlaza. Lo que dice el recibo, sin base: tests/unit/receipts."""
+correo de confirmación lo enlaza. HR-359, con una segunda conexión de verdad: el recibo no espera el cerrojo del
+inventario (la fila de la Property), dos cobros a la vez siguen la serie y el que no salió lo emite el barrido. Lo que
+dice el recibo, sin base: tests/unit/receipts."""
 
 import email
+from contextlib import contextmanager
 from email import policy
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import frappe
@@ -11,19 +15,43 @@ from frappe.utils import add_to_date, now_datetime
 
 from kamra import payments as kamra_payments
 from kamra.folio import open_folio
-from kamra.tests.audit_fixtures import d, make_guest, make_reservation, make_room_type
+from kamra.tests.audit_fixtures import SAVEPOINT, d, make_guest, make_reservation, make_room_type
 from kamra_uy.payments import webhook
-from kamra_uy.payments.tests.fixtures import OTHER, PROP, CobrosCase, event, signed
+from kamra_uy.payments.tests.fixtures import OTHER, PROP, CobrosCase, event, make_uy_property, signed
 from kamra_uy.receipts import issue, model
 
 PAY_2 = "7a2b0c11-1111-4222-8333-999999999999"
+# HR-359: una Property CONFIRMADA en la base, para que otra conexión pueda bloquear su fila o cobrar en su serie
+LOCKED = "UT UY Recibos Cerrojo"
+INVENTORY_LOCK = "kamra.kamra.doctype.reservation.reservation.lock_property_for_inventory"
 
 
 class TestReceipts(CobrosCase):
+	properties = (PROP, OTHER, LOCKED)
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		make_uy_property(LOCKED)
+		issue.ensure_series(LOCKED)  # como el barrido en producción: el contador ya existe cuando llega el cobro
+		frappe.db.commit()
+		cls.addClassCleanup(cls._drop_locked)
+
+	@classmethod
+	def _drop_locked(cls):
+		frappe.db.rollback()
+		frappe.db.delete(issue.DOCTYPE, {"property": LOCKED})
+		frappe.db.delete("Property Setting", {"property": LOCKED})
+		frappe.db.sql("delete from `tabSeries` where name = %s", issue._series_key(LOCKED))
+		frappe.delete_doc("Property", LOCKED, force=True, ignore_permissions=True)
+		frappe.db.commit()
+
 	def setUp(self):
 		super().setUp()
 		frappe.db.set_value("Property", PROP, {"legal_name": "UT Hotel Recibos SA", "gstin": "210000000019",
 		                                       "short_code": "UTR"})
+		# los folios se llaman igual en cada test (la serie se deshace): solo cuentan los Error Log de este test
+		self._old_logs = set(frappe.get_all("Error Log", filters={"method": issue.LOG_TITLE}, pluck="name"))
 
 	def receive(self, body: dict) -> dict:
 		return webhook.receive(*signed(body))
@@ -133,6 +161,143 @@ class TestReceipts(CobrosCase):
 		doc.save(ignore_permissions=True)
 		paid, back = self.receipts(reservation=res)
 		self.assertEqual((back.kind, back.amount, back.refund_of), (model.REFUND, -30.0, paid.name))
+
+	# --- (4) HR-359: el recibo no comparte cerrojo con el inventario, y el que no salió sale en el barrido ---
+
+	@contextmanager
+	def other_transaction(self):
+		"""Otra conexión a la base, con su propia transacción (otro proceso de Kamra). No usa secondary_connection de
+		IntegrationTestCase: la primera vez guarda como «conexión de antes» la nueva y el test sigue en ella."""
+		primary = frappe.local.db
+		if getattr(self, "_other", None) is None:
+			frappe.connect(set_admin_as_user=False)
+			self._other, frappe.local.db = frappe.local.db, primary
+			self.addCleanup(self._close_other)
+			with self.other_transaction():
+				frappe.db.sql("set session innodb_lock_wait_timeout = 3")
+		frappe.local.db = self._other
+		try:
+			yield
+		finally:
+			frappe.local.db = primary
+
+	def _close_other(self):
+		self._other.rollback()
+		self._other.close()
+		self._other = None
+
+	def fresh_transaction(self) -> None:
+		"""Una transacción nueva para esta conexión: la de la clase arrastra los cerrojos de los tests anteriores
+		(ROLLBACK TO SAVEPOINT no los suelta) y la otra conexión esperaría por ellos. Al final, también la suelta."""
+		frappe.db.rollback()
+		frappe.db.savepoint(SAVEPOINT)
+		self.addCleanup(frappe.db.rollback)
+
+	def stay_on_locked(self) -> str:
+		"""Una reserva confirmada de LOCKED y su folio, sin tomar la fila de la Property (Reservation.validate la toma:
+		este test la necesita libre para que la bloquee la otra conexión)."""
+		with patch(INVENTORY_LOCK):
+			rt = make_room_type(LOCKED, "UYL")
+			res = make_reservation(LOCKED, rt, d(5), d(7), status="Confirmed", guest=make_guest("UT Cerrojo"))
+			return open_folio(res)
+
+	def pay_at_desk(self, folio: str, amount: float) -> None:
+		doc = frappe.get_doc("Folio", folio)
+		doc.append("payments", {"posting_date": d(0), "payment_kind": "Advance", "mode": "Cash", "amount": amount})
+		doc.save(ignore_permissions=True)
+
+	def lock_wait(self, seconds: int) -> None:
+		"""Esta conexión se rinde a los `seconds` de esperar un cerrojo (por defecto, 50)."""
+		previous = frappe.db.sql("select @@session.innodb_lock_wait_timeout")[0][0]
+		frappe.db.sql(f"set session innodb_lock_wait_timeout = {int(seconds)}")
+		self.addCleanup(frappe.db.sql, f"set session innodb_lock_wait_timeout = {int(previous)}")
+
+	def failed_logs(self, folio: str) -> list:
+		logs = frappe.get_all("Error Log", filters={"method": issue.LOG_TITLE, "reference_name": folio},
+		                      fields=["name", "error"], order_by="creation asc")
+		return [log for log in logs if log.name not in self._old_logs]
+
+	def test_a_payment_while_the_inventory_holds_the_property_gets_its_receipt_without_waiting(self):
+		self.fresh_transaction()
+		folio = self.stay_on_locked()
+		with self.other_transaction():  # otra transacción decide inventario: tiene la fila de la Property
+			frappe.db.sql("select name from `tabProperty` where name = %s for update", LOCKED)
+		try:
+			self.lock_wait(3)  # si el recibo esperara ese cerrojo, se rendiría aquí y el cobro saldría sin recibo
+			self.pay_at_desk(folio, 30.0)
+		finally:
+			with self.other_transaction():
+				frappe.db.rollback()
+		row = frappe.get_doc("Folio", folio).payments[0]
+		(r,) = self.receipts(folio=folio)
+		self.assertEqual((r.payment_row, r.amount, r.property), (row.name, 30.0, LOCKED))
+		self.assertEqual(self.failed_logs(folio), [])
+
+	def test_two_payments_at_once_keep_the_series_without_gaps(self):
+		self.fresh_transaction()
+		folio = self.stay_on_locked()  # este cobro ya leyó: su instantánea es de antes del otro
+		with self.other_transaction():  # otro cobro de la misma Property emite su recibo y confirma, en medio
+			before = frappe.db.sql("select `current` from `tabSeries` where name = %s", issue._series_key(LOCKED))[0][0]
+			taken = issue._next_number(LOCKED)
+			frappe.db.sql(f"""insert into `tab{issue.DOCTYPE}` (name, creation, modified, owner, modified_by, kind,
+			                  number, receipt_no, property, payment_row, amount, currency)
+			                  values (%s, now(), now(), 'Administrator', 'Administrator', %s, %s, %s, %s, %s, 1, 'USD')""",
+			              (model.doc_name(LOCKED, taken), model.RECEIPT, taken, model.number_label(taken), LOCKED,
+			               f"ut-otro-cobro-{taken}"))
+			frappe.db.commit()
+		self.addCleanup(self._drop_other_payment, model.doc_name(LOCKED, taken), before)
+		self.lock_wait(3)
+		self.pay_at_desk(folio, 30.0)
+		self.pay_at_desk(folio, 20.0)
+		mine = self.receipts(folio=folio)
+		self.assertEqual([(r.number, r.amount) for r in mine], [(taken + 1, 30.0), (taken + 2, 20.0)])
+		self.assertEqual(self.failed_logs(folio), [])
+		self.assertEqual(len(frappe.get_doc("Folio", folio).payments), 2)  # la transacción del cobro sigue entera
+
+	def _drop_other_payment(self, name: str, before: int) -> None:
+		frappe.db.rollback()  # suelta el contador (fresh_transaction lo haría después: aquí hace falta antes)
+		with self.other_transaction():
+			frappe.db.delete(issue.DOCTYPE, {"name": name})
+			frappe.db.sql("update `tabSeries` set `current` = %s where name = %s", (before, issue._series_key(LOCKED)))
+			frappe.db.commit()
+
+	def test_a_receipt_that_failed_comes_out_in_the_next_sweep_with_the_next_number_and_only_once(self):
+		res, folio = self.held()
+		with patch.object(issue, "_next_number", side_effect=RuntimeError("cerrojo agotado (ut)")):
+			self.receive(event("payment.approved", folio, amount="110.00"))
+			self.receive(event("payment.refunded", folio, amount="40.00"))  # la devolución, antes que el recibo
+		paid = frappe.get_doc("Folio", folio).payments[0]
+		self.assertEqual(self.receipts(reservation=res), [])
+		(log,) = self.failed_logs(folio)
+		self.assertIn(f"payment_row={paid.name} kind={model.RECEIPT}", log.error)
+		self.assertNotIn("UT Huésped Cobros", log.error)
+		# otro cobro de la Property, mientras, se lleva el número siguiente
+		_, other = self.held()
+		self.receive(event("payment.approved", other, payment_id=PAY_2, amount="50.00"))
+		(between,) = self.receipts(folio=other)
+
+		self.assertEqual(issue.sweep()["issued"], 1)
+		self.assertEqual(issue.sweep(), {"issued": 0, "resolved": 0, "failed": 0})
+		self.receive(event("payment.approved", folio, amount="110.00"))  # el aviso repetido tampoco hace otro
+		receipt, note = self.receipts(reservation=res)
+		self.assertEqual((receipt.kind, receipt.payment_row, receipt.number, receipt.amount),
+		                 (model.RECEIPT, paid.name, between.number + 1, 110.0))
+		self.assertEqual((note.kind, note.refund_of, note.number, note.amount),
+		                 (model.REFUND, receipt.name, between.number + 2, -40.0))
+		self.assertEqual(str(receipt.issued_on), str(paid.posting_date))
+		(log,) = self.failed_logs(folio)
+		self.assertIn(f"{issue.RESOLVED} {receipt.name}, {note.name}", log.error)
+
+	def test_the_sweep_also_takes_a_failed_receipt_logged_before_hr359(self):
+		res, folio = self.held()
+		with patch.object(issue, "pending_note", side_effect=lambda error, *a: error):  # el Error Log de HR-349
+			with patch.object(issue, "_next_number", side_effect=RuntimeError("ut")):
+				self.receive(event("payment.approved", folio, amount="110.00"))
+		(log,) = self.failed_logs(folio)
+		self.assertEqual(log.error, "RuntimeError")
+		self.assertEqual(issue.sweep()["issued"], 1)
+		(r,) = self.receipts(reservation=res)
+		self.assertEqual((r.payment_row, r.amount), (frappe.get_doc("Folio", folio).payments[0].name, 110.0))
 
 	# --- el correo y la página ---
 

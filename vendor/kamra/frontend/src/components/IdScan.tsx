@@ -24,6 +24,9 @@ export interface IdRead {
   id_expiry_date?: string | null
   address?: string
   city?: string
+  /** the property's country issued the document (from its MRZ); unknown
+   *  when the code carries no issuer */
+  issued_at_home?: boolean
   source: string
 }
 

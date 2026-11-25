@@ -35,6 +35,9 @@ interface Locale {
   /** The country taxes a stay by where the guest lives (Uruguay): the desk
    *  asks it at booking and at check-in. */
   asks_residence?: boolean
+  /** What that question is about: "residence" (where the guest lives) or
+   *  "document" (the country that issued the guest's ID; Uruguay). */
+  residence_basis?: "residence" | "document"
   /** The country pack's own pages the desk opens from the menu (Uruguay:
    *  the pending invoices, /facturas). Shown at the end of Front Desk. */
   desk_pages?: DeskPage[]

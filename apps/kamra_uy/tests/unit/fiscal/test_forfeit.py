@@ -4,6 +4,7 @@ cómo va el comprobante (22 % dentro de lo retenido, e-Factura con RUT, el recha
 from decimal import Decimal
 
 from kamra_uy.fiscal import forfeit, model
+from kamra_uy.payments import payer
 
 # lo que contesta determineIva a una línea `forfeit` (la regla es de core, HR-344)
 SENA = {"rate": "22", "reason_code": "sena_retenida", "rule_id": "sena_retenida"}
@@ -94,3 +95,21 @@ def test_over_the_cap_without_a_document_the_rejection_is_told_as_the_missing_do
     assert not forfeit.has_identity(model.buyer("Ana", None))
     assert forfeit.has_identity(model.buyer("Ana", {"doc_type": "passport", "country": "AR", "doc_number": "X1"}))
     assert forfeit.DOC_MISSING.startswith("Falta el documento del comprador")
+
+
+def test_the_payer_document_from_mercado_pago_is_a_buyer_document_only_when_its_country_is_known() -> None:
+    # HR-360: el `payer` de payment.approved; CI y RUT son de Uruguay, del resto Mercado Pago no da el país
+    assert payer.payer_of({"payer": {"doc_type": "ci", "doc_number": " 48765431 "}}) == {
+        "doc_type": "ci", "doc_number": "48765431"}
+    for bad in (None, "x", {"doc_type": "cedula", "doc_number": "1"}, {"doc_type": "ci", "doc_number": ""},
+                {"doc_type": "ci", "doc_number": 48765431}, {"doc_type": "other", "doc_number": "x" * 41}):
+        assert payer.payer_of({"payer": bad}) is None, bad
+    assert payer.payer_of({}) is None
+    doc = payer.document({payer.TYPE_FIELD: "ci", payer.NUMBER_FIELD: "48765431"})
+    assert doc == {"doc_type": "ci", "country": "UY", "doc_number": "48765431"}
+    assert forfeit.has_identity(model.buyer("Ana", doc))
+    assert payer.document({payer.TYPE_FIELD: "rut", payer.NUMBER_FIELD: "212345670018"})["country"] == "UY"
+    for kind in ("passport", "dni", "other"):
+        assert payer.document({payer.TYPE_FIELD: kind, payer.NUMBER_FIELD: "X1"}) is None, kind
+    assert payer.document({payer.TYPE_FIELD: "ci", payer.NUMBER_FIELD: ""}) is None
+    assert payer.document({}) is None

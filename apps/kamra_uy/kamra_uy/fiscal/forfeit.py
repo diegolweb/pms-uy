@@ -28,6 +28,7 @@ import json
 from decimal import Decimal
 
 from kamra_uy.fiscal import model
+from kamra_uy.payments import payer
 
 STATUSES = ("Cancelled", "No Show")
 PURPOSE = "Forfeit"
@@ -239,8 +240,9 @@ def _buyer(res) -> dict:
 	if res.get("guest"):
 		g = frappe.db.get_value("Guest", res.guest, ["full_name", "id_type", "id_number", "uy_document_country"],
 		                        as_dict=True) or frappe._dict()
-	# el documento lleva el país que lo emitió, nunca el de residencia (HR-346, como connector._buyer)
-	doc = model.document(g.id_type, g.id_number, connector._iso(g.uy_document_country))
+	# el documento lleva el país que lo emitió, nunca el de residencia (HR-346, como connector._buyer); sin el del
+	# huésped, el de quien pagó por Mercado Pago (HR-360, payments/payer.py)
+	doc = model.document(g.id_type, g.id_number, connector._iso(g.uy_document_country)) or payer.document(res)
 	rut, name = None, g.full_name or res.get("guest_name")
 	if res.get("company"):
 		company = frappe.db.get_value("Corporate Account", res.company, ["company_name", "gstin"], as_dict=True)

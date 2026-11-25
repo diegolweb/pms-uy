@@ -30,6 +30,8 @@ import { useCashierAuth } from "../lib/cashierAuth"
 import DepositPanel, { type DepositState } from "./DepositPanel"
 import CheckInDialog from "./CheckInDialog"
 import TillCard, { useTill } from "./TillCard"
+import { CardNetworkPicker } from "./CardNetworkPicker"
+import { cardProblem, isCard } from "../lib/cardNetwork"
 
 /** Reservation.market_segment options (same list as the doctype). */
 const MARKET_SEGMENTS = ["Corporate", "Leisure", "Group", "MICE", "Government", "Wedding",
@@ -303,6 +305,8 @@ export function BookingDialog(props: {
     pay_mode: "Cash",
     pay_amount: "",
     pay_reference: "",
+    pay_network: "",
+    pay_last4: "",
   })
   const setW = (k: keyof typeof walk, v: string) =>
     setWalk((w) => ({ ...w, [k]: v }))
@@ -623,9 +627,14 @@ export function BookingDialog(props: {
 
   async function submit(waitlist = false) {
     if (loc.asks_residence && !form.tax_resident) {
-      setError(t("Ask whether the guest lives in {country}: the tax on the booking depends on it.", {
-        country: options?.property?.country ?? "",
-      }))
+      const country = options?.property?.country ?? ""
+      setError(
+        loc.residence_basis === "document"
+          ? t("Ask whether the guest's ID document is from {country}: the tax on the booking depends on it.", {
+              country,
+            })
+          : t("Ask whether the guest lives in {country}: the tax on the booking depends on it.", { country }),
+      )
       return
     }
     setBusy(true)
@@ -824,6 +833,7 @@ export function BookingDialog(props: {
         payment_mode: amount > 0 ? walk.pay_mode : undefined,
         payment_amount: amount,
         payment_reference: walk.pay_reference.trim() || undefined,
+        ...(amount > 0 && isCard(walk.pay_mode) && walk.pay_network ? { payment_card_network: walk.pay_network, ...(walk.pay_last4 ? { payment_card_last4: walk.pay_last4 } : {}) } : {}),
         idempotency_key: walkInKey,
         ...slotArgs,
         blacklist_override_reason: blacklistOverride,
@@ -924,6 +934,7 @@ export function BookingDialog(props: {
     badSlot ||
     !walk.room ||
     payAmount < 0 ||
+    (payAmount > 0 && !!cardProblem(walk.pay_mode, walk.pay_network, walk.pay_last4)) ||
     (!!walk.id_number.trim() && !walk.id_type)
 
   // the server judges the terms from today (season, tiers, free window);
@@ -1250,12 +1261,20 @@ export function BookingDialog(props: {
                   </Field>
                 </div>
                 {loc.asks_residence && !walkIn && (
-                  <Field label={t("Does the guest live in {country}?", { country: options?.property?.country ?? "" })}>
+                  <Field
+                    label={
+                      loc.residence_basis === "document"
+                        ? t("Is the guest's ID document from {country}?", { country: options?.property?.country ?? "" })
+                        : t("Does the guest live in {country}?", { country: options?.property?.country ?? "" })
+                    }
+                  >
                     <div className="flex gap-2" role="radiogroup" data-testid="tax-resident">
                       {(
                         [
-                          ["1", t("Lives there")],
-                          ["0", t("Lives abroad")],
+                          ["1", loc.residence_basis === "document"
+                            ? t("Document from {country}", { country: options?.property?.country ?? "" })
+                            : t("Lives there")],
+                          ["0", loc.residence_basis === "document" ? t("Foreign document") : t("Lives abroad")],
                         ] as const
                       ).map(([value, label]) => (
                         <button
@@ -1868,6 +1887,10 @@ export function BookingDialog(props: {
                         </button>
                       ))}
                     </div>
+                    {isCard(walk.pay_mode) && (
+                      <CardNetworkPicker size="md" network={walk.pay_network} last4={walk.pay_last4}
+                        onChange={(patch) => setWalk((w) => ({ ...w, ...(patch.network !== undefined ? { pay_network: patch.network } : {}), ...(patch.last4 !== undefined ? { pay_last4: patch.last4 } : {}) }))} />
+                    )}
                     <div className="grid gap-3 sm:grid-cols-2">
                       <Field label={t("Amount collected")}>
                         <input

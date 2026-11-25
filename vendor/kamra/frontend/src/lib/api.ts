@@ -374,6 +374,9 @@ export interface WhoAmI {
   user: string
   full_name: string
   roles: string[]
+  /** {doctype: [permission types]} from Frappe's role permissions
+   *  (Role Permission Manager). Missing on an older server. */
+  can?: Record<string, string[]>
 }
 
 export const whoami = () => call<WhoAmI>("kamra.api.whoami")
@@ -1870,7 +1873,13 @@ export interface TaxResidence {
   can_declare: boolean
   /** check-in cannot go on without it */
   missing: boolean
+  /** what the question is about: where the guest lives, or the country that
+   *  issued the guest's ID document (Uruguay taxes by it). `country` is then
+   *  that country, and "resident" means a document from `home_country`. */
+  basis?: ResidenceBasis
 }
+
+export type ResidenceBasis = "residence" | "document"
 
 /** The currency the tax invoice of a stay goes out in, where the country pack
  *  lets the desk pick it (kamra.localization.invoice_currency). Prices and the

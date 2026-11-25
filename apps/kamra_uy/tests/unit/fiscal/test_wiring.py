@@ -43,7 +43,8 @@ def test_check_in_closing_voiding_and_guest_changes_are_hooked() -> None:
 
 def test_the_sweep_has_who_starts_it() -> None:
     assert _hooks()["scheduler_events"]["cron"]["*/5 * * * *"] == ["kamra_uy.fiscal.sync.sweep",
-                                                                  "kamra_uy.fiscal.forfeit.sweep"]
+                                                                  "kamra_uy.fiscal.forfeit.sweep",
+                                                                  "kamra_uy.receipts.issue.sweep"]
 
 
 def test_every_hooked_handler_exists() -> None:

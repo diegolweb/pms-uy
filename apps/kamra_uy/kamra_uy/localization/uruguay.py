@@ -24,9 +24,10 @@ Qué cubre:
 
 - La residencia del huésped en recepción (HR-304; kamra.localization, «where the guest lives»): `guest_residence`,
   `declare_residence`, `residence_on_new_booking`, `quote_residence` y `save_residence_country`, de
-  kamra_uy.booking.residence. Con ellas Kamra pregunta en la reserva por teléfono si el huésped reside en Uruguay (y
-  cotiza el 10 % del residente como la reserva en línea), lo deja declarar en una reserva ya hecha (la de una
-  plataforma) y pide en el check-in la residencia y el país, sin la cual el check-in no se hace.
+  kamra_uy.booking.residence. Con ellas Kamra pregunta en la reserva por teléfono si el DOCUMENTO del huésped es de
+  Uruguay (y cotiza el 10 % del residente como la reserva en línea), lo deja declarar en una reserva ya hecha (la de una
+  plataforma) y pide en el check-in el país que emitió el documento, sin el cual el check-in no se hace. Lo que pregunta
+  es el documento y no dónde vive (D-HR-74): `RESIDENCE_BASIS = "document"` le da a Kamra esas palabras (HR-361).
 - La moneda de la factura (HR-316; kamra.localization, «the currency a stay is invoiced in»): `invoice_currency` y
   `set_invoice_currency`, de kamra_uy.fiscal.api. Recepción elige en la última pantalla del check-in si la factura sale
   en dólares o en pesos (por defecto, dólares del 16 de noviembre al domingo de Turismo y pesos el resto del año); los
@@ -58,8 +59,12 @@ DEFAULT_CURRENCY = "UYU"
 FX_CURRENCIES = ["UYU", "USD", "ARS", "BRL", "EUR"]
 DEFAULT_TIMEZONE = "America/Montevideo"
 DEFAULT_NATIONALITY = "Uruguayan"
-# el código de país que usa la MRZ de un pasaporte o una cédula uruguaya
+# el código de país que usa la MRZ de un pasaporte o una cédula uruguaya (con él, el escaneo del documento marca en el
+# check-in si lo emitió Uruguay)
 HOME_COUNTRY_ISO3 = "URY"
+# recepción pregunta por el país del DOCUMENTO del huésped, no por dónde vive (D-HR-74; kamra.localization
+# residence_basis): «¿El documento del huésped es de Uruguay?», «Documento extranjero» y «País del documento» (HR-361)
+RESIDENCE_BASIS = "document"
 # «National ID» es la cédula de identidad uruguaya; DNI argentino y RG brasileño; Passport lo usa id_scan
 ID_TYPES = ["National ID", "DNI", "RG", "Passport", "Other"]
 PAYMENT_MODES = ["Cash", "Tarjeta local", "Tarjeta extranjera", "Bank Transfer"]

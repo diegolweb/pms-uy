@@ -1,5 +1,7 @@
 """HR-337: el presupuesto por coste de la cotización pública (kamra_uy/booking/stay_search.py) nunca le quita una venta a
-un huésped de verdad, tampoco a muchos detrás de la misma IP, y sí corta a quien pide años de cotización en bucle.
+un huésped de verdad, tampoco a muchos detrás de la misma IP, y sí corta a quien pide años de cotización en bucle. HR-353:
+lo que se calcula a la vez queda acotado también por debajo de 400 noches (400 por IP, 1.200 en el sitio), sin que una
+estadía corta ni la estadía con sus 6 cercanas choquen nunca.
 
 Lo corre `bench run-tests --module kamra_uy.booking.tests.test_stay_search`.
 """
@@ -8,6 +10,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from contextlib import ExitStack
 from datetime import timedelta
 
 import frappe
@@ -99,6 +102,98 @@ class TestStaySearchBudget(AuditTestCase):
 			pass
 		self.assertEqual(self.used(), 7)
 		self.assertEqual(frappe.cache.zcard(heavy), stay_search.HEAVY_SLOTS)  # la rechazada no dejó su plaza
+		self.assertEqual(frappe.cache.zcard(stay_search.flight_keys(self.ip)[1]), 0)  # ni la de noches en vuelo
+
+
+class TestStaySearchInFlight(AuditTestCase):
+	"""HR-353: las noches en vuelo. Las búsquedas abiertas a la vez se simulan con guardas anidadas: es lo que ven Redis
+	y los dos procesos (la plaza se toma al entrar y se suelta al salir)."""
+
+	properties = ()
+
+	def setUp(self):
+		super().setUp()
+		base = uuid.uuid4().int % 250
+		self.ips = [f"198.51.100.{base + i + 1}" for i in range(4)] + [f"2001:db8::{uuid.uuid4().hex[:4]}"]  # TEST-NET-2
+		for ip in self.ips:
+			for key in (frappe.cache.make_key(f"kamra_uy:search_stay:budget:{ip}"), stay_search.flight_keys(ip)[1]):
+				frappe.cache.delete(key)
+				self.addCleanup(frappe.cache.delete, key)
+		self.site = stay_search.flight_keys(self.ips[0])[0]
+
+	def used(self, ip: str) -> int:
+		return int(frappe.cache.get(frappe.cache.make_key(f"kamra_uy:search_stay:budget:{ip}")) or 0)
+
+	def assertRefused(self, ip: str, cost: int):
+		before = self.used(ip)
+		with self.assertRaises(frappe.RateLimitExceededError):
+			with stay_search.guard(ip, cost):
+				self.fail(f"{cost} unidades desde {ip} no debían calcularse ahora")
+		self.assertEqual(self.used(ip), before)  # lo rechazado no gasta
+
+	def test_una_ip_no_calcula_mas_de_400_noches_a_la_vez_y_las_demas_siguen(self):
+		"""Con una de 400 noches calculándose, otra de 20 desde esa IP da 429 sin gastar; una de 14 (dos semanas) sí
+		pasa, y otra de 400 desde otra IP también. Al salir no queda nada en vuelo."""
+		me, other = self.ips[0], self.ips[1]
+		with stay_search.guard(me, 400):
+			self.assertRefused(me, 20)
+			with stay_search.guard(me, 14):
+				pass
+			with stay_search.guard(other, 400):
+				pass
+		self.assertEqual(frappe.cache.zcard(stay_search.flight_keys(me)[1]), 0)
+		self.assertEqual(self.used(me), 414)
+
+	def test_el_sitio_no_calcula_mas_de_1200_a_la_vez_y_lo_corto_nunca_choca(self):
+		"""Tres IPs con una de 400 cada una (dos de ellas pesadas, de 10 años, que cuentan 400) llenan el sitio: una de 15
+		desde una cuarta IP da 429 sin gastar; la estadía corta (7 noches, o 7 con código = 14) pasa igual. Al soltarse
+		una, la de 15 ya pasa."""
+		ten_years = stay_search.units(d(10), d(10 + 3650))
+		fourth = self.ips[3]
+		with ExitStack() as held:
+			held.enter_context(stay_search.guard(self.ips[0], ten_years))
+			held.enter_context(stay_search.guard(self.ips[1], ten_years))
+			with stay_search.guard(self.ips[2], 400):
+				self.assertRefused(fourth, 15)
+				with stay_search.guard(fourth, stay_search.units(d(10), d(17), "CODIGO")):
+					pass
+			with stay_search.guard(fourth, 15):
+				pass
+		self.assertEqual(frappe.cache.zcard(self.site), 0)
+
+	def test_una_ip_no_abre_mas_de_6_a_la_vez(self):
+		"""Seis de 20 noches a la vez desde una IP caben (las cercanas de la web); la séptima da 429 sin gastar, aunque
+		sus noches cupieran, y una de 14 (que no cuenta) sigue pasando."""
+		me = self.ips[0]
+		with ExitStack() as held:
+			for _ in range(stay_search.SEARCHES_PER_IP):
+				held.enter_context(stay_search.guard(me, 20))
+			self.assertRefused(me, 20)
+			with stay_search.guard(me, 14):
+				pass
+		self.assertEqual(self.used(me), 6 * 20 + 14)
+
+	def test_la_estadia_y_sus_6_cercanas_en_paralelo_caben_hasta_66_noches(self):
+		"""La web pide la estadía sola y, si no hay nada libre, las 6 cercanas a la vez: de 66 noches caben las 6 (396
+		en vuelo), y tras una IP IPv6 igual. Lo mismo de 33 noches con código."""
+		for ip, (ci, co, code) in ((self.ips[0], (d(10), d(76), None)), (self.ips[-1], (d(10), d(43), "CODIGO"))):
+			cost = stay_search.units(ci, co, code)
+			with stay_search.guard(ip, cost):
+				pass
+			with ExitStack() as nearby:
+				for _ in range(6):
+					nearby.enter_context(stay_search.guard(ip, cost))
+			self.assertEqual(self.used(ip), 7 * cost)
+
+	def test_la_plaza_de_un_proceso_muerto_caduca_sola(self):
+		"""Tres plazas de 400 que un proceso muerto dejó tomadas y ya caducaron no cuentan: la siguiente pasa y las
+		barre."""
+		dead = {f"400:ut-{uuid.uuid4().hex}": time.time() - 1 for _ in range(3)}
+		frappe.cache.zadd(self.site, dead)
+		self.addCleanup(frappe.cache.zrem, self.site, *dead)
+		with stay_search.guard(self.ips[0], 400):
+			pass
+		self.assertFalse(any(frappe.cache.zscore(self.site, m) for m in dead))
 
 
 def _patched(name: str, value):

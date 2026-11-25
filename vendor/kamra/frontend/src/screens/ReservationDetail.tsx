@@ -647,18 +647,29 @@ export default function ReservationDetail({
         )}
       </Card>
 
-      {/* where the guest lives, where the country taxes by it */}
+      {/* where the guest lives, or the country of the guest's ID document
+          (residence.basis "document"), where the country taxes by it */}
       {d.residence && (
         <div className="rounded-xl border border-zinc-200 bg-white p-4" data-testid="tax-residence">
-          <h3 className="text-sm font-semibold text-zinc-800">{translate("Residence")}</h3>
+          <h3 className="text-sm font-semibold text-zinc-800">
+            {d.residence.basis === "document" ? translate("Guest's ID document") : translate("Residence")}
+          </h3>
           <p className="mt-1 text-sm text-zinc-700">
-            {d.residence.country
-              ? translate("Lives in {country}", { country: d.residence.country })
-              : d.residence.declared === "resident"
-                ? translate("Said at booking: lives in {country}", { country: d.residence.home_country })
-                : d.residence.declared === "non_resident"
-                  ? translate("Said at booking: lives abroad")
-                  : translate("Not asked yet")}
+            {d.residence.basis === "document"
+              ? d.residence.country
+                ? translate("Document from {country}", { country: d.residence.country })
+                : d.residence.declared === "resident"
+                  ? translate("Said at booking: document from {country}", { country: d.residence.home_country })
+                  : d.residence.declared === "non_resident"
+                    ? translate("Said at booking: foreign document")
+                    : translate("Not asked yet")
+              : d.residence.country
+                ? translate("Lives in {country}", { country: d.residence.country })
+                : d.residence.declared === "resident"
+                  ? translate("Said at booking: lives in {country}", { country: d.residence.home_country })
+                  : d.residence.declared === "non_resident"
+                    ? translate("Said at booking: lives abroad")
+                    : translate("Not asked yet")}
           </p>
           {d.residence.missing && (
             <p className="mt-1 text-xs text-amber-800">
@@ -669,8 +680,11 @@ export default function ReservationDetail({
             <div className="mt-2 flex flex-wrap gap-2">
               {(
                 [
-                  ["1", translate("Lives in {country}", { country: d.residence.home_country }), "resident"],
-                  ["0", translate("Lives abroad"), "non_resident"],
+                  ["1", d.residence.basis === "document"
+                    ? translate("Document from {country}", { country: d.residence.home_country })
+                    : translate("Lives in {country}", { country: d.residence.home_country }), "resident"],
+                  ["0", d.residence.basis === "document" ? translate("Foreign document") : translate("Lives abroad"),
+                    "non_resident"],
                 ] as const
               ).map(([value, label, declared]) => (
                 <Button

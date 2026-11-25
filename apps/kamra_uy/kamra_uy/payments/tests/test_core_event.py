@@ -13,7 +13,7 @@ from frappe.utils import add_to_date, now_datetime
 
 from kamra import payments as kamra_payments
 from kamra.tests.audit_fixtures import ensure_user
-from kamra_uy.payments import texts, webhook
+from kamra_uy.payments import payer, texts, webhook
 from kamra_uy.payments.tests.fixtures import (
 	CODE,
 	FINANCE,
@@ -324,6 +324,52 @@ class TestCoreEvent(CobrosCase):
 			self.assertFalse(roles[role].write or roles[role].create or roles[role].delete)
 		self.assertEqual(meta.autoname, "field:event_id")
 		self.assertEqual(meta.module, "Kamra UY")
+
+	# --- el documento de quien pagó (HR-360) -------------------------------------
+
+	def payer_doc(self, res: str) -> tuple:
+		return tuple(frappe.db.get_value("Reservation", res, [payer.TYPE_FIELD, payer.NUMBER_FIELD]) or ())
+
+	def test_the_payer_document_is_kept_on_the_booking_and_only_a_deposit_replaces_it(self):
+		res, folio = self.booking("Held")
+		body = event("payment.approved", folio, payer={"doc_type": "ci", "doc_number": "48765431"})
+		self.assertEqual(self.receive(body)["status"], "Applied")
+		self.assertEqual(self.payer_doc(res), ("ci", "48765431"))
+		# otro cobro que no es la seña no lo cambia; uno sin payer, tampoco
+		self.receive(event("payment.approved", folio, payment_id=str(uuid.uuid4()), amount="10.00", purpose="balance",
+		                   payer={"doc_type": "passport", "doc_number": "X1"}))
+		self.receive(event("payment.approved", folio, payment_id=str(uuid.uuid4()), amount="10.00"))
+		self.assertEqual(self.payer_doc(res), ("ci", "48765431"))
+		self.receive(event("payment.approved", folio, payment_id=str(uuid.uuid4()), amount="10.00",
+		                   payer={"doc_type": "rut", "doc_number": "212345670018"}))
+		self.assertEqual(self.payer_doc(res), ("rut", "212345670018"))
+		self.assertEqual(len(self.rows(folio)), 4)
+
+		# sin payer, o con uno que no tiene la forma del contrato, el cobro entra igual y no se guarda nada
+		other, other_folio = self.booking("Held")
+		bad = event("payment.approved", other_folio, payment_id=str(uuid.uuid4()),
+		            payer={"doc_type": "cedula", "doc_number": "1"})
+		self.assertEqual(self.receive(bad)["status"], "Applied")
+		self.assertFalse(any(self.payer_doc(other)))
+
+	def test_the_payer_document_goes_to_the_booking_and_nowhere_else(self):
+		# un pago tardío: «Needs attention», correo a Finanzas y aviso guardado; el número no sale en ninguno
+		self.outbox()
+		number = "48765431"
+		res, folio = self.expired()
+		body = event("payment.approved", folio, payer={"doc_type": "ci", "doc_number": number})
+		self.assertEqual(self.receive(body)["status"], "Needs attention")
+		self.assertEqual(self.payer_doc(res), ("ci", number))
+		self.assertNotIn(number, json.dumps(self.stored(body).as_dict(), default=str))
+		messages = frappe.get_all("Email Queue", {"reference_doctype": "UY Core Event"}, pluck="message")
+		self.assertTrue(messages)
+		for raw in messages:
+			self.assertNotIn(number, quopri.decodestring(raw.encode()).decode("utf-8", "replace"))
+		for log in frappe.get_all("Error Log", fields=["method", "error"]):
+			self.assertNotIn(number, f"{log.method} {log.error}")
+		# sin historial de cambios de la reserva con el documento
+		self.assertFalse(frappe.get_all("Version", {"ref_doctype": "Reservation", "docname": res,
+		                                            "data": ["like", f"%{number}%"]}))
 
 
 # --- alcance estricto por propiedad (HR-152) ------------------------------------------------------------------------

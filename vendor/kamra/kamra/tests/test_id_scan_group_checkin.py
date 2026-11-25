@@ -72,6 +72,9 @@ class IdScanTestCase(AuditTestCase):
 		out = id_scan.parse_mrz(TD1)
 		self.assertEqual((out["id_type"], out["id_number"], out["nationality_code"]),
 		                 ("Other", "D23145890", "UTO"))
+		# the issuing state, which can differ from the holder's nationality
+		self.assertEqual(id_scan.parse_mrz(TD1.replace("I<UTO", "I<D<<"))["issuing_code"], "D")
+		self.assertEqual(id_scan.parse_mrz(TD3)["issuing_code"], "UTO")
 
 	def test_aadhaar_secure_qr_keeps_only_the_last_four(self):
 		text = secure_qr(b"V2", b"3", b"123420190101120000000", b"Asha Rao",

@@ -23,6 +23,8 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/card"
+import { CardNetworkPicker } from "../components/CardNetworkPicker"
+import { cardArgs, cardProblem, isCard } from "../lib/cardNetwork"
 
 
 const inr = (n: unknown) =>
@@ -57,6 +59,8 @@ interface InvoiceData {
       mode: string
       amount: number
       reference: string | null
+      card_network?: string | null
+      card_last4?: string | null
       currency?: string | null
       fx_amount?: number | null
       exchange_rate?: number | null
@@ -316,6 +320,8 @@ export default function FolioView() {
     mode: locale().payment_modes[0] ?? "Cash",
     amount: "",
     reference: "",
+    network: "",
+    last4: "",
     kind: "Payment",
     currency: "",
   })
@@ -1921,6 +1927,11 @@ export default function FolioView() {
                   <option key={m} value={m}>{t(m)}</option>
                 ))}
               </select>
+              {isCard(payment.mode) && (
+                <div className="basis-full">
+                  <CardNetworkPicker network={payment.network} last4={payment.last4} onChange={(patch) => setPayment({ ...payment, ...patch })} />
+                </div>
+              )}
               {fxRates.length > 0 && (
                 <select
                   className={inputCls}
@@ -1963,7 +1974,7 @@ export default function FolioView() {
                 </span>
               )}
               <Button
-                disabled={busy || !payment.amount}
+                disabled={busy || !payment.amount || !!cardProblem(payment.mode, payment.network, payment.last4)}
                 onClick={() =>
                   act(async () => {
                     await call("kamra.api.add_folio_payment", withPin({
@@ -1973,8 +1984,11 @@ export default function FolioView() {
                       amount: Number(payment.amount),
                       reference: payment.reference || undefined,
                       currency: payment.currency || undefined,
+                      ...cardArgs(payment.mode, payment.network, payment.last4),
                       idempotency_key: paymentKey,
                     }))
+                    // the card details belong to that payment: the next one starts blank
+                    setPayment((p) => ({ ...p, network: "", last4: "" }))
                     setPaymentKey(newIdempotencyKey())
                   })
                 }

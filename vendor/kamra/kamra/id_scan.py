@@ -18,7 +18,7 @@ from datetime import date
 import frappe
 from frappe import _
 
-from kamra.authz import require_roles
+from kamra.authz import require_perm
 
 _WEIGHTS = (7, 3, 1)
 # a scan is a few hundred characters; an Aadhaar secure QR a few thousand
@@ -109,6 +109,8 @@ def parse_mrz(text: str) -> dict | None:
 		"date_of_birth": _date(dob, future=False),
 		"gender": _SEX.get(sex),
 		"nationality_code": nat.replace("<", ""),
+		# the state that issued the document, on line 1 of every MRZ layout
+		"issuing_code": lines[0][2:5].replace("<", ""),
 		"id_expiry_date": _date(exp, future=True),
 		"source": "mrz",
 	}
@@ -136,6 +138,11 @@ def read(property: str, text: str) -> dict:
 		frappe.throw(_("Kamra can't read this ID's code. Type the details in, "
 		               "and take a picture of the ID."))
 	code = out.pop("nationality_code", None)
+	issuer = out.pop("issuing_code", None)
+	if issuer and loc.home_country_iso3(pack):
+		# the pack's country issued it or not: a country that taxes by the
+		# document's country (residence_basis "document") pre-fills its answer
+		out["issued_at_home"] = issuer == loc.home_country_iso3(pack)
 	if code and not out.get("nationality"):
 		# ponytail: home country by code, others keep the 3-letter code the
 		# desk can edit; add an ISO 3166 table if foreign walk-ins complain
@@ -146,7 +153,7 @@ def read(property: str, text: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
-@require_roles("Front Desk", "Kamra Agent")
+@require_perm("Guest", "handle_guests")
 def read_id_scan(property: str, text: str) -> dict:
 	"""Turn what an ID scanner (or a camera reading a QR) sent into guest
 	fields: name, ID type and number, date of birth, age, gender,

@@ -55,7 +55,8 @@ scheduler_events = {
 	"cron": {
 		"* * * * *": ["kamra_uy.health.beat.heartbeat"],
 		"0 * * * *": ["kamra_uy.contingency.alerts.daily_report"],
-		"*/5 * * * *": ["kamra_uy.fiscal.sync.sweep", "kamra_uy.fiscal.forfeit.sweep"],
+		# HR-359: también el recibo del cobro que no se pudo emitir al cobrar (kamra_uy/receipts/issue.py)
+		"*/5 * * * *": ["kamra_uy.fiscal.sync.sweep", "kamra_uy.fiscal.forfeit.sweep", "kamra_uy.receipts.issue.sweep"],
 	},
 	# HR-314: las consultas del formulario de contacto de la web, fuera de la cola de correo en cuanto salen
 	# (kamra_uy/contact/form.py)
@@ -116,10 +117,11 @@ extend_bootinfo = ["kamra_uy.health.sentry.extend_bootinfo"]
 # Y la residencia declarada al reservar (HR-266, `uy_declared_residence`). Van por código y no en
 # fixtures/custom_field.json, y se ponen al día al instalar y en cada migrate (idempotente).
 # HR-314: el destinatario de las consultas de la web, un ajuste de la Property (kamra_uy/contact/form.py)
+# HR-360: el documento de quien pagó por Mercado Pago, en la Reservation (kamra_uy/payments/payer.py)
 after_install = ["kamra_uy.notifications.confirmation.ensure_fields", "kamra_uy.booking.residence.ensure_fields",
-                 "kamra_uy.contact.form.ensure_fields"]
+                 "kamra_uy.contact.form.ensure_fields", "kamra_uy.payments.payer.ensure_fields"]
 after_migrate = ["kamra_uy.notifications.confirmation.ensure_fields", "kamra_uy.booking.residence.ensure_fields",
-                 "kamra_uy.contact.form.ensure_fields"]
+                 "kamra_uy.contact.form.ensure_fields", "kamra_uy.payments.payer.ensure_fields"]
 
 # El IVA del residente al reservar (HR-266, D-HR-47): book de la página pública (la de la web y la de /book de Kamra)
 # pide en Uruguay la residencia declarada y cobra con ella el IVA de cada noche, y booking_status lleva su desglose

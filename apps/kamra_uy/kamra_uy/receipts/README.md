@@ -18,9 +18,15 @@ web y enlace de pago, `kamra.payments.settle_payment_link`) y recepción. El on_
 
 ## Numeración
 
-`R-<n>`, correlativa por Property y sin huecos: pagos y devoluciones en la misma serie. El número sale bloqueando la
-fila de la Property hasta el final de la transacción; si el cobro se deshace, el número se deshace con él. La base lo
-guarda dos veces: `property`+`number` único y `payment_row` único (una línea de pago, un recibo: el mismo aviso dos
+`R-<n>`, correlativa por Property y sin huecos: pagos y devoluciones en la misma serie. El número sale de un contador
+propio de cada Property (una fila de `tabSeries`, `kamra_uy.receipt:<Property>`; la crea el barrido de cada 5 minutos,
+`ensure_series`, desde el último recibo, en su propia transacción, para que el cobro solo bloquee una fila que ya
+existe; si aún no está, la crea el cobro), que solo bloquean los recibos, hasta el final de la transacción del cobro: dos cobros a la vez esperan su turno
+y no repiten ni saltan número; si el cobro se deshace, el contador se deshace con él. **No** bloquea la fila de la
+Property, que es el cerrojo de cada decisión de inventario de Kamra (`lock_property_for_inventory`): el cobro no espera
+a una reserva o al channel manager (HR-359). El contador se lee y se sube con `innodb_snapshot_isolation` apagado solo
+en esas sentencias: con él (MariaDB ≥ 11.6.2), leer con cerrojo una fila que otro cobro cambió después de la
+instantánea de este deshace la transacción entera, con el cobro dentro. La base lo guarda dos veces: `property`+`number` único y `payment_row` único (una línea de pago, un recibo: el mismo aviso dos
 veces no hace otro). El documento se llama `<código corto de la Property>-R-<n>`. Nadie crea, cambia ni borra un recibo
 a mano (el doctype solo se lee y se imprime).
 
@@ -44,11 +50,19 @@ foto del momento del cobro: si después cambia la Property o la reserva, el reci
 ## Si no puede salir
 
 Nunca frena el cobro: se deshace solo el recibo (savepoint) y va una fila al Error Log del folio con el título
-«kamra_uy: recibo del cobro de la reserva sin emitir» y solo el tipo del error.
+«kamra_uy: recibo del cobro de la reserva sin emitir», el tipo del error y la línea de pago (`payment_row=… kind=…`,
+sin datos del pagador). El barrido de cada 5 minutos (`issue.sweep`, en el cron `*/5` de `hooks.py`) lo emite, cada
+uno en su transacción, con el número siguiente de la serie en ese momento y la fecha del cobro, y anota al final de ese
+Error Log «Resuelto por el barrido de recibos: <recibo>». No duplica: `payment_row` es único, así que si el aviso del
+pago volvió y ya lo emitió, el barrido solo lo anota. La devolución que llegó antes que el recibo de su pago sale en el
+mismo barrido, detrás. Lo que vuelve a fallar se queda para la vuelta siguiente, sin otro Error Log (una línea en el log
+de `kamra_uy`). Un Error Log de antes de HR-359 (solo el tipo del error) también vale: el barrido mira las líneas del
+folio guardadas en los 10 minutos de antes, sin recibo. Los cobros de antes del despliegue de HR-349 no se tocan.
 
 ## Si Gsoft trae recibos
 
 Si su API los emite (pregunta del fundador a Gsoft), cambia `issue.issue` y nada más.
 
 Pruebas: `tests/unit/receipts/test_receipt_model.py` (las reglas, sin base) y `receipts/tests/test_receipts.py` (la
-numeración, el aviso repetido, la devolución y el correo, con `bench run-tests`).
+numeración, el aviso repetido, la devolución y el correo; y con una segunda conexión de verdad, el cobro con la fila
+de la Property bloqueada, dos cobros a la vez y el barrido; con `bench run-tests`).

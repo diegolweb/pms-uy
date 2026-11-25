@@ -17,7 +17,7 @@ import time
 import frappe
 from frappe.utils import now_datetime
 
-from kamra_uy.payments import texts
+from kamra_uy.payments import payer, texts
 from kamra_uy.payments.mercadopago import GATEWAY
 from kamra_uy.pure.core_signature import verify
 from kamra_uy.pure.payments import amount_to_float, charged_fx, parse_core_event
@@ -91,7 +91,7 @@ def _apply(event: dict, folio: str | None, prop: str, payload: bytes, headers: d
 	if currency != event["currency"]:
 		return NEEDS_ATTENTION, f"currency {event['currency']} != {currency or '-'}", texts.ACTION_CURRENCY
 	if event["type"] == "payment.approved" and _booking_status(folio) in LATE:
-		return _late_payment(folio, payload, headers)
+		return _late_payment(folio, payload, headers, event)
 	if frappe.db.get_value("Folio", folio, "status") == "Closed":
 		return NEEDS_ATTENTION, "folio_closed", texts.ACTION_FOLIO_CLOSED
 
@@ -102,6 +102,7 @@ def _apply(event: dict, folio: str | None, prop: str, payload: bytes, headers: d
 		out = payments.handle_webhook(GATEWAY, payload, headers)
 		if out.get("ignored"):
 			return NEEDS_ATTENTION, "ignored by the gateway door", texts.ACTION_NO_FOLIO
+		_remember_payer(folio, event)
 		return (APPLIED, "posted" + _charged_note(event), None) if out.get("posted") else \
 			(DUPLICATE, "payment already posted", None)
 
@@ -127,6 +128,17 @@ def _apply(event: dict, folio: str | None, prop: str, payload: bytes, headers: d
 	return NEEDS_ATTENTION, f"chargeback posted: {left:.2f}", texts.ACTION_CHARGEBACK
 
 
+def _remember_payer(folio: str, event: dict) -> None:
+	"""HR-360: el documento de quien pagó queda en la reserva; si la seña retenida ya esperaba un documento, se rehace."""
+	reservation = payer.remember(folio, event)
+	if not reservation:
+		return
+	from kamra_uy.fiscal import forfeit
+
+	if forfeit._waiting_document(reservation):
+		forfeit._safe("seña retenida: documento de quien pagó", forfeit.queue, frappe.get_doc("Reservation", reservation))
+
+
 def _charged_note(event: dict) -> str:
 	"""D-HR-68: lo que Mercado Pago cobró en otra moneda, para quien mire el aviso («; charged UYU 4478.14 at 40.71»)."""
 	fx = charged_fx(event)
@@ -138,7 +150,7 @@ def _booking_status(folio: str) -> str | None:
 	return frappe.db.get_value("Reservation", reservation, "status") if reservation else None
 
 
-def _late_payment(folio: str, payload: bytes, headers: dict) -> tuple[str, str, str | None]:
+def _late_payment(folio: str, payload: bytes, headers: dict, event: dict) -> tuple[str, str, str | None]:
 	"""El pago de una reserva que ya no lo esperaba (HR-31): el dinero existe, así que se asienta si el folio está
 	abierto, y desde ahí se puede devolver; pero la reserva NO se reactiva sola (su habitación pudo venderse otra vez).
 	Siempre lo revisa Finanzas."""
@@ -149,6 +161,7 @@ def _late_payment(folio: str, payload: bytes, headers: dict) -> tuple[str, str, 
 	out = payments.handle_webhook(GATEWAY, payload, headers)
 	if out.get("ignored"):
 		return NEEDS_ATTENTION, "ignored by the gateway door", texts.ACTION_NO_FOLIO
+	_remember_payer(folio, event)
 	if not out.get("posted"):
 		return DUPLICATE, "payment already posted", None
 	return NEEDS_ATTENTION, "late payment: posted", texts.ACTION_LATE_PAYMENT

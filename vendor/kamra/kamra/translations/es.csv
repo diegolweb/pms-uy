@@ -1458,3 +1458,8 @@ That booking is already {0}.,Esa reserva ya figura como {0}.
 {0} is paid access. Complimentary is not available.,{0} requiere pago: no se puede dar de cortesía.
 Enter the property name.,Ingrese el nombre del alojamiento.
 Enter a valid contact email.,Ingrese un correo de contacto válido.
+"Give exactly the last 4 digits of the card, or leave it empty.","Escriba exactamente los últimos 4 dígitos de la tarjeta, o déjelo en blanco."
+Card network must be one of: {0}.,El tipo de tarjeta debe ser uno de estos: {0}.
+Your own role. What it may do is set in Role Permission Manager.,Es su propio rol. Lo que puede hacer se define en Role Permission Manager.
+Only a Hotel Admin can set a job title.,Solo un administrador del hotel puede asignar un cargo.
+Only a Hotel Admin can grant or remove {0}.,Solo un administrador del hotel puede otorgar o quitar {0}.

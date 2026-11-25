@@ -24,6 +24,7 @@ import { Button } from "./components/ui/button"
 import {
   appForPath,
   useConnectedApps,
+  itemVisible,
   visibleApps,
   type AppDef,
   type AppNavItem,
@@ -87,7 +88,7 @@ export interface ShellContext {
   modules?: string[]
 }
 
-// mirrors @require_roles on kamra.api.create_booking / walk_in (admins always pass)
+// fallback for Reservation: Handle Stays (kamra.api.create_booking / walk_in)
 const BOOKING_ROLES = [
   "Front Desk",
   "Kamra Agent",
@@ -379,7 +380,7 @@ function AppSwitcher({ apps, current }: { apps: AppDef[]; current: AppDef }) {
 }
 
 export default function AppShell() {
-  const { user, roles, signOut } = useAuth()
+  const { user, roles, can, allowed, signOut } = useAuth()
   const { t } = useT()
   const location = useLocation()
   const navigate = useNavigate()
@@ -474,7 +475,7 @@ export default function AppShell() {
     return () => window.removeEventListener("kamra:modules-changed", load)
   }, [property])
 
-  const apps = visibleApps(roles, modules)
+  const apps = visibleApps(roles, modules, can)
   // the app the desk was last in, kept across reloads of a shared page
   const lastApp = useRef<string | undefined>(
     (() => {
@@ -502,10 +503,10 @@ export default function AppShell() {
   }, [currentApp])
   const floor = location.pathname === "/pos" || location.pathname === "/kitchen"
   const { on: kiosk } = useKiosk()
-  const canBook = BOOKING_ROLES.some((r) => roles.includes(r))
+  const canBook = allowed("Reservation", "handle_stays", BOOKING_ROLES)
 
   const items = (currentApp?.items ?? []).filter(
-    (item) => !item.roles || item.roles.some((r) => roles.includes(r)),
+    (item) => itemVisible(item, roles, can),
   )
 
   const renderItem = (item: AppNavItem) =>

@@ -37,9 +37,9 @@
 
     {% if residence_missing %}
       <div class="item warn" data-testid="fp-residence">
-        <h3>Esperan la residencia del huésped</h3>
-        <p>La factura de estas reservas no sale hasta que se indique si el huésped reside en Uruguay y, si no, su
-          país (en el check-in, paso de datos del huésped):</p>
+        <h3>Esperan el país del documento del huésped</h3>
+        <p>La factura de estas reservas no sale hasta que se indique en el check-in (paso de datos del huésped) si el
+          documento del huésped es de Uruguay y, si no, el país que lo emitió:</p>
         <ul>{% for r in residence_missing %}<li>{{ r }}</li>{% endfor %}</ul>
       </div>
     {% endif %}

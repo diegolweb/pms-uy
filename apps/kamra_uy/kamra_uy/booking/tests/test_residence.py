@@ -368,8 +368,9 @@ class TestResidenceAtTheDesk(AuditTestCase):
 		res = make_reservation(PROP, self.rt, str(self.high), str(self.high + timedelta(days=6)), room=self.room,
 		                       source="OTA")
 		seen = api.reservation_detail(res.name)["residence"]
+		# «basis»: lo que recepción pregunta es el país del documento (HR-361)
 		self.assertEqual(seen, {"home_country": "Uruguay", "declared": None, "country": None, "can_declare": True,
-		                        "missing": True})
+		                        "missing": True, "basis": "document"})
 		out = api.declare_residence(res.name, "1")
 		self.assertEqual(out["declared"], "resident")
 		# lo declarado pone el IVA de cada noche, pero para facturar falta el país del documento (HR-346)
