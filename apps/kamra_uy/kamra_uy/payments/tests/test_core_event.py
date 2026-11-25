@@ -371,6 +371,62 @@ class TestCoreEvent(CobrosCase):
 		self.assertFalse(frappe.get_all("Version", {"ref_doctype": "Reservation", "docname": res,
 		                                            "data": ["like", f"%{number}%"]}))
 
+	# --- una transacción perdida (HR-365) -----------------------------------
+	# Un interbloqueo, o el 1020 del aislamiento por instantánea de MariaDB, deshace la transacción entera y Frappe lo
+	# lanza como QueryDeadlockError: el aviso se vuelve a aplicar desde una transacción limpia, y si no, no se guarda.
+
+	def full_rollbacks(self) -> list:
+		"""Cuenta los frappe.db.rollback() sin savepoint y no hace nada con ellos (acabarían con el savepoint del test);
+		el rollback a un savepoint, el del tearDown incluido, sigue corriendo."""
+		real, calls = frappe.local.db.rollback, []
+
+		def rollback(*args, save_point=None, **kwargs):
+			if save_point:
+				return real(*args, save_point=save_point, **kwargs)
+			calls.append(1)
+
+		self._stack.enter_context(patch.object(frappe.local.db, "rollback", side_effect=rollback))
+		return calls
+
+	def receive_with_retry(self, body: dict) -> dict:
+		raw, headers = signed(body)
+		return webhook.receive_with_retry(raw, headers)
+
+	def test_a_refund_whose_transaction_is_lost_is_applied_again_once(self):
+		_, folio = self.booking()
+		self.receive(event("payment.approved", folio))
+		body = event("payment.refunded", folio, amount="100.00")
+		real, tries = kamra_payments.record_gateway_refund, []
+
+		def refund(*args, **kwargs):
+			tries.append(1)
+			if len(tries) == 1:
+				raise frappe.QueryDeadlockError("Record has changed since last read in table 'tabSeries'")
+			return real(*args, **kwargs)
+
+		rollbacks = self.full_rollbacks()
+		with patch("kamra.payments.record_gateway_refund", side_effect=refund):
+			self.assertEqual(self.receive_with_retry(body), {"ok": True, "status": "Applied"})
+		self.assertEqual(len(tries), 2)
+		self.assertEqual(len(rollbacks), 1)
+		refunds = [r for r in self.rows(folio) if r.payment_kind == "Refund"]
+		self.assertEqual([(r.amount, r.reference) for r in refunds], [(-100.0, f"refund:{PAY_1}:{body['refund_id']}")])
+		self.assertEqual(self.stored(body).status, "Applied")
+
+	def test_a_refund_lost_three_times_raises_and_keeps_no_event(self):
+		_, folio = self.booking()
+		self.receive(event("payment.approved", folio))
+		body = event("payment.refunded", folio, amount="100.00")
+		rollbacks = self.full_rollbacks()
+		with patch("kamra.payments.record_gateway_refund",
+		           side_effect=frappe.QueryDeadlockError("Deadlock found when trying to get lock")) as refund, \
+				self.assertRaises(frappe.QueryDeadlockError):
+			self.receive_with_retry(body)
+		self.assertEqual(refund.call_count, 3)
+		self.assertEqual(len(rollbacks), 3)
+		self.assertFalse(frappe.db.exists("UY Core Event", body["event_id"]))
+		self.assertFalse([r for r in self.rows(folio) if r.payment_kind == "Refund"])
+
 
 # --- alcance estricto por propiedad (HR-152) ------------------------------------------------------------------------
 

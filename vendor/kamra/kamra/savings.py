@@ -33,9 +33,12 @@ def log_action(
 	after_snapshot: dict | list | str | None = None,
 	executed_at=None,
 ) -> str | None:
-	"""Write one row to the savings ledger. Never raises — logging must
-	not break the business action it describes — but never fails silently
-	either: an unknown channel is mapped to an allowed one, and a row that
+	"""Write one row to the savings ledger. Never raises, except
+	QueryDeadlockError: the database dropped the caller's whole transaction
+	(a deadlock or MariaDB's snapshot-isolation 1020), so the business action
+	is gone too and must fail or be retried, not be reported done. Logging
+	must not break the business action it describes, but never fails
+	silently either: an unknown channel is mapped to an allowed one, and a row that
 	still fails is reported (server log + Error Log) and retried once with
 	the minimal fields. Returns the log row name, or None if both failed.
 
@@ -69,6 +72,8 @@ def log_action(
 	}
 	try:
 		return _insert(row)
+	except frappe.QueryDeadlockError:
+		raise
 	except Exception as exc:
 		first = exc
 	# The row didn't validate. Losing it silently is how agent actions went
@@ -86,6 +91,8 @@ def log_action(
 	).strip()[:5000]
 	try:
 		return _insert(fallback)
+	except frappe.QueryDeadlockError:
+		raise
 	except Exception as exc:
 		_report_failure(action_type, fallback, exc, fallback=True)
 		return None
@@ -115,13 +122,20 @@ def _normalise_channel(channel: str | None) -> tuple[str | None, str]:
 
 def _insert(row: dict) -> str:
 	"""Insert under a savepoint so a failed row never poisons the caller's
-	transaction (the business action it describes must still commit)."""
+	transaction (the business action it describes must still commit). A
+	transaction the database dropped is not a failed row: QueryDeadlockError."""
 	sp = "aal_" + frappe.generate_hash(length=8)
 	frappe.db.savepoint(sp)
 	try:
 		name = frappe.get_doc(dict(row)).insert(ignore_permissions=True).name
-	except Exception:
-		frappe.db.rollback(save_point=sp)
+	except frappe.QueryDeadlockError:
+		raise  # the database dropped the whole transaction, savepoint included
+	except Exception as exc:
+		try:
+			frappe.db.rollback(save_point=sp)
+		except Exception:
+			# the savepoint is gone: so is the caller's transaction
+			raise frappe.QueryDeadlockError(f"transaction lost under savepoint {sp}") from exc
 		raise
 	frappe.db.release_savepoint(sp)
 	return name

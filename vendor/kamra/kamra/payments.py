@@ -129,6 +129,8 @@ def settle_payment_link(folio_name: str, link_id: str, amount: float,
 	try:
 		from kamra.ledger import record_payment_ledger
 		record_payment_ledger(folio, folio.payments[-1].as_dict())
+	except frappe.QueryDeadlockError:
+		raise  # the transaction is gone, the payment row with it
 	except Exception:
 		from kamra.privacy import guest_traceback
 		frappe.log_error(title="ledger payment-link write failed", message=guest_traceback(folio))
@@ -248,6 +250,8 @@ def record_gateway_refund(folio_name: str, reference: str, amount: float,
 	try:
 		from kamra.ledger import record_payment_ledger
 		record_payment_ledger(doc, doc.payments[-1].as_dict(), ledger=ledger)
+	except frappe.QueryDeadlockError:
+		raise  # the transaction is gone, the refund row with it
 	except Exception:
 		from kamra.privacy import guest_traceback
 		frappe.log_error(title="ledger gateway-refund write failed", message=guest_traceback(doc))
@@ -358,11 +362,19 @@ def refund_via_gateway(folio: str, reference: str, amount: float,
 		frappe.cache.set_value(replay_key, dict(out or {}),
 		                       expires_in_sec=REFUND_REPLAY_SECONDS)
 	from kamra.savings import log_action
-	log_action("gateway_refund_requested", "Folio", doc.name, doc.property,
-	           rationale=f"{loc.money_text(doc.property, amount)} of {reference} "
-	                     f"asked back at {settings.gateway}: "
-	                     f"{(out or {}).get('status')}",
-	           channel="API")
+	rationale = (f"{loc.money_text(doc.property, amount)} of {reference} "
+	             f"asked back at {settings.gateway}: "
+	             f"{(out or {}).get('status')}")
+	try:
+		log_action("gateway_refund_requested", "Folio", doc.name, doc.property,
+		           rationale=rationale, channel="API")
+	except frappe.QueryDeadlockError:
+		# the gateway has the ask and nothing of ours was written (the folio
+		# row comes from its notice): start clean and log it again, so the
+		# desk gets the gateway's answer
+		frappe.db.rollback()
+		log_action("gateway_refund_requested", "Folio", doc.name, doc.property,
+		           rationale=rationale, channel="API")
 	return out
 
 

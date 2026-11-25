@@ -378,3 +378,70 @@ class TestGatewaySettlement(AuditTestCase):
 			"left": "Só restam {0} deste pagamento para reembolsar.",
 			"closed": "Este fólio está fechado.",
 		})
+
+	# --- a transaction the database dropped (HR-365) -------------------------
+	# A deadlock, or the 1020 of MariaDB's snapshot isolation, rolls back the
+	# whole transaction, savepoint included, and Frappe raises it as
+	# QueryDeadlockError. Money posted on the folio is gone with it, so these
+	# must fail (and be retried), never report the money as posted.
+
+	def lost(self):
+		return frappe.QueryDeadlockError("Record has changed since last read in table 'tabSeries'")
+
+	def full_rollbacks(self) -> list:
+		"""Count frappe.db.rollback() calls without a savepoint and do nothing
+		for them (one would end the test's savepoint); a rollback to a
+		savepoint, the tearDown's included, still runs."""
+		real, calls = frappe.local.db.rollback, []
+
+		def rollback(*args, save_point=None, **kwargs):
+			if save_point:
+				return real(*args, save_point=save_point, **kwargs)
+			calls.append(1)
+
+		self._stack.enter_context(patch.object(frappe.local.db, "rollback", side_effect=rollback))
+		return calls
+
+	def test_a_gateway_refund_raises_when_its_transaction_is_lost(self):
+		_, folio = self.booking()
+		payments.settle_payment_link(folio, "plink_1", 500, reference="pay_1")
+		for n, where in enumerate(("kamra.savings._insert", "kamra.ledger.record_payment_ledger"), 1):
+			with self.subTest(lost_in=where), patch(where, side_effect=self.lost()), \
+					self.assertRaises(frappe.QueryDeadlockError):
+				payments.record_gateway_refund(folio, f"refund:pay_1:r{n}", 100, "Payment Link", "x")
+
+	def test_a_link_payment_raises_when_its_transaction_is_lost(self):
+		_, folio = self.booking()
+		for n, where in enumerate(("kamra.savings._insert", "kamra.ledger.record_payment_ledger"), 1):
+			with self.subTest(lost_in=where), patch(where, side_effect=self.lost()), \
+					self.assertRaises(frappe.QueryDeadlockError):
+				payments.settle_payment_link(folio, f"plink_{n}", 100, reference=f"pay_{n}")
+
+	def test_refund_via_gateway_logs_its_ask_again_when_the_transaction_is_lost(self):
+		# nothing of its own is lost (the folio row comes from the gateway's
+		# notice): the desk still gets the gateway's answer, and the ask is logged
+		from kamra import savings
+
+		_, folio = self.booking()
+		payments.settle_payment_link(folio, "plink_1", 500, reference="pay_1")
+		provider = self.refunding({"status": "approved"})
+		rollbacks = self.full_rollbacks()
+		real, tried = savings._insert, []
+
+		def insert(row):
+			tried.append(row["action_type"])
+			if len(tried) == 1:
+				raise self.lost()
+			return real(row)
+
+		with patch("kamra.savings._insert", side_effect=insert):
+			out = payments.refund_via_gateway(folio, "pay_1", 200, "Guest cancelled")
+		self.assertEqual(out, {"status": "approved"})
+		self.assertEqual(provider.refund.call_count, 1)
+		self.assertEqual(len(rollbacks), 1)
+		(row,) = frappe.get_all("Agent Action Log",
+		                        {"action_type": "gateway_refund_requested", "reference_name": folio},
+		                        ["reference_doctype", "rationale"])
+		self.assertEqual(row.reference_doctype, "Folio")
+		self.assertIn("asked back at Razorpay: approved", row.rationale)
+		self.assertNotIn("log fallback", row.rationale)

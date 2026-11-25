@@ -38,9 +38,26 @@ class InvalidEvent(frappe.ValidationError):
 def core_event():
 	"""Lo llama el servicio de cobros; la ruta la fija el servicio (`x-hr-target-path`)."""
 	headers = {k.lower(): v for k, v in (frappe.request.headers or {}).items()}
-	out = receive(frappe.request.get_data() or b"", headers)
+	out = receive_with_retry(frappe.request.get_data() or b"", headers)
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- persists the completed operation before returning to an external/public caller; reviewed as intentional
 	return out
+
+
+_LOST_TRANSACTION_ATTEMPTS = 3
+
+
+def receive_with_retry(payload: bytes, headers: dict) -> dict:
+	"""`receive`, otra vez desde una transacción limpia cuando la base de datos tiró aquella en la que corría (un
+	interbloqueo o el 1020 del aislamiento por instantánea: QueryDeadlockError). Tras el último intento lo lanza: la
+	respuesta no es 2xx y el servicio de cobros manda el aviso de nuevo; no se guardó nada de él, así que se asienta una
+	vez (HR-365)."""
+	for attempt in range(1, _LOST_TRANSACTION_ATTEMPTS + 1):
+		try:
+			return receive(payload, headers)
+		except frappe.QueryDeadlockError:
+			frappe.db.rollback()
+			if attempt == _LOST_TRANSACTION_ATTEMPTS:
+				raise
 
 
 def receive(payload: bytes, headers: dict) -> dict:
