@@ -69,6 +69,18 @@ class ChannexRevisionParsingTestCase(UnitTestCase):
 		self.assertIn("Breakfast", e["notes"])
 		self.assertIn("10:00", e["notes"])
 
+	def test_occupancy_option_books_under_its_parent_rate_plan(self):
+		# Booking OBP: the room comes with the option's id and the real plan in meta.
+		room = dict(doc_revision()["rooms"][0], rate_plan_id="opt-2-adults",
+		            meta={"parent_rate_plan_id": "rp-doc"})
+		events = channex.revision_events(doc_revision(rooms=[room]))
+		self.assertEqual(events[0]["external_rate_id"], "rp-doc")
+		# Without meta, or with an empty parent, it is the rate plan id as before.
+		for meta in (None, {}, {"parent_rate_plan_id": ""}):
+			room = dict(doc_revision()["rooms"][0], meta=meta)
+			events = channex.revision_events(doc_revision(rooms=[room]))
+			self.assertEqual(events[0]["external_rate_id"], "rp-doc")
+
 	def test_two_rooms_split_ref_total_and_commission(self):
 		rooms = [dict(doc_revision()["rooms"][0], room_type_id="rt-a", amount="200.00",
 		              days={"2019-04-26": "200.00"}),

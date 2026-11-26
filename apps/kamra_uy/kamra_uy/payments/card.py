@@ -125,12 +125,15 @@ def checkout(token: str) -> dict:
 
 	`charge` (HR-366): lo que cobra la tarjeta, siempre en pesos (`{amount, currency, exchange_rate}`; el importe en
 	dólares, al cambio de Mercado Pago), o None. Sin `charge` no hay tarjeta: core no lo da si Mercado Pago no da el
-	cambio, y entonces se paga en la página de Mercado Pago."""
+	cambio, y entonces se paga en la página de Mercado Pago.
+
+	`equivalents` (HR-368): lo que vale en dólares, reales y pesos argentinos (`[{amount, currency}]`, en ese orden),
+	informativo, al cambio de Mercado Pago; las que core no da, no están. Vacío sin tarjeta."""
 	res = _res_by_status_token(token)
 	live = _hold_is_live(res)
 	out = {"card": False, "public_key": None, "amount": max(amount_left(res.advance_due, res.advance_paid), 0.0),
 	       "currency": _currency(res), "hold_expires_on": _zoned(res.hold_expires_on) if live else None, "code": None,
-	       "charge": None}
+	       "charge": None, "equivalents": []}
 	try:
 		link_id, settings = _payable(res, None)
 	except _Refused as refused:
@@ -145,7 +148,7 @@ def checkout(token: str) -> dict:
 	charge = _charge_of(card.get("charge"))
 	if not (key and charge):
 		return out
-	return {**out, "card": True, "public_key": key, "charge": charge}
+	return {**out, "card": True, "public_key": key, "charge": charge, "equivalents": _equivalents_of(card.get("equivalents"))}
 
 
 def _charge_of(charge) -> dict | None:
@@ -160,6 +163,25 @@ def _charge_of(charge) -> dict | None:
 		return None
 	rate = charge.get("exchange_rate")
 	return {"amount": amount, "currency": charge["currency"], "exchange_rate": rate if isinstance(rate, str) else None}
+
+
+EQUIVALENT_CURRENCIES = ("USD", "BRL", "ARS")
+
+
+def _equivalents_of(equivalents) -> list[dict]:
+	"""El `card.equivalents` de core para la web (HR-368): `[{amount: float, currency}]` en el orden de core, solo USD,
+	BRL y ARS con importe > 0; lo que no valga se descarta."""
+	out = []
+	for item in equivalents if isinstance(equivalents, list) else []:
+		if not isinstance(item, dict) or item.get("currency") not in EQUIVALENT_CURRENCIES:
+			continue
+		try:
+			amount = float(item.get("amount"))
+		except (TypeError, ValueError):
+			continue
+		if 0 < amount < float("inf"):
+			out.append({"amount": amount, "currency": item["currency"]})
+	return out
 
 
 def _failed(code: str) -> dict:

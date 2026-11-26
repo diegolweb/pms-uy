@@ -363,7 +363,10 @@ def revision_events(revision: dict) -> list[dict]:
 			"revision_id": revision_id,
 			"channel": channel,
 			"room_type_external_id": room.get("room_type_id") or "",
-			"external_rate_id": room.get("rate_plan_id"),
+			# An Occupancy option (or a derived plan) books under its own id; the
+			# real plan, the one Kamra maps, comes in meta.parent_rate_plan_id.
+			"external_rate_id": (room.get("meta") or {}).get("parent_rate_plan_id")
+			or room.get("rate_plan_id"),
 			"check_in": room.get("checkin_date") or rev.get("arrival_date"),
 			"check_out": room.get("checkout_date") or rev.get("departure_date"),
 			"adults": int(occ.get("adults") or 2),

@@ -27,6 +27,9 @@ ORIGIN = "https://hotel.example.com"
 PUBLIC_KEY = "TEST-00000000-not-a-real-public-key"
 CHARGE = {"amount": "4478.14", "currency": "UYU", "exchange_rate": "40.7104",
           "rate_as_of": "2026-11-25T00:00:00.000-04:00"}
+# HR-368: las equivalencias informativas de core (USD 110 al cambio del simulador), con una que la web no pinta
+EQUIVALENTS = [{"currency": "USD", "amount": "110.00"}, {"currency": "BRL", "amount": "647.08"},
+               {"currency": "EUR", "amount": "100.00"}, {"currency": "ARS", "amount": "176440.00"}]
 WALLET_URL = "http://mp-mock:8080/checkout/v1/redirect?pref_id=wallet-1"
 SENTINEL_TOKEN = "SENTINEL-TOK"
 SENTINEL_DOC = "99999999"
@@ -74,7 +77,8 @@ class Core:
 		if "get" in self.fail:
 			raise self.fail["get"]
 		return {"link_id": path.rsplit("/", 1)[-1], "url": "http://mp/x", "status": "pending", "expires_at": None,
-		        "card": {"public_key": self.public_key, "charge": self.charge} if self.public_key and self.charge else None}
+		        "card": {"public_key": self.public_key, "charge": self.charge, "equivalents": EQUIVALENTS}
+		        if self.public_key and self.charge else None}
 
 	def after(self, n: int) -> list[tuple]:
 		return self.calls[n:]
@@ -198,10 +202,14 @@ class TestCard(CobrosCase):
 	def test_checkout_gives_the_card_key_and_the_full_amount(self):
 		out = self.held()
 		got = card.checkout(out["status_token"])
-		self.assertEqual(set(got), {"card", "public_key", "amount", "currency", "charge", "hold_expires_on", "code"})
+		self.assertEqual(set(got), {"card", "public_key", "amount", "currency", "charge", "equivalents", "hold_expires_on",
+		                            "code"})
 		self.assertEqual((got["card"], got["public_key"], got["currency"], got["code"]), (True, PUBLIC_KEY, "USD", None))
 		# HR-366: lo que cobra la tarjeta, en pesos, para que la web lo enseñe
 		self.assertEqual(got["charge"], {"amount": 4478.14, "currency": "UYU", "exchange_rate": "40.7104"})
+		# HR-368: las equivalencias, en el orden de core, sin lo que la web no pinta
+		self.assertEqual(got["equivalents"], [{"amount": 110.0, "currency": "USD"}, {"amount": 647.08, "currency": "BRL"},
+		                                      {"amount": 176440.0, "currency": "ARS"}])
 		# «Full online» (D-HR-38): lo que se paga al reservar es el total
 		self.assertEqual(got["amount"], out["amount_after_tax"])
 		self.assertEqual(got["amount"], out["advance_due"])
