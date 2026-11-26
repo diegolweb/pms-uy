@@ -42,7 +42,7 @@ def explain_night(property: str, rt, date, adults: int = 2, children: int = 0,
 	                           occupancy_rate, package_covering_date, season_adjust)
 	bar = occupancy_rate(rt, adults, children, date, allow_small_group=small_ok)
 	season = active_season(property, date, rt.name)
-	after_season = season_adjust(property, date, bar, rt.name)
+	after_season = season_adjust(property, date, bar, rt.name, adults=adults, children=children)
 	occ = forecast_occupancy(property, date) if occupancy is None else occupancy
 	final, tier = demand_adjust(property, rt.name, date, after_season, occupancy=occ)
 	pkg = package_covering_date(property, date, rt.name)

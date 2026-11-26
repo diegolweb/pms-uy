@@ -26,7 +26,8 @@ TOK = "tok-card-ut-1"
 
 def request(**over) -> dict:
     base = {"card_token": TOK, "payment_method_id": "visa", "issuer_id": "", "payer_email": "huesped@example.com",
-            "identification_type": "", "identification_number": "", "device_id": ""}
+            "identification_type": "", "identification_number": "", "device_id": "", "charge_amount": "4478.14",
+            "charge_currency": "UYU"}
     base.update(over)
     return card_payment_request(**base)
 
@@ -81,8 +82,26 @@ def test_the_wallet_key_changes_with_the_body_it_goes_with() -> None:
 # --- el cuerpo para core ---------------------------------------------------------
 
 
+CHARGE = {"amount": "4478.14", "currency": "UYU"}
+
+
 def test_the_minimal_body_has_no_amount() -> None:
-    assert request() == {"token": TOK, "payment_method_id": "visa", "payer": {"email": "huesped@example.com"}}
+    assert request() == {"token": TOK, "payment_method_id": "visa", "payer": {"email": "huesped@example.com"},
+                         "expected_charge": CHARGE}
+
+
+def test_the_body_carries_the_pesos_the_guest_saw() -> None:
+    # HR-366: core no cobra con esto; lo compara y, si los pesos cambiaron, responde charge_changed sin cobrar
+    assert request(charge_amount="50908.36")["expected_charge"] == {"amount": "50908.36", "currency": "UYU"}
+
+
+@pytest.mark.parametrize("over", [
+    {"charge_amount": ""}, {"charge_amount": "0.00"}, {"charge_amount": "4478.145"}, {"charge_amount": "-4478.14"},
+    {"charge_amount": "4.478,14"}, {"charge_currency": ""}, {"charge_currency": "EUR"},
+])
+def test_a_missing_or_malformed_charge_is_refused(over) -> None:
+    with pytest.raises(ValueError):
+        request(**over)
 
 
 def test_the_full_body() -> None:
@@ -90,7 +109,7 @@ def test_the_full_body() -> None:
                    device_id="armor.0123456789abcdef")
     assert body == {"token": TOK, "payment_method_id": "visa", "issuer_id": "310",
                     "payer": {"email": "huesped@example.com", "identification": {"type": "CI", "number": "12345678"}},
-                    "device_id": "armor.0123456789abcdef"}
+                    "device_id": "armor.0123456789abcdef", "expected_charge": CHARGE}
     assert not {"amount", "transaction_amount"} & set(body)
 
 
@@ -126,11 +145,11 @@ def test_the_error_never_carries_the_token_or_the_document() -> None:
 
 
 def test_the_codes_the_web_translates() -> None:
-    assert CARD_CODES == ("hold_expired", "link_not_payable", "card_not_enabled", "too_many_attempts", "unavailable",
-                          "invalid")
+    assert CARD_CODES == ("hold_expired", "link_not_payable", "card_not_enabled", "too_many_attempts", "charge_changed",
+                          "unavailable", "invalid")
 
 
-@pytest.mark.parametrize("code", ["link_not_payable", "card_not_enabled", "too_many_attempts"])
+@pytest.mark.parametrize("code", ["link_not_payable", "card_not_enabled", "too_many_attempts", "charge_changed"])
 def test_a_409_of_core_keeps_its_code(code) -> None:
     assert card_code(409, code) == code
 

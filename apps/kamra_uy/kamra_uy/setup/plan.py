@@ -74,6 +74,7 @@ class Accion:
 	nombre: str | None = None  # el registro de Kamra que se cambia o retira; None al crear
 	antes: dict = dataclasses.field(default_factory=dict)
 	tipo: str | None = None  # el tipo de la planilla al que pertenece
+	precios: tuple | None = None  # (precio para 2, precio para 3) de un tipo o una temporada por personas (D-HR-81)
 
 
 @dataclasses.dataclass
@@ -239,18 +240,33 @@ def _tipos(pl: Plan) -> dict[str, str | None]:
 			"children_capacity": t.ninos if t.ninos is not None else max(t.adultos - 1, 0),
 			"max_total_occupants": t.adultos,
 		}
+		# lo que solo se compara: al crear ya es así en Kamra (0 = sin precio para 1 persona), y escribirlo cambiaría
+		# el plan de una planilla sin «Precio para 2»
+		solo_compara = {}
+		precios = None
 		if pl.planilla.condiciones.por_habitacion:
 			deseado.update(children_within_base_occupancy=1, child_price=0, extra_adult_price=0)
+			solo_compara["single_occupancy_price"] = 0
+		if t.precio2_minimo is not None:
+			# D-HR-81: el precio base es el de 2 y cada persona de más (niño o adulto, D-S367-3) paga la diferencia hasta
+			# el de 3; 1 persona paga el de 2 (C-1, D-S367-4)
+			extra = max(0, t.precio_minimo - t.precio2_minimo)
+			deseado.update(base_occupancy=2, base_price=t.precio2_minimo, extra_adult_price=extra, child_price=extra,
+			               children_within_base_occupancy=1, single_occupancy_price=0)
+			solo_compara.pop("single_occupancy_price", None)
+			precios = (t.precio2_minimo, t.precio_minimo)
 		actual = por_nombre.get(_clave(t.nombre))
 		if actual is None:
 			code = codigo(t.nombre, usados)
 			usados.add(code.casefold())
-			pl.acciones.append(Accion("Room Type", "crear", {**deseado, "room_type_code": code}, tipo=t.nombre))
+			pl.acciones.append(
+				Accion("Room Type", "crear", {**deseado, "room_type_code": code}, tipo=t.nombre, precios=precios)
+			)
 			resueltos[t.nombre] = None
 			continue
-		valores, antes = _diferencias(actual, deseado)
+		valores, antes = _diferencias(actual, {**deseado, **solo_compara})
 		pl.acciones.append(
-			Accion("Room Type", "cambiar" if valores else "igual", valores, actual["name"], antes, t.nombre)
+			Accion("Room Type", "cambiar" if valores else "igual", valores, actual["name"], antes, t.nombre, precios)
 		)
 		resueltos[t.nombre] = actual["name"]
 	sobran = sorted(
@@ -311,20 +327,30 @@ def _temporadas(pl: Plan, resueltos: dict) -> None:
 			"full_payment": 0,
 			"disabled": 0,
 		}
+		# D-HR-81: una temporada por personas vale el precio para 2 y cada persona de más paga la diferencia hasta el
+		# de 3; sin «Precio para 2», los tres a 0 (al crear ya lo están: solo se comparan)
+		precios = None
+		por_personas = {"priced_by_occupancy": 0, "extra_adult_price": 0, "child_price": 0}
+		if s.precio2 is not None:
+			extra = s.precio - s.precio2
+			por_personas = {"priced_by_occupancy": 1, "extra_adult_price": extra, "child_price": extra}
+			deseado.update(adjustment_value=s.precio2, **por_personas)
+			precios = (s.precio2, s.precio)
 		rt = resueltos.get(s.tipo)
 		actual = existentes.get((rt, s.nombre, str(s.desde), str(s.hasta))) if rt else None
 		if actual is None:
-			pl.acciones.append(Accion("Season", "crear", deseado, tipo=s.tipo))
+			pl.acciones.append(Accion("Season", "crear", deseado, tipo=s.tipo, precios=precios))
 			continue
 		usadas.add(actual["name"])
 		gestionados = {k: deseado[k] for k in ("adjustment_type", "adjustment_value", "minimum_nights",
 		                                        "advance_percent", "disabled")}
+		gestionados.update(por_personas)
 		valores, antes = _diferencias(actual, gestionados)
 		if valores:
 			valores = {"season_name": s.nombre, "room_type": s.tipo, "start_date": s.desde, "end_date": s.hasta,
 			           **valores}
 		pl.acciones.append(
-			Accion("Season", "cambiar" if valores else "igual", valores, actual["name"], antes, s.tipo)
+			Accion("Season", "cambiar" if valores else "igual", valores, actual["name"], antes, s.tipo, precios)
 		)
 	for t in pl.estado.temporadas:
 		if t["name"] in usadas or t.get("disabled"):
@@ -566,9 +592,12 @@ def _linea(pl: Plan, a: Accion) -> list[str]:
 		        for k, x in v.items()]
 	if a.doctype == "Room Type":
 		if a.op == "crear":
-			return [f"  + {v['room_type_name']} ({v['room_type_code']}): precio base {_num(v['base_price'])} {moneda}, "
+			precio = (f"precio base para 2 {_num(a.precios[0])} · para 3 {_num(a.precios[1])} {moneda}" if a.precios
+			          else f"precio base {_num(v['base_price'])} {moneda}")
+			return [f"  + {v['room_type_name']} ({v['room_type_code']}): {precio}, "
 			        f"{v['max_total_occupants']} personas (niños hasta {v['children_capacity']})"]
-		return [f"  ~ {a.tipo}: " + ", ".join(f"{k} {_num(a.antes.get(k))} → {_num(x)}" for k, x in v.items())]
+		return [f"  ~ {a.tipo}: " + ", ".join(f"{k} {_num(a.antes.get(k))} → {_num(x)}" for k, x in v.items())
+		        + _por_personas(a, moneda)]
 	if a.doctype == "Room":
 		if a.op == "crear":
 			piso = f", piso {v['floor']}" if v.get("floor") else ""
@@ -586,9 +615,19 @@ def _linea(pl: Plan, a: Accion) -> list[str]:
 	cabeza = f"  {signo} {v['season_name']}, {_dd(v['start_date'])} → {_dd(v['end_date'])}, {v['room_type']}"
 	if a.op == "crear":
 		noches = "noche" if minimo == 1 else "noches"
-		return [f"{cabeza}: {_num(v['adjustment_value'])} {moneda}/noche, mínimo {minimo} {noches}"]
+		precio = (f"precio para 2 {_num(a.precios[0])} · para 3 {_num(a.precios[1])}" if a.precios
+		          else _num(v["adjustment_value"]))
+		return [f"{cabeza}: {precio} {moneda}/noche, mínimo {minimo} {noches}"]
 	cambios = {k: x for k, x in v.items() if k not in ("season_name", "room_type", "start_date", "end_date")}
-	return [f"{cabeza}: " + ", ".join(f"{k} {_num(a.antes.get(k))} → {_num(x)}" for k, x in cambios.items())]
+	return [f"{cabeza}: " + ", ".join(f"{k} {_num(a.antes.get(k))} → {_num(x)}" for k, x in cambios.items())
+	        + _por_personas(a, moneda)]
+
+
+def _por_personas(a: Accion, moneda: str | None) -> str:
+	"""El precio para 2 y para 3 de un cambio por personas (D-HR-81), legible tras los campos que cambian."""
+	if not a.precios:
+		return ""
+	return f" (precio para 2 {_num(a.precios[0])} · para 3 {_num(a.precios[1])} {moneda})"
 
 
 def _texto(pl: Plan, aplicado: bool) -> str:

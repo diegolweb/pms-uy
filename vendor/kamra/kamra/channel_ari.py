@@ -92,11 +92,16 @@ def availability_cells(conn, date_from, date_to) -> dict[str, dict[str, dict]]:
 def _plan_night_rate(property: str, room_type: str, rate_plan: str | None, d,
                      adults: int | None = None) -> Decimal | None:
 	"""The pricing engine's room total for one night from `d`, on `rate_plan`
-	(None: the room type's base price), for `adults` - by default the type's
-	base occupancy (or 2) -, to 2 decimals. None when the night cannot be
-	quoted or is not worth more than 0."""
+	(None: the room type's base price), for `adults` - by default the full
+	room: the type's adults capacity (or its base occupancy, or 2), so a plan
+	sold per room never sells a room priced per person for fewer guests than
+	it sleeps (HR-367) -, to 2 decimals. None when the night cannot be quoted
+	or is not worth more than 0."""
 	from kamra.pricing import quote
-	adults = adults or frappe.db.get_value("Room Type", room_type, "base_occupancy") or 2
+	if not adults:
+		cap, base = frappe.db.get_value("Room Type", room_type,
+		                                ["adults_capacity", "base_occupancy"]) or (None, None)
+		adults = cap or base or 2
 	try:
 		q = quote(property, room_type, str(d), str(add_days(d, 1)), adults=int(adults),
 		          children=0, rate_plan=rate_plan or None, check_restrictions=False)

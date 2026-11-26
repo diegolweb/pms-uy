@@ -408,3 +408,94 @@ def test_the_report_with_errors(tmp_path) -> None:
 	fabrica.escribe_xlsx(ruta, fabrica.pestanas(temporadas_=tem))
 	texto = plan.planea(planilla.lee(ruta), _vacio()).texto(aplicado=False)
 	assert texto.splitlines()[-1] == "RESULTADO: NO SE PUEDE CARGAR: 1 error en la planilla o en Kamra (arriba)."
+
+
+# D-HR-81 (HR-367): la Triple con precio para 2 y para 3 en cada temporada
+_TRIPLES = {1: 1302, 4: 1002, 7: 602}  # las filas de la Triple con fechas en fabrica.temporadas()
+
+
+def _con_precio2(tmp_path, precios2):
+	cabecera, tem = fabrica.con_precio2(fabrica.temporadas(), precios2)
+	ruta = tmp_path / "precio2.xlsx"
+	fabrica.escribe_xlsx(ruta, fabrica.pestanas(temporadas_=tem, tem_cabecera=cabecera))
+	out = planilla.lee(ruta)
+	assert out.errores == []
+	return out
+
+
+def _resumen(pl):
+	return [(a.doctype, a.op, a.nombre, a.tipo, a.valores, a.antes) for a in pl.acciones]
+
+
+def test_without_a_price_for_two_the_plan_is_todays(p, tmp_path) -> None:
+	vacia = _con_precio2(tmp_path, {})
+	assert _resumen(plan.planea(vacia, _vacio())) == _resumen(plan.planea(p, _vacio()))
+	# un Kamra ya cargado, con los campos nuevos como los deja migrate (0) o sin leer (None): todo igual
+	cargado = _cargado(plan.planea(p, _vacio()))
+	for i, t in enumerate(cargado.tipos):
+		t["single_occupancy_price"] = (0, None)[i % 2]
+	for i, s in enumerate(cargado.temporadas):
+		s.update(priced_by_occupancy=0, extra_adult_price=(0, None)[i % 2], child_price=0)
+	for planilla_ in (p, vacia):
+		assert {a.op for a in plan.planea(planilla_, cargado).acciones} == {"igual"}
+
+
+def test_the_triple_is_priced_for_two_and_three_and_nothing_else_moves(p, tmp_path) -> None:
+	hoy = plan.planea(p, _vacio())
+	pl = plan.planea(_con_precio2(tmp_path, _TRIPLES), _vacio())
+	assert pl.errores == []
+	tipos = {a.tipo: a.valores for a in pl.acciones if a.doctype == "Room Type"}
+	assert tipos["Triple"] == {
+		"room_type_name": "Triple",
+		"room_type_code": "TRIPLE",
+		"base_price": 602,
+		"adults_capacity": 3,
+		"base_occupancy": 2,
+		"children_capacity": 2,
+		"max_total_occupants": 3,
+		"children_within_base_occupancy": 1,
+		"child_price": 100,
+		"extra_adult_price": 100,
+		"single_occupancy_price": 0,
+	}
+	triples = [a.valores for a in pl.acciones if a.doctype == "Season" and a.tipo == "Triple"]
+	assert [(v["season_name"], v["adjustment_type"], v["adjustment_value"], v["priced_by_occupancy"],
+	         v["extra_adult_price"], v["child_price"]) for v in triples] == [
+		("Alta inventada", "Absolute", 1302, 1, 200, 200),
+		("Media inventada", "Absolute", 1002, 1, 200, 200),
+		("Baja inventada", "Absolute", 602, 1, 100, 100),
+	]
+	otras = [x for x in _resumen(pl) if x[3] != "Triple"]
+	assert otras == [x for x in _resumen(hoy) if x[3] != "Triple"]
+
+
+def test_on_a_loaded_kamra_only_the_triple_and_its_seasons_change(p, tmp_path) -> None:
+	cargado = _cargado(plan.planea(p, _vacio()))
+	pl = plan.planea(_con_precio2(tmp_path, _TRIPLES), cargado)
+	cambios = [(a.doctype, a.tipo, a.valores, a.antes) for a in pl.acciones if a.op != "igual"]
+	assert cambios[0] == ("Room Type", "Triple",
+	                      {"base_price": 602, "base_occupancy": 2, "child_price": 100, "extra_adult_price": 100},
+	                      {"base_price": 702, "base_occupancy": 3, "child_price": 0, "extra_adult_price": 0})
+	assert [(d, t, v["adjustment_value"], v["priced_by_occupancy"], v["extra_adult_price"]) for d, t, v, _ in
+	        cambios[1:]] == [("Season", "Triple", 1302, 1, 200), ("Season", "Triple", 1002, 1, 200),
+	                         ("Season", "Triple", 602, 1, 100)]
+	assert {a.op for a in plan.planea(_con_precio2(tmp_path, _TRIPLES), _cargado(pl)).acciones} == {"igual"}
+	# y quitar la columna devuelve la Triple al precio por habitación
+	vuelta = plan.planea(p, _cargado(pl))
+	assert [(a.doctype, a.op) for a in vuelta.acciones if a.op != "igual"] == [
+		("Room Type", "cambiar"), ("Season", "cambiar"), ("Season", "cambiar"), ("Season", "cambiar")]
+	assert {a.valores["priced_by_occupancy"] for a in vuelta.acciones if a.doctype == "Season" and a.op != "igual"} == {0}
+
+
+def test_the_report_shows_the_price_for_two_and_for_three(p, tmp_path) -> None:
+	texto = plan.planea(_con_precio2(tmp_path, _TRIPLES), _vacio()).texto(aplicado=False)
+	assert "  + Triple (TRIPLE): precio base para 2 602 · para 3 702 USD, 3 personas (niños hasta 2)" in texto
+	assert ("  + Alta inventada, 01-01-2030 → 10-01-2030, Triple: precio para 2 1302 · para 3 1502 USD/noche, "
+	        "mínimo 3 noches") in texto
+	assert "  + Alta inventada, 01-01-2030 → 10-01-2030, Doble: 1001 USD/noche, mínimo 3 noches" in texto
+	cargado = _cargado(plan.planea(p, _vacio()))
+	for s in cargado.temporadas:  # como los deja migrate
+		s.update(priced_by_occupancy=0, extra_adult_price=0, child_price=0)
+	cambio = plan.planea(_con_precio2(tmp_path, _TRIPLES), cargado).texto(aplicado=False)
+	assert ("  ~ Alta inventada, 01-01-2030 → 10-01-2030, Triple: adjustment_value 1502 → 1302, priced_by_occupancy 0 → "
+	        "1, extra_adult_price 0 → 200, child_price 0 → 200 (precio para 2 1302 · para 3 1502 USD)") in cambio

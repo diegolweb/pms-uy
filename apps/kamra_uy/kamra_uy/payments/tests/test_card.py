@@ -25,6 +25,8 @@ from kamra_uy.payments.tests.fixtures import PROP, CobrosCase
 CORE = "http://core.example.com"
 ORIGIN = "https://hotel.example.com"
 PUBLIC_KEY = "TEST-00000000-not-a-real-public-key"
+CHARGE = {"amount": "4478.14", "currency": "UYU", "exchange_rate": "40.7104",
+          "rate_as_of": "2026-11-25T00:00:00.000-04:00"}
 WALLET_URL = "http://mp-mock:8080/checkout/v1/redirect?pref_id=wallet-1"
 SENTINEL_TOKEN = "SENTINEL-TOK"
 SENTINEL_DOC = "99999999"
@@ -40,6 +42,8 @@ class Core:
 
 	def __init__(self, public_key: str | None = PUBLIC_KEY, card_reply: dict | None = None):
 		self.public_key = public_key
+		# HR-366: lo que cobra la tarjeta, en pesos (`card.charge` de core); None, Mercado Pago no dio el cambio
+		self.charge: dict | None = dict(CHARGE)
 		self.card_reply = card_reply or APPROVED
 		self.fail: dict[str, Exception] = {}
 		self.calls: list[tuple] = []
@@ -70,7 +74,7 @@ class Core:
 		if "get" in self.fail:
 			raise self.fail["get"]
 		return {"link_id": path.rsplit("/", 1)[-1], "url": "http://mp/x", "status": "pending", "expires_at": None,
-		        "card": {"public_key": self.public_key} if self.public_key else None}
+		        "card": {"public_key": self.public_key, "charge": self.charge} if self.public_key and self.charge else None}
 
 	def after(self, n: int) -> list[tuple]:
 		return self.calls[n:]
@@ -110,7 +114,8 @@ class TestCard(CobrosCase):
 
 	def pay(self, token: str, **over) -> dict:
 		args = {"card_token": "tok-card-ut-1", "payment_method_id": "visa",
-		        "payer_email": "pagador-ut@example.com"}
+		        "payer_email": "pagador-ut@example.com", "charge_amount": CHARGE["amount"],
+		        "charge_currency": CHARGE["currency"]}
 		args.update(over)
 		return card.pay(token, **args)
 
@@ -144,7 +149,7 @@ class TestCard(CobrosCase):
 		self.assertEqual(list(inspect.signature(card.checkout).parameters), ["token"])
 		self.assertEqual(list(inspect.signature(card.pay).parameters), [
 			"token", "card_token", "payment_method_id", "issuer_id", "payer_email", "identification_type",
-			"identification_number", "device_id"])
+			"identification_number", "device_id", "charge_amount", "charge_currency"])
 		self.assertEqual(list(inspect.signature(card.wallet).parameters), ["token", "return_url"])
 
 	# --- el token de estado y la retención -----------------------------------------------------------------
@@ -193,8 +198,10 @@ class TestCard(CobrosCase):
 	def test_checkout_gives_the_card_key_and_the_full_amount(self):
 		out = self.held()
 		got = card.checkout(out["status_token"])
-		self.assertEqual(set(got), {"card", "public_key", "amount", "currency", "hold_expires_on", "code"})
+		self.assertEqual(set(got), {"card", "public_key", "amount", "currency", "charge", "hold_expires_on", "code"})
 		self.assertEqual((got["card"], got["public_key"], got["currency"], got["code"]), (True, PUBLIC_KEY, "USD", None))
+		# HR-366: lo que cobra la tarjeta, en pesos, para que la web lo enseñe
+		self.assertEqual(got["charge"], {"amount": 4478.14, "currency": "UYU", "exchange_rate": "40.7104"})
 		# «Full online» (D-HR-38): lo que se paga al reservar es el total
 		self.assertEqual(got["amount"], out["amount_after_tax"])
 		self.assertEqual(got["amount"], out["advance_due"])
@@ -205,6 +212,12 @@ class TestCard(CobrosCase):
 		self.core.public_key = None
 		got = card.checkout(self.held()["status_token"])
 		self.assertEqual((got["card"], got["public_key"], got["code"]), (False, None, None))
+
+	def test_checkout_without_the_pesos_has_no_card(self):
+		# HR-366 (D-S366-4): core no da `charge` si Mercado Pago no da el cambio; sin él no hay tarjeta en la web
+		self.core.charge = None
+		got = card.checkout(self.held()["status_token"])
+		self.assertEqual((got["card"], got["public_key"], got["charge"], got["code"]), (False, None, None, None))
 
 	def test_checkout_of_a_property_without_mercado_pago_has_no_card(self):
 		out = self.held()
@@ -244,7 +257,8 @@ class TestCard(CobrosCase):
 		self.assertEqual((method, path), ("POST", f"/v1/payments/links/{link}/card-payments"))
 		self.assertEqual(body, {"token": "tok-card-ut-1", "payment_method_id": "visa",
 		                        "issuer_id": "310", "payer": {"email": "pagador-ut@example.com", "identification": {
-		                            "type": "CI", "number": "12345678"}}, "device_id": "armor.0123456789abcdef"})
+		                            "type": "CI", "number": "12345678"}}, "device_id": "armor.0123456789abcdef",
+		                        "expected_charge": {"amount": "4478.14", "currency": "UYU"}})
 		self.assertEqual(key, hashlib.sha256(f"{link}:tok-card-ut-1".encode()).hexdigest())
 
 	def test_the_amount_a_client_sends_never_reaches_core(self):
@@ -252,7 +266,8 @@ class TestCard(CobrosCase):
 		self.assertNotIn("amount", inspect.signature(card.pay).parameters)
 		n = len(self.core.calls)
 		frappe.call(card.pay, token=out["status_token"], card_token="tok-1", payment_method_id="visa",
-		            payer_email="pagador-ut@example.com", amount=1, transaction_amount=1)
+		            payer_email="pagador-ut@example.com", charge_amount="4478.14", charge_currency="UYU", amount=1,
+		            transaction_amount=1)
 		((_, _, body, _),) = self.core.after(n)
 		self.assertFalse({"amount", "transaction_amount"} & set(body))
 

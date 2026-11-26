@@ -176,9 +176,11 @@ def payment_mode(event: dict) -> str:
 # --- el cobro con tarjeta y el botón del saldo que Kamra abre a la web (HR-222) --------------------------------------
 # Contrato de core: KICKOFF-HR-220 §7 (HR-221). La web nunca manda importe: lo pone el enlace de core.
 
-CARD_CODES = ("hold_expired", "link_not_payable", "card_not_enabled", "too_many_attempts", "unavailable", "invalid")
+CARD_CODES = ("hold_expired", "link_not_payable", "card_not_enabled", "too_many_attempts", "charge_changed", "unavailable",
+              "invalid")
 CARD_STATUSES = ("approved", "pending", "in_process", "rejected")
-_KEPT_409 = ("link_not_payable", "card_not_enabled", "too_many_attempts")
+# `charge_changed` (HR-366): el importe en pesos de la tarjeta cambió desde que se enseñó; la web lo vuelve a pedir
+_KEPT_409 = ("link_not_payable", "card_not_enabled", "too_many_attempts", "charge_changed")
 _LATER = ("upstream_unavailable", "idempotency_in_progress", "not_ready")
 # Los largos de `CardPaymentRequest` en core: lo que core rechazaría se rechaza aquí, sin preguntarle.
 TOKEN_MAX = 256
@@ -228,8 +230,13 @@ def card_payment_request(
     identification_type: str,
     identification_number: str,
     device_id: str,
+    charge_amount: str,
+    charge_currency: str,
 ) -> dict:
-    """El cuerpo de `POST /v1/payments/links/{link_id}/card-payments`, sin importe. ValueError si core lo rechazaría."""
+    """El cuerpo de `POST /v1/payments/links/{link_id}/card-payments`, sin importe. ValueError si core lo rechazaría.
+
+    `expected_charge` (HR-366, requerido) es lo que vio el huésped: el `charge` de `checkout`, en pesos. Core no cobra
+    con él; solo lo compara y, si ya no es lo que cobraría, responde 409 `charge_changed` sin cobrar."""
     body = {"token": _text(card_token, "el token de la tarjeta", TOKEN_MAX, required=True),
             "payment_method_id": _text(payment_method_id, "el medio de pago", METHOD_MAX, required=True)}
     issuer = _text(issuer_id, "el emisor", ISSUER_MAX)
@@ -247,6 +254,12 @@ def card_payment_request(
     device = _text(device_id, "la huella del dispositivo", DEVICE_MAX)
     if device:
         body["device_id"] = device
+    amount = (charge_amount or "").strip() if isinstance(charge_amount, str) else ""
+    if not _MONEY.fullmatch(amount) or not amount.strip("0."):
+        raise ValueError("el importe a cobrar no es válido")
+    if charge_currency not in CURRENCIES:
+        raise ValueError("la moneda a cobrar no es válida")
+    body["expected_charge"] = {"amount": amount, "currency": charge_currency}
     return body
 
 

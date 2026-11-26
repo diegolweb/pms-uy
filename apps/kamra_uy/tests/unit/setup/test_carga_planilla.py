@@ -268,3 +268,50 @@ def test_rooms_and_seasons_in_numbers(tmp_path) -> None:
 		"filas_de_precio": 9,
 		"sin_fechas": ["Julio inventado"],
 	}
+
+
+# D-HR-81 (HR-367): la columna opcional «Precio para 2 (US$)», solo en las filas de la Triple
+_TRIPLES = {1: 1302, 4: 1002, 7: 602}  # índices de las filas de la Triple con fechas en fabrica.temporadas()
+
+
+def _con_precio2(tmp_path, precios2, filas=None, antes=False):
+	cabecera, tem = fabrica.con_precio2(filas or fabrica.temporadas(), precios2, antes=antes)
+	return _lee(tmp_path, temporadas_=tem, tem_cabecera=cabecera)
+
+
+@pytest.mark.parametrize("antes", [False, True])
+def test_the_price_for_two_is_read_from_its_own_column(tmp_path, antes) -> None:
+	p = _con_precio2(tmp_path, _TRIPLES, antes=antes)
+	assert p.errores == []
+	assert p.moneda == "USD"
+	assert [(t.tipo, t.precio, t.precio2) for t in p.temporadas if t.nombre == "Alta inventada"] == [
+		("Doble", 1001, None), ("Triple", 1502, 1302), ("Apartamento", 2003, None)]
+	assert (p.tipos["Triple"].precio_minimo, p.tipos["Triple"].precio2_minimo) == (702, 602)
+	assert p.tipos["Doble"].precio2_minimo is None
+
+
+def test_an_empty_price_for_two_column_reads_as_today(tmp_path) -> None:
+	hoy = _lee(tmp_path)
+	p = _con_precio2(tmp_path, {})
+	assert p.errores == []
+	assert [(t.nombre, t.tipo, t.precio, t.minimo, t.precio2) for t in p.temporadas] == [
+		(t.nombre, t.tipo, t.precio, t.minimo, None) for t in hoy.temporadas]
+
+
+@pytest.mark.parametrize(
+	("precios2", "fila", "texto"),
+	[
+		({**_TRIPLES, 0: 900}, 4, "el precio para 2 solo va en las habitaciones de 3 personas."),
+		({**_TRIPLES, 1: "barato"}, 5, "«barato» no es un precio."),
+		({**_TRIPLES, 1: 0}, 5, "el precio para 2 tiene que ser mayor que 0."),
+		({**_TRIPLES, 1: 1600}, 5, "el precio para 2 (1600) es mayor que el precio por noche (1502)."),
+		({1: 1302, 7: 602}, 8, "a «Media inventada» le falta el precio para 2 de Triple."),
+	],
+)
+def test_a_bad_price_for_two_is_an_error_on_its_cell(tmp_path, precios2, fila, texto) -> None:
+	p = _con_precio2(tmp_path, precios2)
+	assert _textos(p.errores) == [f"Temporadas y precios, fila {fila}, columna F (Precio para 2 (US$)): {texto}"]
+
+
+def test_the_price_for_two_may_equal_the_full_room(tmp_path) -> None:
+	assert _con_precio2(tmp_path, {1: 1502, 4: 1202, 7: 702}).errores == []

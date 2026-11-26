@@ -331,6 +331,7 @@ def active_season(property: str, date, room_type: str | None = None):
 			"room_type": ("in", [room_type, "", None]),
 		},
 		fields=["name", "season_name", "adjustment_type", "adjustment_value",
+		        "priced_by_occupancy", "extra_adult_price", "child_price",
 		        "days_of_week", "room_type", "priority"],
 		order_by="priority desc",
 	)
@@ -349,12 +350,33 @@ def active_season(property: str, date, room_type: str | None = None):
 	                                  float(x.priority or 0)))
 
 
+def season_occupancy_rate(rt, season, adults: int, children: int, date=None) -> Decimal:
+	"""An Absolute season priced by occupancy: its value is the room at the room type's
+	base occupancy and the guests above it pay the season's extra_adult_price / child_price,
+	by the same rules as occupancy_rate (children_within_base_occupancy included)."""
+	card = frappe._dict(rt.as_dict() if hasattr(rt, "as_dict") else rt)
+	card.update(base_price=season.adjustment_value, extra_adult_price=season.extra_adult_price,
+	            child_price=season.child_price, single_occupancy_price=None,
+	            small_group_max_adults=None, small_group_price_per_adult=None)
+	return occupancy_rate(card, adults, children, date, allow_small_group=False)
+
+
 def season_adjust(property: str, date, base: Decimal,
-                  room_type: str | None = None) -> Decimal:
-	"""Apply the active season covering `date` for this room type."""
+                  room_type: str | None = None, *,
+                  adults: int | None = None, children: int | None = None) -> Decimal:
+	"""Apply the active season covering `date` for this room type.
+
+	An Absolute season priced by occupancy (`priced_by_occupancy`) prices the
+	party instead of replacing `base`: pass the room type and `adults` (and
+	`children`) and it gives season_occupancy_rate. Without them, or on any
+	other season, the result is the one it has always been."""
 	s = active_season(property, date, room_type)
 	if not s:
 		return base
+	if (s.adjustment_type == "Absolute" and s.get("priced_by_occupancy")
+			and room_type and adults is not None):
+		return season_occupancy_rate(frappe.get_cached_doc("Room Type", room_type), s,
+		                             adults, children or 0, date)
 	v = _dec(s.adjustment_value)
 	if s.adjustment_type == "Percent":
 		return base * (Decimal(1) + v / Decimal(100))
@@ -1186,7 +1208,7 @@ def quote(
 				property, date,
 				occupancy_rate(rt, adults, children, date,
 				               allow_small_group=small_ok),
-				room_type
+				room_type, adults=adults, children=children
 			)
 			# demand pricing: when the house fills past a hurdle tier, the
 			# premium applies and the tier's floor holds - decided here, in

@@ -35,11 +35,13 @@ _CAMPOS = {
 	"Room Type": [
 		"name", "room_type_name", "room_type_code", "base_price", "adults_capacity", "base_occupancy",
 		"children_capacity", "max_total_occupants", "children_within_base_occupancy", "child_price", "extra_adult_price",
+		"single_occupancy_price",
 	],
 	"Room": ["name", "room_number", "room_type", "floor", "notes"],
 	"Season": [
 		"name", "season_name", "room_type", "start_date", "end_date", "adjustment_type", "adjustment_value",
 		"minimum_nights", "advance_percent", "full_payment", "disabled", "priority",
+		"priced_by_occupancy", "extra_adult_price", "child_price",
 	],
 }
 _RESERVA = ["name", "status", "ota_ref", "idempotency_key", "room_type", "room", "check_in_date", "check_out_date",

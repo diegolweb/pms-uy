@@ -90,13 +90,18 @@ Tres métodos públicos (`/api/method/kamra_uy.payments.card.<método>`, sin ses
 
 | Método | Límite | Devuelve |
 |---|---|---|
-| `checkout(token)` | 240/h | `card` (bool), `public_key` (la de Mercado Pago de la propiedad, o null), `amount`, `currency`, `hold_expires_on`, `code` |
-| `pay(token, card_token, payment_method_id, issuer_id, payer_email, identification_type, identification_number, device_id)` | 20/h | `status` (`approved`, `pending`, `in_process`, `rejected` o `error`), `status_detail` (el de Mercado Pago), `payment_id`, `three_ds` (`external_resource_url` y `creq` si el banco pide autorización), `code` |
+| `checkout(token)` | 240/h | `card` (bool), `public_key` (la de Mercado Pago de la propiedad, o null), `amount`, `currency`, `charge` (lo que cobra la tarjeta en pesos: `amount`, `currency`, `exchange_rate`; o null), `hold_expires_on`, `code` |
+| `pay(token, card_token, payment_method_id, issuer_id, payer_email, identification_type, identification_number, device_id, charge_amount, charge_currency)` | 20/h | `status` (`approved`, `pending`, `in_process`, `rejected` o `error`), `status_detail` (el de Mercado Pago), `payment_id`, `three_ds` (`external_resource_url` y `creq` si el banco pide autorización), `code` |
 | `wallet(token, return_url)` | 10/h | `url` (la de Mercado Pago para pagar con el saldo), `code` |
 
 - **El importe lo pone el servidor.** Las tres calculan lo que falta (`advance_due − advance_paid`) y usan el enlace del
   folio si es por ese importe; si no, piden uno nuevo (`kamra.public_api._deposit_link`, como `booking_payment_link`).
   core cobra el importe del enlace. `pay` no tiene parámetro de importe: lo que mande el navegador se descarta.
+- **La tarjeta cobra en pesos** (HR-366, D-HR-80): Mercado Pago Uruguay cobra la tarjeta en UYU, así que core cobra el
+  importe en dólares del enlace en pesos, al cambio que da Mercado Pago, y el folio sigue en dólares con lo cobrado y el
+  cambio (D-HR-68). `checkout` da esos pesos en `charge` para que la web los enseñe, y `pay` los devuelve en
+  `charge_amount`/`charge_currency` (requeridos, `invalid` si faltan): core solo los compara y, si el cambio se movió,
+  responde `charge_changed` sin cobrar. Sin `charge` (core no tuvo el cambio), `card` es false.
 - **Un enlace, dos caminos.** El cobro con tarjeta y la preferencia del saldo cuelgan del mismo enlace que la preferencia
   de siempre, así que la confirmación de la reserva, el aviso firmado, la conciliación, el pago tardío y la devolución
   desde el folio (HR-124) valen igual.
@@ -107,6 +112,8 @@ Tres métodos públicos (`/api/method/kamra_uy.payments.card.<método>`, sin ses
   - `link_not_payable`: no falta nada por pagar, o core dice que el enlace ya no está pendiente.
   - `card_not_enabled`: la propiedad no tiene Mercado Pago, o core no tiene su `public_key`.
   - `too_many_attempts`: core rechaza la tarjeta tras 5 rechazos en el mismo enlace (queda el saldo).
+  - `charge_changed`: el importe en pesos ya no es el que se enseñó (Mercado Pago movió el cambio); no se cobró, la web
+    vuelve a pedir `checkout` y lo enseña.
   - `unavailable`: core o Mercado Pago no responden; se puede reintentar.
   - `invalid`: la petición tiene algo mal (un campo vacío o largo, una `return_url` de otro sitio, un 4xx de core).
 - `checkout` da `card: false` (y `code` nulo) si la propiedad no cobra con tarjeta: la web ofrece entonces el botón a

@@ -5953,7 +5953,8 @@ def availability_calendar(property: str, start_date: str | None = None, days: in
 			than once for the range, so a day-scoped rule (small-group
 			pricing, a weekend season) shows on the right columns."""
 			return float(season_adjust(
-				property, date, occupancy_rate(rt_doc, 2, 0, date), rt_name))
+				property, date, occupancy_rate(rt_doc, 2, 0, date), rt_name,
+				adults=2, children=0))
 
 		# nights the villa <-> room lockout or a group block takes off sale
 		locked = villa_locked_nights(property, rt.name, start, end)

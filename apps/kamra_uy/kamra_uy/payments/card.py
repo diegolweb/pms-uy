@@ -7,7 +7,8 @@ Las tres son públicas (sin sesión, solo POST, con su `rate_limit`) y se apoyan
 la confirmación, el aviso firmado, la conciliación, el pago tardío y la devolución desde el folio valen igual.
 
 - El importe lo pone el servidor: lo que falta de lo que se paga al reservar (`advance_due − advance_paid`; con
-  «Full online», el total), y core cobra el del enlace. `pay` no tiene parámetro de importe.
+  «Full online», el total), y core cobra el del enlace, en pesos al cambio de Mercado Pago (HR-366). `pay` no fija el
+  importe: lleva el `charge` que vio el huésped solo para que core compruebe que sigue siendo ese.
 - Devuelven códigos, no textos (`kamra_uy.pure.payments.CARD_CODES`): la web los traduce.
 - Ni el token de la tarjeta ni el documento salen en un Error Log: se registra el estado y el código de core, y un fallo
   inesperado con su traza sin variables y con esos dos valores tachados.
@@ -25,6 +26,7 @@ from kamra.public_api import _deposit_link, _guest_folio, _hold_is_live, _res_by
 from kamra_uy.core.client import CoreError
 from kamra_uy.payments import mercadopago
 from kamra_uy.pure.payments import (
+	CURRENCIES,
 	amount_left,
 	card_code,
 	card_idempotency_key,
@@ -119,11 +121,16 @@ def _core_failed(res, link_id: str, error: CoreError) -> str:
 def checkout(token: str) -> dict:
 	"""Lo que el paso de pago necesita: si hay tarjeta (y su `public_key` de Mercado Pago), el importe, la moneda y
 	hasta cuándo se guarda la habitación. `code` solo si no se puede pagar (hold_expired, link_not_payable,
-	unavailable); sin tarjeta, `card` es False y la web ofrece el pago en Mercado Pago."""
+	unavailable); sin tarjeta, `card` es False y la web ofrece el pago en Mercado Pago.
+
+	`charge` (HR-366): lo que cobra la tarjeta, siempre en pesos (`{amount, currency, exchange_rate}`; el importe en
+	dólares, al cambio de Mercado Pago), o None. Sin `charge` no hay tarjeta: core no lo da si Mercado Pago no da el
+	cambio, y entonces se paga en la página de Mercado Pago."""
 	res = _res_by_status_token(token)
 	live = _hold_is_live(res)
 	out = {"card": False, "public_key": None, "amount": max(amount_left(res.advance_due, res.advance_paid), 0.0),
-	       "currency": _currency(res), "hold_expires_on": _zoned(res.hold_expires_on) if live else None, "code": None}
+	       "currency": _currency(res), "hold_expires_on": _zoned(res.hold_expires_on) if live else None, "code": None,
+	       "charge": None}
 	try:
 		link_id, settings = _payable(res, None)
 	except _Refused as refused:
@@ -133,8 +140,26 @@ def checkout(token: str) -> dict:
 	except CoreError as error:
 		code = _core_failed(res, link_id, error)
 		return out if code == "card_not_enabled" else {**out, "code": "unavailable" if code == "invalid" else code}
-	key = (link.get("card") or {}).get("public_key") if isinstance(link.get("card"), dict) else None
-	return {**out, "card": bool(key), "public_key": key or None}
+	card = link.get("card") if isinstance(link.get("card"), dict) else {}
+	key = card.get("public_key") or None
+	charge = _charge_of(card.get("charge"))
+	if not (key and charge):
+		return out
+	return {**out, "card": True, "public_key": key, "charge": charge}
+
+
+def _charge_of(charge) -> dict | None:
+	"""El `card.charge` de core para la web: `{amount: float, currency, exchange_rate}`, o None si no viene entero."""
+	if not isinstance(charge, dict) or charge.get("currency") not in CURRENCIES:
+		return None
+	try:
+		amount = float(charge.get("amount"))
+	except (TypeError, ValueError):
+		return None
+	if not amount > 0:
+		return None
+	rate = charge.get("exchange_rate")
+	return {"amount": amount, "currency": charge["currency"], "exchange_rate": rate if isinstance(rate, str) else None}
 
 
 def _failed(code: str) -> dict:
@@ -145,13 +170,17 @@ def _failed(code: str) -> dict:
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=20, seconds=3600)
 def pay(token: str, card_token: str, payment_method_id: str, issuer_id: str = "", payer_email: str = "",
-        identification_type: str = "", identification_number: str = "", device_id: str = "") -> dict:
+        identification_type: str = "", identification_number: str = "", device_id: str = "",
+        charge_amount: str = "", charge_currency: str = "") -> dict:
 	"""Cobra con el token de la tarjeta lo que falta de la reserva, por el enlace de su folio. Sin importe: lo pone core.
 
 	{"status": approved | pending | in_process | rejected | error, "status_detail", "payment_id",
 	"provider_payment_id" (el de Mercado Pago, para el Status Screen Brick), "three_ds", "code"}.
 	Con desafío del banco, `three_ds` trae `external_resource_url` y `creq`. La Idempotency-Key es el sha256 de
-	"<link_id>:<token>": el mismo token, el mismo cobro."""
+	"<link_id>:<token>": el mismo token, el mismo cobro.
+
+	`charge_amount` y `charge_currency` (HR-366): el `charge` que enseñó la web (`checkout`), lo que vio el huésped.
+	Core solo los compara: si los pesos cambiaron, `code` `charge_changed` y no se cobra."""
 	res = _res_by_status_token(token)
 	secrets = (card_token, identification_number)
 	link_id = None
@@ -162,7 +191,7 @@ def pay(token: str, card_token: str, payment_method_id: str, issuer_id: str = ""
 				card_token=card_token, payment_method_id=payment_method_id, issuer_id=issuer_id,
 				payer_email=payer_email or frappe.db.get_value("Guest", res.guest, "email") or "",
 				identification_type=identification_type, identification_number=identification_number,
-				device_id=device_id)
+				device_id=device_id, charge_amount=charge_amount, charge_currency=charge_currency)
 		except ValueError:
 			return _failed("invalid")
 		try:

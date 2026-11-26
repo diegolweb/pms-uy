@@ -16,6 +16,9 @@
   "column_break_a",
   "adjustment_type",
   "adjustment_value",
+  "priced_by_occupancy",
+  "extra_adult_price",
+  "child_price",
   "priority",
   "minimum_nights",
   "non_refundable",
@@ -85,6 +88,28 @@
   },
   {
    "default": "0",
+   "depends_on": "eval:doc.adjustment_type=='Absolute'",
+   "description": "Absolute is the price at the room type's base occupancy; guests above it pay these amounts",
+   "fieldname": "priced_by_occupancy",
+   "fieldtype": "Check",
+   "label": "Priced by occupancy"
+  },
+  {
+   "depends_on": "eval:doc.adjustment_type=='Absolute' && doc.priced_by_occupancy",
+   "description": "Per extra adult above the base occupancy, per night",
+   "fieldname": "extra_adult_price",
+   "fieldtype": "Currency",
+   "label": "Extra Adult Price"
+  },
+  {
+   "depends_on": "eval:doc.adjustment_type=='Absolute' && doc.priced_by_occupancy",
+   "description": "Per child above the base occupancy, per night",
+   "fieldname": "child_price",
+   "fieldtype": "Currency",
+   "label": "Child Price"
+  },
+  {
+   "default": "0",
    "description": "Higher wins when seasons overlap",
    "fieldname": "priority",
    "fieldtype": "Int",
@@ -145,7 +170,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-29 23:00:00.000000",
+ "modified": "2026-11-25 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kamra",
  "name": "Season",

@@ -481,7 +481,8 @@ def _plan_free_night_rate(reservation, date) -> Decimal:
 		allow_small_group=small_group_allows_stay(
 			rt, reservation.check_in_date, reservation.check_out_date))
 	rate = season_adjust(reservation.property, date, base,
-	                     reservation.room_type)
+	                     reservation.room_type, adults=reservation.adults,
+	                     children=reservation.children)
 	rate, _gst = room_net_rate(reservation.property, rt, rate,
 	                           _over_cap_night(reservation))
 	return rate
@@ -511,7 +512,8 @@ def _nightly_gst(reservation, date) -> float:
 		allow_small_group=small_group_allows_stay(
 			rt, reservation.check_in_date, reservation.check_out_date))
 	gross = season_adjust(reservation.property, date, base,
-	                      reservation.room_type)
+	                      reservation.room_type, adults=reservation.adults,
+	                      children=reservation.children)
 	_net, gst = room_net_rate(reservation.property, rt, gross,
 	                          _over_cap_night(reservation))
 	return float(gst)

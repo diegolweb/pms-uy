@@ -75,6 +75,7 @@ class Temporada:
 	precio: float
 	minimo: int
 	fila: int
+	precio2: float | None = None  # «Precio para 2 (US$)»: la Triple con precio para 2 y para 3 (D-HR-81)
 
 
 @dataclasses.dataclass
@@ -84,6 +85,7 @@ class Tipo:
 	ninos: int | None
 	habitaciones: list
 	precio_minimo: float | None = None
+	precio2_minimo: float | None = None
 
 
 @dataclasses.dataclass
@@ -234,6 +236,9 @@ _TEM_REQ = {
 	"precio": "precio",
 	"minimo": "estancia minima",
 }
+# opcional (D-HR-81): el precio para 2 de un tipo de 3 personas; «precio para 2» casa más largo que «precio», así que
+# «Precio por noche» sigue siendo el precio de la habitación llena
+_TEM_OPC = {"precio2": "precio para 2"}
 _HAB_VISIBLE = {"numero": "Número", "tipo": "Tipo", "adultos": "Adultos máx."}
 _TEM_VISIBLE = {
 	"temporada": "Temporada",
@@ -242,6 +247,7 @@ _TEM_VISIBLE = {
 	"tipo": "Tipo de habitación",
 	"precio": "Precio por noche",
 	"minimo": "Estancia mínima",
+	"precio2": "Precio para 2",
 }
 
 
@@ -274,7 +280,7 @@ def analiza(libro: xlsx.Libro, reservas: str | None = None) -> Planilla:
 	"""`reservas`: el nombre de la pestaña de reservas, si se leyó."""
 	p = Planilla(con_reservas=reservas is not None)
 	hab = _Pestana(HABITACIONES, libro.filas(HABITACIONES), _HAB_REQ, _HAB_OPC, _HAB_VISIBLE, p.errores)
-	tem = _Pestana(TEMPORADAS, libro.filas(TEMPORADAS), _TEM_REQ, {}, _TEM_VISIBLE, p.errores)
+	tem = _Pestana(TEMPORADAS, libro.filas(TEMPORADAS), _TEM_REQ, _TEM_OPC, _TEM_VISIBLE, p.errores)
 	sen = _Pestana(SENA, libro.filas(SENA), _SEN_REQ, {}, _SEN_VISIBLE, p.errores)
 	if sen.fila_cabecera is not None:
 		_condiciones(sen, p)
@@ -435,7 +441,8 @@ def _temporadas(pest: _Pestana, libro: xlsx.Libro, p: Planilla) -> None:
 		if nombre:
 			desde, md = _fecha(pest.valor(celdas, "desde"), libro)
 			hasta, mh = _fecha(pest.valor(celdas, "hasta"), libro)
-			actual = {"nombre": nombre, "desde": desde, "hasta": hasta, "fila": fila, "tipos": {}, "ok": True}
+			actual = {"nombre": nombre, "desde": desde, "hasta": hasta, "fila": fila, "tipos": {}, "ok": True,
+			          "precio2": set()}
 			bloques.append(actual)
 			for campo, f, motivo in (("desde", desde, md), ("hasta", hasta, mh)):
 				if motivo == "mal":
@@ -511,13 +518,40 @@ def _temporadas(pest: _Pestana, libro: xlsx.Libro, p: Planilla) -> None:
 		minimo, mal = (1, None) if bruto is None else _entero(bruto, 1)
 		if mal:
 			p.errores.append(pest.nota(fila, "minimo", f"«{_texto(bruto)}» no es un número de noches."))
-		if precio is None or mal or actual["ok"] is False:
+		precio2, mal2 = _precio2(pest, fila, celdas, p.tipos[tipo], precio, p)
+		if (precio2 is not None or mal2) and p.tipos[tipo].adultos == 3:
+			actual["precio2"].add(tipo)
+		if precio is None or mal or mal2 or actual["ok"] is False:
 			actual["ok"] = False
 			continue
 		p.temporadas.append(
-			Temporada(actual["nombre"], actual["desde"], actual["hasta"], tipo, precio, minimo, fila)
+			Temporada(actual["nombre"], actual["desde"], actual["hasta"], tipo, precio, minimo, fila, precio2)
 		)
 	_cuadra_bloques(pest, bloques, p)
+
+
+def _precio2(pest: _Pestana, fila: int, celdas: dict, tipo: Tipo, precio, p: Planilla) -> tuple[float | None, bool]:
+	"""La columna opcional «Precio para 2» de una fila (D-HR-81, D-S367-9): (precio, hubo error). Vacía, (None, False):
+	la fila carga como hoy. Solo vale en un tipo de 3 personas, mayor que 0 y sin pasar del precio por noche."""
+	bruto = pest.valor(celdas, "precio2")
+	if _texto(bruto) is None:
+		return None, False
+	if tipo.adultos != 3:
+		p.errores.append(pest.nota(fila, "precio2", "el precio para 2 solo va en las habitaciones de 3 personas."))
+		return None, True
+	precio2 = _precio(bruto)
+	if precio2 is None:
+		p.errores.append(pest.nota(fila, "precio2", f"«{_texto(bruto)}» no es un precio."))
+		return None, True
+	if precio2 <= 0:
+		p.errores.append(pest.nota(fila, "precio2", "el precio para 2 tiene que ser mayor que 0."))
+		return None, True
+	if precio is not None and precio > 0 and precio2 > precio:
+		p.errores.append(
+			pest.nota(fila, "precio2", f"el precio para 2 ({precio2:g}) es mayor que el precio por noche ({precio:g}).")
+		)
+		return None, True
+	return precio2, False
 
 
 def _cuadra_bloques(pest: _Pestana, bloques: list, p: Planilla) -> None:
@@ -526,6 +560,13 @@ def _cuadra_bloques(pest: _Pestana, bloques: list, p: Planilla) -> None:
 		for tipo in p.tipos:
 			if p.tipos[tipo].habitaciones and tipo not in b["tipos"] and b["ok"] is not False:
 				p.errores.append(pest.nota(b["fila"], "tipo", f"a «{b['nombre']}» le falta el precio de {tipo}."))
+	# un tipo con precio para 2 en una temporada con fechas lo lleva en todas (D-S367-9)
+	con_precio2 = {t for b in con_fechas for t in b["precio2"]}
+	cargadas = {s.fila for s in p.temporadas}
+	for b in con_fechas:
+		for tipo, fila in b["tipos"].items():
+			if tipo in con_precio2 and tipo not in b["precio2"] and fila in cargadas:
+				p.errores.append(pest.nota(fila, "precio2", f"a «{b['nombre']}» le falta el precio para 2 de {tipo}."))
 	orden = sorted(con_fechas, key=lambda b: (b["desde"], b["fila"]))
 	for antes, despues in zip(orden, orden[1:]):
 		if despues["desde"] <= antes["hasta"]:
@@ -551,6 +592,8 @@ def _cuadra_bloques(pest: _Pestana, bloques: list, p: Planilla) -> None:
 	for nombre, t in p.tipos.items():
 		precios = [s.precio for s in p.temporadas if s.tipo == nombre]
 		t.precio_minimo = min(precios) if precios else None
+		precios2 = [s.precio2 for s in p.temporadas if s.tipo == nombre and s.precio2 is not None]
+		t.precio2_minimo = min(precios2) if precios2 else None
 
 
 def _cuadra_tipos(hab: _Pestana, p: Planilla) -> None:

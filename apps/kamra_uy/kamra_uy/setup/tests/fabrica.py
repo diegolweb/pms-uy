@@ -128,6 +128,18 @@ TEM_CABECERA = [
 	"Notas",
 ]
 
+TEM_PRECIO2 = "Precio para 2 (US$)"  # la columna opcional de D-HR-81
+
+
+def con_precio2(filas: list[list], precios2: dict, antes: bool = False) -> tuple[list, list[list]]:
+	"""«Temporadas y precios» con la columna «Precio para 2 (US$)» (D-HR-81): la cabecera y las filas, con
+	`precios2` = {índice de la fila en `filas`: valor} y vacía en las demás. La columna va tras «Precio por noche», o
+	delante con `antes` (gana igual: casa más largo)."""
+	donde = 4 if antes else 5
+	cabecera = [*TEM_CABECERA[:donde], TEM_PRECIO2, *TEM_CABECERA[donde:]]
+	return cabecera, [[*f[:donde], precios2.get(i), *f[donde:]] for i, f in enumerate(filas)]
+
+
 # La planilla inventada: 6 habitaciones (Doble 2, Triple 3, Apartamento 1) y 3 temporadas contiguas de 2030, más una
 # sin fechas. Los mismos nombres de tipo que el hotel (no son datos sensibles); ni sus números ni sus precios.
 HABITACIONES = [
@@ -219,16 +231,18 @@ def reservas() -> list[list]:
 	]
 
 
-def pestanas(habitaciones=None, temporadas_=None, extra: dict | None = None, sena_=None, reservas_=None) -> dict:
+def pestanas(habitaciones=None, temporadas_=None, extra: dict | None = None, sena_=None, reservas_=None,
+             tem_cabecera=None) -> dict:
 	"""Las seis pestañas de la planilla real, con las dos de datos personales ROTAS: abrirlas tumba la prueba. Con
-	`reservas_` (filas bajo RES_CABECERA), la de reservas trae esas reservas inventadas; «Personal» sigue rota."""
+	`reservas_` (filas bajo RES_CABECERA), la de reservas trae esas reservas inventadas; «Personal» sigue rota. Con
+	`tem_cabecera`, «Temporadas y precios» lleva esa cabecera (ver `con_precio2`)."""
 	out = {
 		"Léeme": [["Planilla inventada para pruebas"], ["Precios en dólares."]],
 		"Habitaciones": [["1. Habitaciones"], ["Una fila por habitación."], HAB_CABECERA, *(habitaciones or HABITACIONES)],
 		"Temporadas y precios": [
 			["2. Temporadas y precios"],
 			["Una fila por temporada y tipo."],
-			TEM_CABECERA,
+			tem_cabecera or TEM_CABECERA,
 			*(temporadas_ if temporadas_ is not None else temporadas()),
 		],
 		"Seña y cancelación": [
