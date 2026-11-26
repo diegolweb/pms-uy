@@ -27,7 +27,7 @@ import frappe
 from frappe.utils import add_days, getdate
 
 from kamra_uy.core.client import CoreClient, CoreError, core_base_url
-from kamra_uy.fiscal import model, texts
+from kamra_uy.fiscal import agency, model, texts
 
 DOCTYPE = "UY CFE"
 COUNTRY = "Uruguay"
@@ -135,7 +135,8 @@ def document_copy(res, guest_file: str | None) -> str | None:
 
 
 def guest_inputs(res) -> dict:
-	"""guest (para determineIva), copy_on_file, buyer y el anexo de huéspedes (para el CFE) y la copia del documento.
+	"""guest (para determineIva), copy_on_file, buyer y el anexo de huéspedes (para el CFE), la copia del documento y,
+	facturado a un RUT, hasta cuándo vale su constancia de agencia del MINTUR (`mintur_agency_until`, HR-236).
 	Manda el país del documento (D-HR-74): el del tipo (la cédula es uruguaya) o el que indicó recepción
 	(`Guest.uy_document_country`), nunca el de residencia, que va como dato. Sin él, ResidenceMissingError: nunca se
 	supone (HR-304, HR-346)."""
@@ -159,7 +160,8 @@ def guest_inputs(res) -> dict:
 	annex = guests_annex(res, {"name": g.full_name or res.get("guest_name"), "doc": doc,
 	                           "nationality": _nationality(g.nationality)}) if buyer["type"] == "rut" else []
 	return {"guest": facts, "copy_on_file": bool(copy_url), "copy_url": copy_url, "document_country": doc_country,
-	        "buyer": buyer, "annex": annex}
+	        "buyer": buyer, "annex": annex,
+	        "mintur_agency_until": agency.constancia_until(res.get("company")) if buyer["type"] == "rut" else None}
 
 
 def _currency(property: str) -> str:
@@ -324,7 +326,8 @@ def account_lines(folios: list, reservation: str | None = None, rooms: set[str] 
 def determine(client: CoreClient, core_property: str, res, lines: list[dict], inputs: dict,
               currency: str, payments: list[dict]) -> tuple[list[dict], str | None]:
 	body = model.determine_request(core_property, lines, currency, inputs["guest"], payments,
-	                               buyer_type=inputs["buyer"]["type"])
+	                               buyer_type=inputs["buyer"]["type"],
+	                               mintur_agency_until=inputs.get("mintur_agency_until"))
 	out = client.post("/v1/fiscal/iva/determine", body, idempotency_key="")
 	return model.with_rates(lines, out), out.get("rules_version")
 

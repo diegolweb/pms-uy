@@ -121,6 +121,19 @@ def test_a_resident_buyer_with_a_rut_pays_every_night_all_year() -> None:
     assert set(_rates(uy_tax.RESIDENT, "2026-11-14", "2026-11-17", rut=True).values()) == {Decimal("10")}
 
 
+def test_a_mintur_agency_pays_no_iva_off_season_only_while_its_constancia_is_valid() -> None:
+    # HR-236 (D-HR-74, pregunta 11): la noche del vencimiento incluida; vencida o sin constancia, un RUT más
+    def rate(night, until):
+        return uy_tax.booking_room_rate(uy_tax.RESIDENT, night, buyer_has_rut=True, agency_until=until)
+
+    assert rate(date(2027, 4, 5), date(2027, 4, 30)) == Decimal("0")
+    assert rate(date(2027, 4, 30), date(2027, 4, 30)) == Decimal("0")
+    assert rate(date(2027, 5, 5), date(2027, 4, 30)) == Decimal("10")
+    assert rate(date(2027, 4, 5), None) == Decimal("10")
+    # dentro de la alta temporada, el 10 % aunque la constancia valga
+    assert rate(date(2027, 3, 27), date(2027, 4, 30)) == Decimal("10")
+
+
 def test_the_rate_is_the_room_rate_of_the_property() -> None:
     assert _rates(uy_tax.RESIDENT, "2026-12-01", "2026-12-02", pct=Decimal("11")) == {"2026-12-01": Decimal("11")}
 

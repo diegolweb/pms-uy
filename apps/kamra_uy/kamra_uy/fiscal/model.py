@@ -211,7 +211,9 @@ def _positive_payments(payments: list[dict]) -> list[dict]:
 
 
 def determine_request(property_code: str, lines: list[dict], currency: str, guest: dict, payments: list[dict],
-                      buyer_type: str = "consumer") -> dict:
+                      buyer_type: str = "consumer", mintur_agency_until: str | None = None) -> dict:
+	"""El cuerpo de /v1/fiscal/iva/determine. `mintur_agency_until` (AAAA-MM-DD, kamra_uy.fiscal.agency) solo con un
+	comprador con RUT: la agencia de viajes con su constancia del MINTUR vigente hasta esa fecha (HR-236)."""
 	body = {
 		"property": property_code,
 		"lines": [{"line_id": ln["line_id"], "kind": ln["kind"], "amount": money(ln["amount"]), "currency": currency,
@@ -220,6 +222,8 @@ def determine_request(property_code: str, lines: list[dict], currency: str, gues
 		"billed_to": "guest_account",
 		"buyer": {"type": buyer_type},
 	}
+	if buyer_type == "rut" and mintur_agency_until:
+		body["buyer"]["mintur_agency"] = {"constancia_valid_until": mintur_agency_until}
 	paid = _positive_payments(payments)
 	if paid:
 		body["payments"] = [{"mode": p["mode"], "amount": money(p["amount"]), "currency": currency} for p in paid]
@@ -405,10 +409,23 @@ def split_parts(errors: list | None) -> list[dict] | None:
 
 
 def _share(payments: list[dict], weight: Decimal, total: Decimal, last: bool, given: dict[int, Decimal]) -> list[dict]:
+	"""Lo de cada medio de pago que le toca a una parte, cuadrado en las dos direcciones. Una parte que no es la última
+	se lleva lo cobrado por `weight` (su total con IVA) sobre `total` (el de todas), al centavo: cada medio, su
+	proporción, y el último medio, lo que falta para ese importe exacto. La última se lleva, medio a medio, lo que
+	queda de cada uno. Así cada CFE suma justo lo suyo (cobrado el total, su total: `formaPago` contado sin tolerancia
+	en Gsoft) y cada medio suma lo cobrado con él. Un importe negativo (un medio de unos centavos) → ValueError."""
+	amounts: list[Decimal] = []
+	if last:
+		amounts = [dec(p["amount"]) - given.get(i, Decimal(0)) for i, p in enumerate(payments)]
+	elif payments:
+		ratio = weight / total if total else Decimal(0)
+		target = dec(money(sum((dec(p["amount"]) for p in payments), Decimal(0)) * ratio))
+		amounts = [dec(money(dec(p["amount"]) * ratio)) for p in payments[:-1]]
+		amounts.append(target - sum(amounts, Decimal(0)))
+	if any(a < 0 for a in amounts):
+		raise ValueError("el reparto de los pagos entre las partes del CFE deja un importe negativo")
 	out = []
-	for i, p in enumerate(payments):
-		whole = dec(p["amount"])
-		amount = whole - given.get(i, Decimal(0)) if last else dec(money(whole * weight / total)) if total else Decimal(0)
+	for i, (p, amount) in enumerate(zip(payments, amounts, strict=True)):
 		given[i] = given.get(i, Decimal(0)) + amount
 		if amount > 0:
 			out.append({**p, "amount": money(amount)})
@@ -418,20 +435,34 @@ def _share(payments: list[dict], weight: Decimal, total: Decimal, last: bool, gi
 def split_request(body: dict, lines: list[dict], parts: list[dict]) -> list[dict]:
 	"""Cada parte de un CFE que core pide partir: {"lines": las líneas guardadas (con `source_amount`), "body": la
 	petición sin `invoice_number`}. Cada línea va en una sola parte y todas en alguna (si no, ValueError: core contestó
-	con otras líneas); los pagos se reparten en proporción al importe de cada parte, con el redondeo en la última."""
+	con otras líneas); los pagos se reparten en proporción al total CON IVA de cada parte (el que core pone en su CFE),
+	con el redondeo en la última: cobrado el total, cada CFE lleva pagado justo su total."""
 	by_id = {ln["line_id"]: ln for ln in lines}
 	wanted = [lid for p in parts for lid in p["line_ids"]]
 	if sorted(wanted) != sorted(by_id):
 		raise ValueError("core pidió partir el CFE con otras líneas que las que se le mandaron")
 	sent = {ln["line_id"]: ln for ln in body["lines"]}
-	total = sum((dec(ln["unit_amount"]) * dec(ln.get("quantity") or 1) for ln in body["lines"]), Decimal(0))
+
+	def gross(part_lines: list[dict]) -> Decimal:
+		# Como core (fiscal/cfe/compute.ts, computeTotals): el neto de cada línea al centavo y el IVA de cada tasa
+		# sobre la suma de sus netos, al centavo, con el medio centavo hacia arriba. Con `prices_include_iva` el
+		# importe ya lo lleva dentro.
+		nets = [dec(money(dec(ln["unit_amount"]) * dec(ln.get("quantity") or 1))) for ln in part_lines]
+		if body.get("prices_include_iva"):
+			return sum(nets, Decimal(0))
+		by_rate: dict[str, Decimal] = {}
+		for ln, net in zip(part_lines, nets, strict=True):
+			by_rate[_rate_key(ln["rate"])] = by_rate.get(_rate_key(ln["rate"]), Decimal(0)) + net
+		return sum((net + dec(money(net * dec(rate) / 100)) for rate, net in by_rate.items()), Decimal(0))
+
+	weights = [gross([sent[lid] for lid in part["line_ids"]]) for part in parts]
+	total = sum(weights, Decimal(0))
 	given: dict[int, Decimal] = {}
 	out = []
 	for n, part in enumerate(parts):
 		part_lines = [sent[lid] for lid in part["line_ids"]]
-		weight = sum((dec(ln["unit_amount"]) * dec(ln.get("quantity") or 1) for ln in part_lines), Decimal(0))
 		piece = {**body, "lines": part_lines,
-		         "payments": _share(body.get("payments") or [], weight, total, n == len(parts) - 1, given)}
+		         "payments": _share(body.get("payments") or [], weights[n], total, n == len(parts) - 1, given)}
 		piece.pop("invoice_number", None)
 		if "guests_annex" in body and not needs_annex(body["buyer"], [by_id[lid] for lid in part["line_ids"]]):
 			piece.pop("guests_annex")

@@ -80,13 +80,17 @@ def _day(value) -> date:
 	return value if isinstance(value, date) else date.fromisoformat(str(value))
 
 
-def booking_room_rate(declared: str, night: date, buyer_has_rut: bool = False, room_pct=None) -> Decimal:
+def booking_room_rate(declared: str, night: date, buyer_has_rut: bool = False, room_pct=None,
+                      agency_until: date | None = None) -> Decimal:
 	"""El IVA de una noche como lo factura core (services/core/config/iva-rules.uy.yaml, gana la primera que encaja):
 
 	- quien no reside en Uruguay, 0 todo el año (exportación de servicios, Decreto 220/998, art. 34, num. 14; la copia
 	  del documento la toma recepción en el check-in y el hotel está en el MINTUR), también facturado a un RUT;
 	- quien reside, la tasa de habitación en la alta temporada (del 16 de noviembre al domingo de Pascua, Decreto
-	  267/001) y, facturado a un comprador con RUT (contribuyente de IVA), todas las noches; fuera de ella, 0.
+	  267/001) y, facturado a un comprador con RUT (contribuyente de IVA), todas las noches; fuera de ella, 0;
+	- salvo que el RUT sea una agencia de viajes inscripta en el MINTUR con su constancia vigente hasta `agency_until`
+	  (HR-236, D-HR-74 pregunta 11; kamra_uy.fiscal.agency): sus noches hasta esa fecha, incluida, van como las de
+	  quien no tiene RUT (0 fuera de la alta temporada, la tasa de habitación dentro); las de después, como un RUT más.
 
 	`declared` es el valor del campo (RESIDENT o NON_RESIDENT). ValueError con cualquier otro: sin declaración no se
 	sabe qué cobrar."""
@@ -94,21 +98,23 @@ def booking_room_rate(declared: str, night: date, buyer_has_rut: bool = False, r
 		raise ValueError(f"sin residencia declarada: {declared!r}")
 	if declared == NON_RESIDENT:
 		return Decimal(0)
-	if buyer_has_rut or turismo.en_alta_temporada(night):
+	rut = buyer_has_rut and not (agency_until is not None and night <= agency_until)
+	if rut or turismo.en_alta_temporada(night):
 		return room_rate(None, room_pct)
 	return Decimal(0)
 
 
-def booking_room_rates(declared: str, llegada, salida, buyer_has_rut: bool = False, room_pct=None) -> dict[str, Decimal]:
+def booking_room_rates(declared: str, llegada, salida, buyer_has_rut: bool = False, room_pct=None,
+                       agency_until: date | None = None) -> dict[str, Decimal]:
 	"""{AAAA-MM-DD: tasa} de cada noche de la estancia, de la llegada a la noche anterior a la salida."""
 	desde, hasta = _day(llegada), _day(salida)
 	out: dict[str, Decimal] = {}
 	noche = desde
 	while noche < hasta:
-		out[noche.isoformat()] = booking_room_rate(declared, noche, buyer_has_rut, room_pct)
+		out[noche.isoformat()] = booking_room_rate(declared, noche, buyer_has_rut, room_pct, agency_until)
 		noche += timedelta(days=1)
 	if not out:
-		booking_room_rate(declared, desde, buyer_has_rut, room_pct)  # sin noches, igual exige la declaración
+		booking_room_rate(declared, desde, buyer_has_rut, room_pct, agency_until)  # sin noches, igual exige la declaración
 	return out
 
 

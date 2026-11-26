@@ -1,6 +1,7 @@
 """El conector fiscal de Kamra (HR-28) contra Kamra de verdad y un core simulado: IVA 0 y CFE en el check-in de un
 no residente con la copia del documento, core caído sin parar a recepción, ajuste al cerrar, nota de crédito al anular,
-aviso cfe.updated, bloque CFE del folio y el descuento de la estancia repartido por noches (HR-235)."""
+aviso cfe.updated, bloque CFE del folio, el descuento de la estancia repartido por noches (HR-235) y la seña cobrada
+antes de la llegada, con su recibo y sin CFE hasta el check-in (HR-125)."""
 
 import json
 import uuid
@@ -1037,3 +1038,52 @@ class TestInvoiceCurrency(FiscalCase):
 		self.assertEqual((items[high.name]["currency"], items[high.name]["fx"]),
 		                 ("USD", model.FX_LINE.format(currency="USD", rate="40")))
 
+
+
+class TestTheDepositBeforeArrival(FiscalCase):
+	"""HR-125 (D-HR-74, respuesta del estudio a la pregunta 11): la seña cobrada antes de la llegada NO emite CFE; su
+	comprobante es el recibo del hotel (R-<n>, HR-349) y el de Mercado Pago. La estancia entera se factura una sola vez,
+	en el check-in, y ese CFE lleva la seña como lo ya cobrado: al huésped le queda por pagar la estancia menos la seña.
+	La seña PERDIDA (cancelación fuera de plazo o no-show) es otra cosa: fiscal.forfeit, HR-347 (test_forfeit_flow)."""
+
+	def test_the_deposit_issues_no_cfe_only_its_receipt_and_the_check_in_invoice_deducts_it(self):
+		from kamra.folio import open_folio
+
+		from kamra_uy.payments import webhook as payments_webhook
+		from kamra_uy.payments.tests.fixtures import event as payment_event
+		from kamra_uy.receipts import issue as receipts
+
+		guest = make_guest("UT Huésped Seña", residence_country="Argentina", uy_document_country="Argentina",
+		                   id_type="DNI", id_number="30111222", id_file="/private/files/ut-dni.png")
+		# la reserva web: retenida hasta que llega el pago de la seña (kamra.public_api.book)
+		res = make_reservation(PROP, self.rt, d(0), d(2), status="Pending Payment", room=self.room, guest=guest,
+		                       hold_expires_on=frappe.utils.add_to_date(frappe.utils.now_datetime(), minutes=30))
+		folio = open_folio(res)
+
+		# 1) pagar la seña: el recibo, y ningún CFE (ni tarea en UY CFE ni POST /v1/fiscal/cfe a core)
+		payments_webhook.receive(*signed(payment_event("payment.approved", folio, amount="80.00", purpose="deposit")))
+		self.assertEqual(frappe.db.get_value("Reservation", res.name, "status"), "Confirmed")
+		[receipt] = frappe.get_all(receipts.DOCTYPE, filters={"reservation": res.name}, fields=["kind", "amount"])
+		self.assertEqual((receipt.kind, receipt.amount), ("Receipt", 80.0))
+		self.assertEqual(connector.process_reservation(res.name), {"sent": 0, "pending": 0, "attention": 0})
+		self.assertEqual(frappe.get_all(connector.DOCTYPE, filters={"reservation": res.name}), [])
+		self.assertEqual(self.core.bodies("/v1/fiscal/cfe"), [])
+
+		# 2) el check-in: un CFE por la estancia entera (la seña no se facturó antes) con la seña como lo ya cobrado
+		frappe.db.set_value("Room", self.room, "housekeeping_status", "Clean")
+		kamra_api.check_in(res.name, invoice_currency="USD")
+		connector.process_reservation(res.name)
+		[body] = self.core.bodies("/v1/fiscal/cfe")
+		self.assertEqual(sum(Decimal(ln["unit_amount"]) * Decimal(ln["quantity"]) for ln in body["lines"]),
+		                 Decimal("200.00"))
+		self.assertEqual(body["payments"], [{"mode": "Payment Link", "amount": "80.00"}])
+		[cfe] = self.documents(res)
+		self.assertEqual((cfe.kind, cfe.total), ("Original", "200.00"))
+
+		# 3) la salida: se cobra lo que falta (la estancia menos la seña), sin otro CFE ni otro recibo
+		self.settle_and_close(res, 2)
+		connector.process_reservation(res.name)
+		paid = [p.amount for p in frappe.get_doc("Folio", folio).payments]
+		self.assertEqual(paid, [80.0, 120.0])
+		self.assertEqual(len(self.documents(res)), 1)
+		self.assertEqual(len(frappe.get_all(receipts.DOCTYPE, filters={"reservation": res.name})), 1)

@@ -7,6 +7,7 @@ módulo de Frappe «Fiscal» de kamra_uy (sus doctypes viven en `doctype/`).
 
 | Momento en Kamra | Gancho (hooks.py) | Qué hace |
 |---|---|---|
+| Cobro antes del check-in: la seña o el total (`Folio.on_update`, línea `Advance`) | ninguno de este paquete (el recibo: `kamra_uy.receipts`) | **Ningún CFE** (HR-125, abajo). |
 | Check-in (`Reservation.validate`, con el huésped en casa) | `events.on_reservation_validate` | `determineIva` de cada noche con el país de residencia, el documento y si su copia está archivada; deja la tasa en `night_rates` (lo que Kamra cobra). Core caído: sigue el IVA del paquete, sin parar el check-in. |
 | Check-in (`on_update`, el estado pasa a Checked In) | `events.on_reservation_update` | Tarea «Check-in» en UY CFE + cola tras el commit → CFE de la estancia, línea a línea. |
 | Cierre de la cuenta (`Folio.on_update` → Closed) | `events.on_folio_update` | Tarea «Close»: lo de todas las cuentas cerradas de la reserva contra lo ya facturado → CFE de ajuste (prolongación) o nota de crédito (salida anticipada, descuento, IVA corregido). Con el huésped en casa (factura intermedia) solo añade. |
@@ -19,6 +20,25 @@ módulo de Frappe «Fiscal» de kamra_uy (sus doctypes viven en `doctype/`).
 La conciliación (`model.reconcile`) es la misma para todo: lo que debería estar facturado (la estancia o las cuentas
 cerradas) contra lo que cubren los CFE menos sus notas de crédito, tasa a tasa. Las notas de crédito salen antes que el
 CFE nuevo. Las filas de una reserva se procesan en orden y se para en la primera que no sale.
+
+## La seña cobrada antes de la llegada: recibo, nunca CFE (HR-125, D-HR-74)
+
+El estudio contable (D-HR-74, respuesta 4; la pregunta 11 de la lista vieja de HR-125): «con la reserva corresponde
+recibo siempre. Incluso no corresponde factura hasta que se presta el servicio».
+
+- **Cobrar la seña (o el total) antes del check-in no emite ningún CFE.** El cobro (el aviso `payment.approved` de core
+  con `purpose` `deposit`, el enlace de pago o recepción) es una línea `Advance` del folio Guest. Su comprobante es el
+  recibo del hotel `R-<n>` (`kamra_uy.receipts`, HR-349) y el de Mercado Pago. Ningún gancho de este paquete factura
+  un cobro: `events.on_folio_update` solo actúa con la cuenta cerrada, y `forfeit.on_folio_update` solo con la
+  reserva cancelada o no presentada.
+- **El CFE del check-in factura la estancia entera, una sola vez, y descuenta la seña como lo ya cobrado.** Sus líneas
+  son las noches de `connector.stay_lines`: la seña no se facturó antes, así que no se resta del importe facturado. La
+  seña va en los `payments` del CFE (`connector._payments` del folio Guest, el mismo que Kamra reutiliza en el check-in,
+  `kamra.folio.open_folio`). Al huésped le queda por pagar la estancia menos la seña, y al cerrar no sale otro CFE.
+- **La seña perdida** (cancelación fuera de plazo o no-show) sí lleva CFE: e-Ticket con el 22 % dentro de lo retenido,
+  o e-Factura si hay RUT, y su nota de crédito si después se devuelve algo (`forfeit.py`, HR-347).
+- Lo fija `tests/test_connector.py` (`TestTheDepositBeforeArrival`): pagar la seña deja su recibo y ninguna fila en
+  UY CFE; el check-in, un CFE por la estancia con la seña en `payments`; la salida cobra el resto, sin otro CFE.
 
 ## Estados de UY CFE
 

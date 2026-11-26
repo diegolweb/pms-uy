@@ -73,6 +73,9 @@ Cuando la propiedad tiene la pasarela «Mercado Pago» habilitada, la reserva de
   configuración del sitio (`booking_return_origins`, por ejemplo `["https://reservas.example.com"]`).
 - La seña de una noche es el modo «First night» de la propiedad: el total de la estadía dividido por sus noches; una
   temporada con su propio porcentaje de seña manda sobre él.
+- La seña no lleva CFE (HR-125, D-HR-74): su comprobante es el recibo del hotel `R-<n>` (`kamra_uy.receipts`, HR-349)
+  y el de Mercado Pago. El CFE sale en el check-in por la estancia entera, con la seña como lo ya cobrado
+  (`fiscal/README.md`, «La seña cobrada antes de la llegada»).
 - El pago que llega tarde (la retención ya venció y Kamra canceló la reserva, o la reserva quedó como no-show): se
   asienta si el folio sigue abierto, para poder devolverlo desde ahí, y el aviso queda en «Needs attention» con un
   correo a Finanzas. La reserva **no** se reactiva sola: su habitación pudo venderse otra vez.
@@ -129,6 +132,6 @@ Tres métodos públicos (`/api/method/kamra_uy.payments.card.<método>`, sin ses
 
 - La prueba con el sandbox de Mercado Pago (HR-89) y el país de la tarjeta por su BIN (HR-91; hoy llega nulo y el
   modo es `Payment Link`).
-- La ayuda de la tarjeta de ajustes de la pasarela (HR-123), el botón «Devolver por Mercado Pago» del folio (HR-124) y
-  el comprobante de la seña (HR-125).
+- La ayuda de la tarjeta de ajustes de la pasarela (HR-123) y el botón «Devolver por Mercado Pago» del folio (HR-124).
+  El comprobante de la seña (HR-125) ya está: el recibo, nunca un CFE (arriba, «La seña de la reserva web»).
 - El paso de pago de la web con la tarjeta y el botón del saldo (HR-220) y su prueba con Mercado Pago de verdad (HR-223).

@@ -118,10 +118,13 @@ extend_bootinfo = ["kamra_uy.health.sentry.extend_bootinfo"]
 # fixtures/custom_field.json, y se ponen al día al instalar y en cada migrate (idempotente).
 # HR-314: el destinatario de las consultas de la web, un ajuste de la Property (kamra_uy/contact/form.py)
 # HR-360: el documento de quien pagó por Mercado Pago, en la Reservation (kamra_uy/payments/payer.py)
+# HR-236: la constancia del MINTUR de la agencia de viajes, en la Corporate Account (kamra_uy/fiscal/agency.py)
 after_install = ["kamra_uy.notifications.confirmation.ensure_fields", "kamra_uy.booking.residence.ensure_fields",
-                 "kamra_uy.contact.form.ensure_fields", "kamra_uy.payments.payer.ensure_fields"]
+                 "kamra_uy.contact.form.ensure_fields", "kamra_uy.payments.payer.ensure_fields",
+                 "kamra_uy.fiscal.agency.ensure_fields"]
 after_migrate = ["kamra_uy.notifications.confirmation.ensure_fields", "kamra_uy.booking.residence.ensure_fields",
-                 "kamra_uy.contact.form.ensure_fields", "kamra_uy.payments.payer.ensure_fields"]
+                 "kamra_uy.contact.form.ensure_fields", "kamra_uy.payments.payer.ensure_fields",
+                 "kamra_uy.fiscal.agency.ensure_fields"]
 
 # El IVA del residente al reservar (HR-266, D-HR-47): book de la página pública (la de la web y la de /book de Kamra)
 # pide en Uruguay la residencia declarada y cobra con ella el IVA de cada noche, y booking_status lleva su desglose

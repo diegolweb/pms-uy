@@ -58,7 +58,8 @@ def test_los_campos_se_crean_al_instalar_y_en_cada_migrate() -> None:
         assert hooks[hook] == ["kamra_uy.notifications.confirmation.ensure_fields",
                                "kamra_uy.booking.residence.ensure_fields",
                                "kamra_uy.contact.form.ensure_fields",  # HR-314: el destinatario de la web
-                               "kamra_uy.payments.payer.ensure_fields"], hook  # HR-360: quien pagó
+                               "kamra_uy.payments.payer.ensure_fields",  # HR-360: quien pagó
+                               "kamra_uy.fiscal.agency.ensure_fields"], hook  # HR-236: la agencia del MINTUR
 
 
 def test_las_consultas_de_la_web_salen_de_la_cola_cada_hora() -> None:

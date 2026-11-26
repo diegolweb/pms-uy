@@ -113,6 +113,17 @@ def test_the_determine_request_carries_lines_guest_payments_and_buyer() -> None:
     }
 
 
+def test_a_mintur_agency_rut_carries_its_constancia_date_and_nobody_else_does() -> None:
+    # HR-236: solo un comprador con RUT lleva la constancia de agencia del MINTUR (core, buyerOf)
+    guest = {"residence_country": "UY"}
+    body = model.determine_request("P", NIGHTS, "UYU", guest, [], buyer_type="rut", mintur_agency_until="2027-04-30")
+    assert body["buyer"] == {"type": "rut", "mintur_agency": {"constancia_valid_until": "2027-04-30"}}
+    assert model.determine_request("P", NIGHTS, "UYU", guest, [], buyer_type="rut")["buyer"] == {"type": "rut"}
+    body = model.determine_request("P", NIGHTS, "UYU", guest, [], buyer_type="consumer",
+                                   mintur_agency_until="2027-04-30")
+    assert body["buyer"] == {"type": "consumer"}
+
+
 def test_payments_that_are_not_positive_are_left_out() -> None:
     body = model.determine_request("P", NIGHTS, "UYU", {"residence_country": "UY"},
                                    [{"mode": "Cash", "amount": "0.00"}, {"mode": "Cash", "amount": "-5.00"}])
@@ -651,10 +662,33 @@ def test_each_part_takes_its_lines_and_its_share_of_the_payments() -> None:
     assert [ln["line_id"] for ln in rest["body"]["lines"]] == ["m1"]
     assert export["lines"][0]["source_amount"] == "100.00" and "source_amount" not in export["body"]["lines"][0]
     assert "tax_category" not in export["body"]["lines"][0]  # CfeLine no la admite: es de Kamra
-    # 131 en proporción 100/120 y lo que queda: entre las dos, lo pagado al centavo
-    assert export["body"]["payments"] == [{"mode": "Tarjeta", "amount": "109.17"}]
-    assert rest["body"]["payments"] == [{"mode": "Tarjeta", "amount": "21.83"}]
+    # 131 en proporción a los totales con IVA (100 y 22, de 122) y lo que queda: entre las dos, lo pagado al centavo
+    assert export["body"]["payments"] == [{"mode": "Tarjeta", "amount": "107.38"}]
+    assert rest["body"]["payments"] == [{"mode": "Tarjeta", "amount": "23.62"}]
     assert "invoice_number" not in export["body"] and export["body"]["rules_version"] == "v1"
+
+
+@pytest.mark.parametrize("paid", [
+    [("Tarjeta", "310.00")],
+    [("Tarjeta", "93.00"), ("Efectivo", "217.00")],  # la seña por Mercado Pago y el saldo al llegar
+    # con tres medios el reparto viejo daba 199,99 + 110,01 (58,06 + 6,45 + 135,48): el de 200, a crédito
+    [("Tarjeta", "90.00"), ("Transferencia", "10.00"), ("Efectivo", "210.00")],
+])
+def test_a_stay_split_by_the_season_takes_on_each_cfe_its_total_with_iva(paid) -> None:
+    # HR-317: 200 exentos + 100 al 10 % (110 con IVA), cobrados 310 → cada e-Ticket suma justo su total (formaPago
+    # contado en Gsoft: lo pagado ≥ el total, sin tolerancia) y cada medio, lo cobrado con él
+    exempt = {"line_id": "e1", "rate": "0", "reason_code": "hospedaje_fuera_temporada", "tax_category": "exempt",
+              "quantity": "2", "unit_amount": "100.00", "description": "x"}
+    taxed = {**TAXED, "unit_amount": "100.00"}
+    body = model.cfe_request("P", "F", "R/1", {"type": "consumer", "name": "Ana"}, "UYU", "1", [exempt, taxed],
+                             [{"mode": m, "amount": a} for m, a in paid], None)
+    pieces = model.split_request(body, [exempt, taxed], [{"type": "e-ticket", "line_ids": ["e1"]},
+                                                        {"type": "e-ticket", "line_ids": ["m1"]}])
+    by_part = [sum(Decimal(p["amount"]) for p in piece["body"]["payments"]) for piece in pieces]
+    assert by_part == [Decimal("200.00"), Decimal("110.00")]
+    by_mode = {m: sum(Decimal(p["amount"]) for piece in pieces for p in piece["body"]["payments"] if p["mode"] == m)
+               for m, _a in paid}
+    assert by_mode == {m: Decimal(a) for m, a in paid}
 
 
 def test_a_split_with_other_lines_than_the_ones_sent_is_refused() -> None:

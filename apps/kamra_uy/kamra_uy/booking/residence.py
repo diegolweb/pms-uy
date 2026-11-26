@@ -37,7 +37,7 @@ from decimal import Decimal
 import frappe
 from frappe.utils import flt, fmt_money, getdate
 
-from kamra_uy.fiscal import connector, model
+from kamra_uy.fiscal import agency, connector, model
 from kamra_uy.notifications import confirmation
 from kamra_uy.pure import uy_tax
 
@@ -160,6 +160,12 @@ def buyer_has_rut(res) -> bool:
 	return model.valid_rut("".join(ch for ch in gstin if ch.isdigit()))
 
 
+def agency_until(res):
+	"""Hasta cuándo la empresa de la reserva es agencia de viajes con su constancia del MINTUR (HR-236), o None."""
+	until = agency.constancia_until(res.get("company"))
+	return getdate(until) if until else None
+
+
 def _room_pct(res):
 	"""La tasa de habitación de la propiedad (o la del tipo de habitación), como uruguay.calculate_room_tax."""
 	rates = frappe.db.get_value("Property", res.property, ["uy_iva_room_pct", "rates_include_tax"], as_dict=True) or {}
@@ -178,7 +184,7 @@ def apply(res) -> bool:
 	if included:
 		return False
 	rates = uy_tax.booking_room_rates(declared, getdate(res.check_in_date), getdate(res.check_out_date),
-	                                  buyer_has_rut=buyer_has_rut(res), room_pct=pct)
+	                                  buyer_has_rut=buyer_has_rut(res), room_pct=pct, agency_until=agency_until(res))
 	return connector.apply_room_rates(res, rates)
 
 
@@ -322,7 +328,7 @@ def quote_for(quote: dict, resident: bool, inputs: dict) -> dict:
 	out = dict(quote)
 	if not included and quote.get("nightly"):
 		rates = uy_tax.booking_room_rates(declared, getdate(inputs["check_in_date"]), getdate(inputs["check_out_date"]),
-		                                  buyer_has_rut=buyer_has_rut(res), room_pct=pct)
+		                                  buyer_has_rut=buyer_has_rut(res), room_pct=pct, agency_until=agency_until(res))
 		out = uy_tax.quote_with_rates(quote, rates)
 	out["residence"] = "resident" if resident else "non_resident"
 	return out
