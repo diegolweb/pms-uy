@@ -59,7 +59,12 @@ def on_folio_update(doc, method=None):
 		return
 	if doc.get("folio_type") == "Account":
 		return
-	res = frappe.get_doc("Reservation", doc.reservation)
+	if doc.get("folio_type") == "Group":
+		# el maestro de un grupo es de su pagador, no de su ancla si esta no se alojó (HR-375); si no hay ninguna
+		# habitación viva, el grupo entero no se alojó y se sale como abajo
+		res = frappe.get_doc("Reservation", connector.group_payer(doc))
+	else:
+		res = frappe.get_doc("Reservation", doc.reservation)
 	if res.status in forfeit.STATUSES:
 		# lo de una reserva que no se alojó es la seña retenida: la factura fiscal.forfeit (HR-347), no la cuenta
 		return

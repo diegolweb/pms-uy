@@ -23,7 +23,7 @@ from kamra.tests.audit_fixtures import (
 	make_room_type,
 )
 
-from kamra_uy.fiscal import api, connector, fx, model, sync, texts, webhook
+from kamra_uy.fiscal import api, connector, forfeit, fx, model, sync, texts, webhook
 from kamra_uy.payments.tests.fixtures import CODE, PROP, SECRET, gateway_settings, make_uy_property, signed
 
 CORE = "http://core.test"
@@ -896,6 +896,101 @@ class TestGroupMasterFolio(FiscalCase):
 		titular = {r.name: frappe.db.get_value("Guest", r.guest, "full_name") for r in (self.main, self.other)}
 		self.assertEqual(annex, {self.main.name: [titular[self.main.name]],
 		                         self.other.name: [titular[self.other.name], "UT Acompañante BR"]})
+
+
+class TestGroupWhoseMainRoomDoesNotStay(FiscalCase):
+	"""HR-375: la principal del grupo (la ancla del folio maestro) no se aloja con el maestro ya abierto. El dinero del
+	grupo en el maestro no es su seña, y lo cargado a mano en el maestro sale una vez, al pagador del grupo
+	(connector.group_payer), con la ancla de Kamra o reanclado por recepción."""
+
+	post_nights = TestGroupMasterFolio.post_nights
+	master = TestGroupMasterFolio.master
+	settle = staticmethod(TestGroupMasterFolio.settle)
+
+	def setUp(self):
+		super().setUp()
+		self.company = frappe.get_doc({"doctype": "Corporate Account", "company_name": f"UT Grupo {uuid.uuid4().hex[:6]}",
+		                               "gstin": "21-999999-0016"}).insert(ignore_permissions=True).name
+		self.gb = frappe.get_doc({"doctype": "Group Booking", "property": PROP, "group_name": "UT Grupo Sin Principal",
+		                          "company": self.company, "check_in_date": d(0), "check_out_date": d(2),
+		                          "status": "Confirmed"}).insert(ignore_permissions=True)
+		# la principal aún no llegó; la segunda está en casa y su check-in ya facturó sus dos noches
+		self.main, self.other = (
+			make_reservation(PROP, self.rt, d(0), d(2), status=status, room=make_room(PROP, self.rt, f"G{n}"),
+			                 company=self.company, group_booking=self.gb.name,
+			                 guest=make_guest(name, id_type="Passport", id_number=doc, uy_document_country="Argentina",
+			                                  residence_country="Argentina", nationality="ARG",
+			                                  id_file="/private/files/ut-pasaporte.png"))
+			for n, name, doc, status in (("301", "UT Principal Ausente", "PC-3", "Confirmed"),
+			                             ("302", "UT Segunda En Casa", "PD-4", "Checked In")))
+		self.gb.db_set({"master_reservation": self.main.name, "master_pays": "Room only"})
+		connector.process_reservation(self.other.name)
+		# las noches de la segunda van al maestro, que Kamra ancla a la principal (viva mientras está «Confirmed»)
+		self.post_nights(self.other)
+		self.assertEqual(frappe.db.get_value("Folio", self.master(), "reservation"), self.main.name)
+
+	def cancel_main(self) -> None:
+		res = frappe.get_doc("Reservation", self.main.name)
+		res.status = "Cancelled"
+		frappe.flags.kamra_cancelling = True  # como kamra.api._do_cancel
+		try:
+			res.save(ignore_permissions=True)
+		finally:
+			frappe.flags.kamra_cancelling = False
+
+	def test_the_group_money_in_the_master_is_never_the_deposit_of_its_main_room(self):
+		from kamra import folio as folio_mod
+
+		master = frappe.get_doc("Folio", self.master())
+		folio_mod._recalculate(master)
+		self.assertGreater(master.balance, 0)
+		# el grupo paga a cuenta en el maestro las noches de la segunda habitación
+		master.append("payments", {"posting_date": d(0), "payment_kind": "Payment", "mode": "Tarjeta extranjera",
+		                           "amount": master.balance})
+		folio_mod._recalculate(master)
+		master.save(ignore_permissions=True)
+		# la principal no viene (kamra.folio.apply_no_show): «No Show» sin sus ganchos, la penalidad en su folio propio
+		# y nada pagado en él
+		frappe.db.set_value("Reservation", self.main.name, "status", "No Show")
+		main = frappe.get_doc("Reservation", self.main.name)
+		self.assertGreater(folio_mod.post_policy_fee(main, "First Night", "No-show charge (First Night)",
+		                                             posting_date=d(0)), 0)
+		for name in (connector._guest_folio(main.name), self.master()):
+			forfeit.on_folio_update(frappe.get_doc("Folio", name))
+		# lo pagado en el maestro no es suyo: no le queda nada retenido que facturar
+		self.assertFalse(forfeit._due(main))
+		forfeit.process(main.name)
+		self.assertEqual(self.documents(main), [])
+		[cfe] = self.documents(self.other)
+		self.assertEqual(cfe.purpose, "Check-in")
+		self.assertEqual(len(self.core.bodies("/v1/fiscal/cfe")), 1)
+
+	def dinner_goes_once_to_the_other_room(self, reanchor: bool) -> None:
+		kamra_api.add_folio_charge(self.master(), "Food & Beverage", "UT Cena del grupo", 300, posting_date=d(0))
+		master = frappe.get_doc("Folio", self.master())
+		[dinner] = [c for c in master.charges if c.description == "UT Cena del grupo"]
+		self.assertEqual(dinner.reservation, self.main.name)
+		self.cancel_main()
+		if reanchor:
+			# recepción pone de principal a la habitación que sí está (Kamra mueve el maestro con ella)
+			kamra_api.set_group_master(self.gb.name, self.other.name)
+			self.assertEqual(frappe.db.get_value("Folio", self.master(), "reservation"), self.other.name)
+		self.settle(self.master())
+		for res in (self.main, self.other):
+			connector.process_reservation(res.name)
+		self.assertEqual(self.documents(self.main), [])
+		check_in, billed = self.documents(self.other)
+		self.assertEqual(check_in.purpose, "Check-in")
+		sent = json.loads(billed.request_json)
+		self.assertEqual(sum(Decimal(ln["unit_amount"]) * Decimal(ln.get("quantity", 1)) for ln in sent["lines"]),
+		                 Decimal("300.00"))
+		self.assertEqual(len(self.core.bodies("/v1/fiscal/cfe")), 2)
+
+	def test_when_the_main_room_does_not_stay_the_master_dinner_goes_once_to_the_group_payer(self):
+		self.dinner_goes_once_to_the_other_room(reanchor=False)
+
+	def test_reanchored_by_the_desk_the_master_dinner_goes_once_to_the_new_main_room(self):
+		self.dinner_goes_once_to_the_other_room(reanchor=True)
 
 
 class TestCoreEvent(FiscalCase):

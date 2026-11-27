@@ -438,7 +438,7 @@ class TestConfirmationMail(CobrosCase):
 		from kamra.folio import open_folio
 
 		guest = make_guest("UT Recepción", email="recepcion-ut@example.com")
-		desk = make_reservation(PROP, self.rt, d(60), d(62), status="Held", guest=guest, source="Walk-in")
+		desk = make_reservation(PROP, self.rt, d(60), d(62), status="Held", guest=guest, source="AI Agent")  # web14: Walk-in es de recepción y, con BORRADORES_OK, sí recibe la suya (HR-374)
 		folio = open_folio(desk)
 		webhook.receive(*signed(event("payment.approved", folio, payment_id=str(uuid.uuid4()))))
 		self.assertEqual(self.status(desk.name), "Confirmed")

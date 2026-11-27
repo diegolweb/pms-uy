@@ -147,7 +147,8 @@ class TestResidence(AuditTestCase):
 		self.assertAlmostEqual(float(out["advance_due"]), 630.0, places=2)
 		self.assertAlmostEqual(float(res.advance_due), 630.0, places=2)
 		self.assertEqual(out["uy_iva"], {"residence": "resident", "amount_before_tax": 600.0, "tax_amount": 30.0,
-		                                 "amount_after_tax": 630.0, "iva_pct": 10.0, "iva_nights": 3})
+		                                 "amount_after_tax": 630.0, "iva_pct": 10.0, "iva_nights": 3,
+		                                 "discount_amount": 0.0, "voucher_code": None})
 
 	def test_el_extranjero_no_paga_iva(self):
 		out = self.book(_future(11, 13), 6, "0")
@@ -156,7 +157,8 @@ class TestResidence(AuditTestCase):
 		self.assertEqual(set(self.rates(res)), {0.0})
 		self.assertAlmostEqual(float(out["advance_due"]), 600.0, places=2)
 		self.assertEqual(out["uy_iva"], {"residence": "non_resident", "amount_before_tax": 600.0, "tax_amount": 0.0,
-		                                 "amount_after_tax": 600.0, "iva_pct": 0.0, "iva_nights": 0})
+		                                 "amount_after_tax": 600.0, "iva_pct": 0.0, "iva_nights": 0,
+		                                 "discount_amount": 0.0, "voucher_code": None})
 
 	def test_el_domingo_de_pascua_lleva_iva_y_el_lunes_no(self):
 		res = self.res(self.book(_easter(), 2, "1"))

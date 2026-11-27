@@ -27,13 +27,14 @@ def test_ningun_texto_del_correo_queda_pendiente() -> None:
 
 
 # HR-374 (D-HR-44): los textos nuevos de los dos correos nuevos al huésped y el de WhatsApp en pt y en, BORRADORES para
-# la tanda de OK del fundador. Hasta su OK no sale ninguno: BORRADORES_OK lo apaga todo.
+# la tanda de OK del fundador. Hasta su OK no salía ninguno: BORRADORES_OK lo apaga todo. Su página decía «si no dices
+# nada, salen así con la versión siguiente» (hub hr43, 27-11, lote 14): encendidos, y la guarda vigila que sigan así.
 BORRADORES_HR374 = {"whatsapp", "intro_recepcion", "asunto_cancelada", "cancelada", "intro_cancelada",
                     "numero_cancelacion", "cargo_cancelacion", "ayuda_cancelada", "despedida_cancelada"}
 
 
-def test_los_borradores_de_hr374_estan_en_los_tres_idiomas_y_apagados_hasta_su_ok() -> None:
-	assert texts.BORRADORES_OK is False, "con el OK del fundador a la tanda de HR-374, cambia esta línea también"
+def test_los_textos_de_hr374_estan_en_los_tres_idiomas_y_encendidos_con_su_ok() -> None:
+	assert texts.BORRADORES_OK is True, "el fundador dio su OK a la tanda de HR-374 (lote 14): no se vuelven a apagar"
 	for idioma in ("es", "pt", "en"):
 		assert set(texts.BORRADORES[idioma]) == BORRADORES_HR374, idioma
 		assert all(v.strip() for v in texts.BORRADORES[idioma].values()), idioma

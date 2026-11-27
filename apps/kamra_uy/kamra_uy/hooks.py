@@ -77,6 +77,8 @@ scheduler_events = {
 # (require_at_check_in, el primero del validate): la factura sale en el check-in y nunca la supone.
 # El recibo del hotel al cobrar la reserva antes del check-in (HR-349, D-HR-74): cada cobro nuevo del folio de una
 # reserva que todavía no llegó deja su recibo, y la devolución de ese pago, su constancia (kamra_uy/receipts/issue.py).
+# El vale de la reserva web (HR-377): si la reserva caduca sin pagar, devuelve el uso del vale (on_update), y el código
+# del vale se guarda en mayúsculas (kamra_uy/booking/voucher.py).
 doc_events = {
 	"Reservation": {
 		"before_insert": [
@@ -95,6 +97,7 @@ doc_events = {
 			"kamra_uy.fiscal.forfeit.on_reservation_update",
 			"kamra_uy.notifications.confirmation.on_reservation_update",
 			"kamra_uy.notifications.cancelada.on_reservation_update",
+			"kamra_uy.booking.voucher.on_reservation_update",
 			"kamra_uy.booking.residence.on_reservation_update",
 		],
 		"on_cancel": "kamra_uy.contingency.alerts.on_reservation_change",
@@ -104,6 +107,8 @@ doc_events = {
 	                      "kamra_uy.receipts.issue.on_folio_update"]},
 	"Cancelled Invoice": {"after_insert": "kamra_uy.fiscal.events.on_invoice_cancelled"},
 	"Guest": {"on_update": ["kamra_uy.fiscal.events.on_guest_update", "kamra_uy.fiscal.forfeit.on_guest_update"]},
+	# HR-377: el código del vale, en mayúsculas al guardarlo (Kamra lo busca así; kamra_uy/booking/voucher.py)
+	"Discount Voucher": {"validate": "kamra_uy.booking.voucher.normalize"},
 	# Monitoreo (HR-21): cada Error Log a Sentry, sin datos personales (kamra_uy/health/sentry.py)
 	"Error Log": {"after_insert": "kamra_uy.health.sentry.on_error_log"},
 }
@@ -140,6 +145,8 @@ override_whitelisted_methods = {
 	"kamra.public_api.search_stay": "kamra_uy.booking.stay_search.search_stay",
 	# HR-374: el formulario comercial de la empresa de Kamra, cerrado (kamra_uy/closed.py: sin lista blanca, 403)
 	"kamra.public_api.hosting_enquiry": "kamra_uy.closed.hosting_enquiry",
+	# HR-377: el código de descuento de la web, con su motivo (no una frase en inglés) y un tope por IP
+	"kamra.public_api.check_voucher": "kamra_uy.booking.voucher.check_voucher",
 }
 
 # HR-349: los recibos de la reserva, en sus conexiones del escritorio (kamra_uy/receipts/issue.py)

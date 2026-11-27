@@ -218,7 +218,7 @@ CODIGOS_TIPO = {"doble-camas-separadas": ("DOBLE", "TWN"), "doble-matrimonial": 
 # recepción y el aviso de cancelación; y el texto del enlace de WhatsApp del pie en su idioma, que la web solo tiene en
 # español). Son BORRADORES para su tanda de OK (D-HR-44): mientras BORRADORES_OK sea False no sale ninguno (ni esos dos
 # correos, ni el texto de WhatsApp en pt y en, que sigue el de la web). Con su OK, el hub pone BORRADORES_OK = True.
-BORRADORES_OK = False
+BORRADORES_OK = True
 BORRADORES = {
 	"es": {
 		"whatsapp": "¡Hola! Para solicitar una reserva:",  # el de la web (inicio.md), aprobado: no es borrador en es

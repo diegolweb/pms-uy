@@ -9,7 +9,8 @@ Cuándo (D-HR-32: la factura sale en el CHECK-IN, por la estancia entera):
   UY CFE dentro de la misma transacción y la encola tras el commit. Una tarea compara lo que debería estar facturado
   con lo que ya cubren los CFE y pide a core el CFE o la nota de crédito que falte (`model.reconcile`). Cada cargo
   cuenta para una sola reserva (`owner`): en un grupo, la noche que Kamra lleva al folio maestro es de su habitación, y
-  al cerrar el maestro se concilia cada habitación con cargos en él (HR-362).
+  al cerrar el maestro se concilia cada habitación con cargos en él (HR-362). Lo del maestro que no es de una
+  habitación que se alojó es de su pagador (`group_payer`), aunque la ancla del maestro no se haya alojado (HR-375).
 - `process_reservation` (cola, barrido de kamra_uy.fiscal.sync cada 5 minutos o recepción con «Reintentar»): procesa
   en orden las filas pendientes de una reserva. Core caído deja la fila «Pending» con su error, visible en el folio, y
   nada impide facturar ni cerrar la cuenta.
@@ -27,7 +28,8 @@ import frappe
 from frappe.utils import add_days, getdate
 
 from kamra_uy.core.client import CoreClient, CoreError, core_base_url
-from kamra_uy.fiscal import agency, model, texts
+from kamra_uy.fiscal import agency, forfeit, model, texts
+from kamra_uy.pure.uy_tax import discount_factor
 
 DOCTYPE = "UY CFE"
 COUNTRY = "Uruguay"
@@ -279,13 +281,50 @@ def _charge_line(c) -> dict:
 	        "amount": model.money(c.amount), "description": c.description or c.charge_type or ""}
 
 
-def owner(charge, folio, rooms: set[str]) -> str:
+def _live(reservation: str | None) -> bool:
+	status = frappe.db.get_value("Reservation", reservation, "status") if reservation else None
+	return bool(status) and status not in forfeit.STATUSES
+
+
+def group_payer(folio) -> str:
+	"""Quién paga lo del folio maestro de un grupo que no es de una habitación que se alojó (HR-375): la ancla del
+	maestro (`Folio.reservation`, la reserva principal con que Kamra lo abrió) si se aloja o se alojó; si no (se canceló
+	o no vino con el maestro ya abierto, y Kamra no lo reancla), la principal del grupo si se aloja; si no, la primera
+	reserva viva del grupo, el mismo orden que kamra.folio.open_group_folio. Sin ninguna viva, la ancla. Con cualquier
+	otro folio, la reserva del folio."""
+	if folio.get("folio_type") != "Group":
+		return folio.reservation
+	if _live(folio.reservation):
+		return folio.reservation
+	group = folio.get("group_booking")
+	if group:
+		master = frappe.db.get_value("Group Booking", group, "master_reservation")
+		if _live(master):
+			return master
+		first = frappe.get_all("Reservation", pluck="name", order_by="creation asc", limit=1,
+		                       filters={"group_booking": group, "status": ["not in", list(forfeit.STATUSES)]})
+		if first:
+			return first[0]
+	return folio.reservation
+
+
+def _staying(rooms: set[str]) -> set[str]:
+	"""Las habitaciones del grupo que se alojan o se alojaron (sin las de forfeit.STATUSES)."""
+	if not rooms:
+		return set()
+	return set(frappe.get_all("Reservation", pluck="name",
+	                          filters={"name": ["in", sorted(rooms)], "status": ["not in", list(forfeit.STATUSES)]}))
+
+
+def owner(charge, folio, rooms: set[str], payer: str | None = None) -> str:
 	"""De qué reserva es un cargo: la que lleva el cargo (`Folio Charge.reservation`, con la que Kamra lo cargó o lo
-	trasladó: kamra.folio._charge_posted) si es una habitación del grupo; si no, la del folio. En el folio maestro de un
-	grupo (anclado a la reserva principal, kamra.folio.open_group_folio) la noche de cada habitación es de esa
-	habitación, y lo que se cargó a mano en el maestro, de la principal, que es su pagador (HR-362)."""
+	trasladó: kamra.folio._charge_posted) si es una habitación del grupo que se alojó o se aloja (`rooms`, sin las que
+	no vinieron); si no, el pagador del folio (`payer`, group_payer en el maestro) o la reserva del folio. En el folio
+	maestro de un grupo (kamra.folio.open_group_folio) la noche de cada habitación es de esa habitación (HR-362), y lo
+	que no es de una habitación que se alojó o se aloja (lo cargado a mano en el maestro, que Kamra pone a nombre de la
+	ancla, o lo de una habitación que no vino) es del pagador del grupo, aunque la ancla no se haya alojado (HR-375)."""
 	own = charge.get("reservation")
-	return own if own and own in rooms else folio.reservation
+	return own if own and own in rooms else (payer or folio.reservation)
 
 
 def account_lines(folios: list, reservation: str | None = None, rooms: set[str] | None = None) -> list[dict]:
@@ -296,10 +335,13 @@ def account_lines(folios: list, reservation: str | None = None, rooms: set[str] 
 	ninguna noche en las cuentas, el descuento va como está."""
 	from kamra.folio import voided_rows
 
+	live = _staying(rooms or set()) if reservation is not None else set()
+	payers = {f.name: group_payer(f) for f in folios if reservation is not None and f.get("folio_type") == "Group"}
+
 	def charges(f):
 		if reservation is None:
 			return list(f.charges)
-		return [c for c in f.charges if owner(c, f, rooms or set()) == reservation]
+		return [c for c in f.charges if owner(c, f, live, payers.get(f.name)) == reservation]
 
 	nights: dict[str, Decimal] = {}
 	for f in folios:
@@ -346,6 +388,10 @@ def apply_room_rates(res, rates: dict[str, Decimal]) -> bool:
 		row.gst_rate = float(rate)
 		changed = True
 	if changed:
+		# con un vale, la base de las noches es la tarifa menos su parte del descuento: el IVA, igual (HR-377)
+		subtotal = sum((Decimal(str(r.rate or 0)) + Decimal(str(r.meal_amount or 0))
+		                for r in res.get("night_rates") or []), Decimal(0))
+		delta *= discount_factor(subtotal, res.discount_amount)
 		res.tax_amount = float(Decimal(str(res.tax_amount or 0)) + delta)
 		res.amount_after_tax = float(Decimal(str(res.amount_before_tax or 0)) + Decimal(str(res.tax_amount)))
 	return changed
@@ -398,22 +444,20 @@ def queue_task(res, purpose: str, folio: str | None = None, reason: str | None =
 	frappe.enqueue("kamra_uy.fiscal.connector.process_reservation", queue="short", enqueue_after_commit=True,
 	               reservation=res.name)
 	if purpose == "Close" and folio:
-		kind, anchor = frappe.db.get_value("Folio", folio, ["folio_type", "reservation"]) or (None, None)
-		if kind == "Group" and anchor == res.name:
+		f = frappe.db.get_value("Folio", folio, ["folio_type", "reservation", "group_booking"], as_dict=True)
+		if f and f.folio_type == "Group" and group_payer(f) == res.name:
 			_close_rooms_of(folio, res, reason)
 	return doc.name
 
 
-def _close_rooms_of(folio: str, anchor, reason: str | None) -> None:
-	"""Al cerrar el folio maestro de un grupo (que Kamra ancla a la reserva principal, y que solo le avisa a ella:
-	events.on_folio_update), el ajuste de cierre de cada otra habitación con cargos en él (HR-362): lo suyo se concilia
-	con lo que facturó su check-in. Las que no se alojaron, no: lo suyo lo factura fiscal.forfeit."""
-	from kamra_uy.fiscal import forfeit
-
+def _close_rooms_of(folio: str, payer_res, reason: str | None) -> None:
+	"""Al cerrar el folio maestro de un grupo (que events.on_folio_update solo le avisa a su pagador, group_payer), el
+	ajuste de cierre de cada otra habitación con cargos en él (HR-362): lo suyo se concilia con lo que facturó su
+	check-in. Las que no se alojaron, no: lo suyo es del pagador (`owner`) o, en su cuenta, de fiscal.forfeit."""
 	doc = frappe.get_doc("Folio", folio)
-	rooms = group_rooms(anchor)
-	for name in dict.fromkeys(owner(c, doc, rooms) for c in doc.charges):
-		if name == anchor.name:
+	rooms = _staying(group_rooms(payer_res))
+	for name in dict.fromkeys(owner(c, doc, rooms, payer_res.name) for c in doc.charges):
+		if name == payer_res.name:
 			continue
 		res = frappe.get_doc("Reservation", name)
 		if res.status not in forfeit.STATUSES:

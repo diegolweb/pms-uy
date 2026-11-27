@@ -195,7 +195,8 @@ def on_reservation_validate(doc, method=None) -> None:
 
 
 def breakdown(res) -> dict | None:
-	"""El desglose de lo que se cobra: sin IVA, IVA, total, la tasa y cuántas noches la llevan. None sin declaración."""
+	"""El desglose de lo que se cobra: sin IVA, IVA, total, la tasa, cuántas noches la llevan y el vale (su descuento y
+	su código). None sin declaración."""
 	declared = res.get(FIELD) if _has_field() else None
 	if declared not in (uy_tax.RESIDENT, uy_tax.NON_RESIDENT):
 		return None
@@ -207,6 +208,10 @@ def breakdown(res) -> dict | None:
 		"amount_after_tax": round(flt(res.amount_after_tax), 2),
 		"iva_pct": max(taxed) if taxed else 0.0,
 		"iva_nights": len(taxed),
+		# el vale de la reserva (HR-377): la web enseña «Estadía sin IVA» = sin IVA + descuento y la fila del cupón
+		"discount_amount": round(flt(res.get("discount_amount")), 2),
+		"voucher_code": (frappe.db.get_value("Discount Voucher", res.voucher, "voucher_code")
+		                 if res.get("voucher") else None),
 	}
 
 

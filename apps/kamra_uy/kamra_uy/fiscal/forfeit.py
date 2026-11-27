@@ -191,9 +191,12 @@ def _safe(title: str, fn, *args):
 
 
 def _folios(reservation: str) -> list:
+	"""Las cuentas de la reserva que guardan su seña: las suyas, sin «Account» (la cuenta corriente de la empresa) ni
+	«Group». El folio maestro de un grupo, aunque Kamra lo ancle a esta reserva, es dinero del grupo: paga las noches de
+	las habitaciones, ya facturadas en su check-in, y nunca es la seña de su ancla (HR-375)."""
 	frappe = _frappe()
-	names = frappe.get_all("Folio", filters={"reservation": reservation, "folio_type": ["!=", "Account"]},
-	                       pluck="name", order_by="creation asc")
+	names = frappe.get_all("Folio", pluck="name", order_by="creation asc",
+	                       filters={"reservation": reservation, "folio_type": ["not in", ["Account", "Group"]]})
 	return [frappe.get_doc("Folio", n) for n in names]
 
 
@@ -295,7 +298,7 @@ def on_folio_update(doc, method=None):
 	"""El cargo de no-show de la auditoría (la reserva ya es «No Show» sin sus ganchos), un pago, una devolución o un
 	cargo anulado en la cuenta de una reserva que no se alojó."""
 	frappe = _frappe()
-	if not doc.reservation or doc.get("folio_type") == "Account":
+	if not doc.reservation or doc.get("folio_type") in ("Account", "Group"):
 		return
 	if frappe.db.get_value("Reservation", doc.reservation, "status") not in STATUSES:
 		return

@@ -43,6 +43,8 @@ def test_book_y_su_estado_pasan_por_la_residencia() -> None:
         "kamra.public_api.booking_status": "kamra_uy.booking.residence.booking_status",
         "kamra.public_api.search_stay": "kamra_uy.booking.stay_search.search_stay",
         "kamra.public_api.hosting_enquiry": "kamra_uy.closed.hosting_enquiry",
+        # HR-377: la web comprueba un vale (cupón) antes de reservar.
+        "kamra.public_api.check_voucher": "kamra_uy.booking.voucher.check_voucher",
     }
 
 

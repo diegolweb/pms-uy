@@ -147,10 +147,23 @@ def quote_nights(nightly: list[dict], room_total) -> dict[str, Decimal]:
 	return out
 
 
+def discount_factor(subtotal, discount) -> Decimal:
+	"""La parte del precio que queda tras el descuento de un vale (HR-377): 1 − descuento / subtotal, con el subtotal
+	sobre el que Kamra aplica el vale (habitación + comida, kamra.pricing.quote). Kamra rebaja el IVA en esa misma
+	proporción (tax = gross_tax · taxable / subtotal); el IVA que kamra_uy añade a cada noche, también. 1 sin
+	descuento o sin subtotal; nunca menos de 0."""
+	subtotal = Decimal(str(subtotal or 0))
+	discount = Decimal(str(discount or 0))
+	if subtotal <= 0 or discount <= 0:
+		return Decimal(1)
+	return max(Decimal(0), Decimal(1) - discount / subtotal)
+
+
 def quote_with_rates(quote: dict, rates: dict) -> dict:
 	"""La cotización de Kamra (kamra.pricing.quote) con el IVA de cada noche de `rates` ({fecha: tasa}, de
 	booking_room_rates), como lo deja la reserva al crearse (kamra_uy.booking.residence.apply): la diferencia de cada
-	noche, importe × (tasa − la suya) / 100, entra en el IVA, el total, la seña y la línea de la habitación. Devuelve
+	noche, importe × (tasa − la suya) / 100 (por discount_factor si lleva un vale), entra en el IVA, el total, la seña y
+	la línea de la habitación. Devuelve
 	una copia: la cotización que llega no se toca."""
 	out = {**quote, "nightly": [dict(n) for n in quote.get("nightly") or []]}
 	nights = quote_nights(out["nightly"], quote.get("room_total"))
@@ -161,7 +174,9 @@ def quote_with_rates(quote: dict, rates: dict) -> dict:
 			continue
 		delta += nights[str(n["date"])] * (Decimal(str(rate)) - Decimal(str(n.get("gst_rate") or 0))) / 100
 		n["gst_rate"] = float(rate)
-	delta = _money(delta)
+	# el vale rebaja la base de las noches: su IVA, en la misma proporción (HR-377)
+	delta = _money(delta * discount_factor(Decimal(str(quote.get("room_total") or 0))
+	                                       + Decimal(str(quote.get("meal_total") or 0)), quote.get("discount")))
 	base = Decimal(str(quote.get("amount_before_tax") or 0))
 	tax = _money(quote.get("tax_amount")) + delta
 	total = _money(base + tax)

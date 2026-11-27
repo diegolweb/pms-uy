@@ -210,3 +210,26 @@ def test_quote_with_rates_sin_sena_ni_lineas_ni_noches() -> None:
     empty = uy_tax.quote_with_rates({"nightly": [], "room_total": 0, "amount_before_tax": 0, "tax_amount": 0,
                                      "amount_after_tax": 0}, {})
     assert empty["tax_percent"] == 0.0
+
+
+# --- HR-377: con un vale, el IVA del residente va sobre el precio con descuento (como lo rebaja Kamra) ---
+
+def test_discount_factor_es_lo_que_queda_tras_el_vale() -> None:
+    assert uy_tax.discount_factor(480, 48) == Decimal("0.9")
+    assert uy_tax.discount_factor(0, 0) == 1
+    assert uy_tax.discount_factor(480, 0) == 1
+    assert uy_tax.discount_factor(100, 150) == 0  # nunca menos de 0
+
+
+@pytest.mark.parametrize(("discount", "tax", "total"), [(48, 43.20, 475.20), (0, 48.0, 528.0)])
+def test_quote_with_rates_con_vale_cobra_el_iva_sobre_el_precio_con_descuento(discount, tax, total) -> None:
+    # 3 noches × 160 de temporada, residente al 10 %; VERANO10 = 10 % → 480 − 48 = 432 sin IVA
+    q = _quote([{"date": "2027-01-20", "rate": 160.0}, {"date": "2027-01-21", "rate": 160.0},
+                {"date": "2027-01-22", "rate": 160.0}], advance_pct=100)
+    q.update(meal_total=0.0, discount=float(discount), amount_before_tax=480.0 - discount)
+    rates = {"2027-01-20": Decimal("10"), "2027-01-21": Decimal("10"), "2027-01-22": Decimal("10")}
+    out = uy_tax.quote_with_rates(q, rates)
+    assert out["tax_amount"] == tax
+    assert out["amount_after_tax"] == total
+    assert out["advance"]["amount"] == total
+    assert out["line_items"][0]["tax_amount"] == tax
