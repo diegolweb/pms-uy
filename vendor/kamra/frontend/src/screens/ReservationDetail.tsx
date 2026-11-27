@@ -44,6 +44,7 @@ import RoomChangeDialog from "../components/RoomChangeDialog"
 import CheckOutDialog from "../components/CheckOutDialog"
 import CheckInDialog from "../components/CheckInDialog"
 import StayInstructions from "../components/StayInstructions"
+import OtaMessagesCard from "../components/OtaMessagesCard"
 import { cur, moneyLocale } from "../lib/money"
 import { t as translate, useUILanguage } from "../lib/i18n"
 
@@ -618,6 +619,9 @@ export default function ReservationDetail({
           </Card>
         )}
       </div>
+
+      {/* the guest's messages on Booking.com / Expedia (Channex), when there are any */}
+      <OtaMessagesCard reservation={name} />
 
       {/* special requests - editable */}
       <Card icon={<FileText className="size-4" />} title={translate("Special requests")}>

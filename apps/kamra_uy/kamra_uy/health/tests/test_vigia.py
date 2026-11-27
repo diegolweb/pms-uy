@@ -130,8 +130,8 @@ class ConfigTestCase(VigiaCase):
 	def test_defaults(self):
 		cfg = vigia.config_from_env({"HR_VIGIA_URL": URL + "/"})
 		self.assertEqual(cfg.url, URL)
-		self.assertEqual((cfg.intervalo, cfg.caida_confirma, cfg.repite_min, cfg.disco_pct, cfg.gracia_min),
-		                 (60, 3, 240, 90, 10))
+		self.assertEqual((cfg.intervalo, cfg.caida_confirma, cfg.repite_min, cfg.disco_pct, cfg.gracia_min,
+		                  cfg.caida_min), (60, 3, 240, 90, 10, 2))
 		self.assertEqual(cfg.channels(), [])
 
 	def test_the_channels_come_from_their_variables(self):
@@ -226,6 +226,16 @@ class DecideTestCase(VigiaCase):
 		self.net.ping = (503, b"")
 		self.run_at(0)
 		self.run_at(1)
+		self.assertEqual(self.slack_texts(), [])
+		self.run_at(2)
+		self.assertEqual(len(self.slack_texts()), 1)
+		self.assertIn("Kamra no responde", self.slack_texts()[0])
+
+	def test_down_needs_two_minutes_whatever_the_interval(self):
+		# HR-374 (el fundador: «debería ser 2 minutos»): con vueltas cada 30 s, tres seguidas caídas (1 min) no avisan
+		self.net.ping = (503, b"")
+		for second in (0, 30, 60, 90):
+			self.run_at(second / 60)
 		self.assertEqual(self.slack_texts(), [])
 		self.run_at(2)
 		self.assertEqual(len(self.slack_texts()), 1)

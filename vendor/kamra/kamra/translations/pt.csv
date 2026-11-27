@@ -343,3 +343,13 @@ Your role can't change {0} settings.,Sua função não permite alterar as config
 {0} isn't a setting on this page.,{0} não é uma configuração desta página.
 {0} must be a number.,{0} deve ser um número.
 {0} must be a time like 14:00.,{0} deve ser um horário como 14:00.
+New message from {0}: {1},Mensagem nova do {0}: {1}
+Guest from {0},Hóspede do {0}
+Nothing to send.,Não há nada para enviar.
+{0} did not accept the message: {1},O {0} não aceitou a mensagem: {1}
+Channex is busy; try again in a minute.,O Channex está ocupado; tente de novo em um minuto.
+Could not read the conversation from Channex: {0},Não foi possível ler a conversa no Channex: {0}
+This property has no active Channex connection.,Esta propriedade não tem uma conexão ativa com o Channex.
+Conversation not found.,Conversa não encontrada.
+Only Booking.com conversations can be marked as not needing a reply.,Só as conversas do Booking.com podem ser marcadas como sem necessidade de resposta.
+Attachment not found.,Anexo não encontrado.

@@ -120,7 +120,12 @@ def _reserva(propiedad: str, v: dict, tipos: dict) -> str:
 	if v.get("total"):
 		doc.amount_after_tax = v["total"]
 		cm.lock_channel_rates(doc, v["total"])
-	doc.insert(ignore_permissions=True)
+	# HR-374: las reservas de la planilla ya existían; cargarlas no es confirmarlas, así que no llevan correo al huésped
+	frappe.flags.kamra_uy_sin_correo_al_huesped = True
+	try:
+		doc.insert(ignore_permissions=True)
+	finally:
+		frappe.flags.kamra_uy_sin_correo_al_huesped = False
 	if canal:
 		cm.set_ota_commission(doc, cm.channel_commission_pcts().get(canal))
 	return doc.name

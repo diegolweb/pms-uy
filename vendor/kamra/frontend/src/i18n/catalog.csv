@@ -7139,3 +7139,22 @@ New batch,New batch,,Nueva tanda,,,screens/ChannelRestrictions.tsx,,translated
 Stay restrictions,Stay restrictions,,Restricciones de estadía,,,screens/ChannelRestrictions.tsx,,translated
 Stay Restrictions,Stay Restrictions,,Restricciones,,,screens/ChannelRestrictions.tsx,,translated
 Source code,Source code,,Código fuente,,,components/SourceCodeLink.tsx,,translated
+OTA Messages,OTA Messages,,Mensajes de las plataformas,Mensagens das plataformas,,lib/apps.ts;screens/OtaMessages.tsx,,translated
+What guests write on Booking.com and Expedia. What you answer here reaches the guest on their platform.,What guests write on Booking.com and Expedia. What you answer here reaches the guest on their platform.,,Lo que escriben los huéspedes por Booking.com y Expedia. Lo que contestes aquí le llega al huésped en su plataforma.,O que os hóspedes escrevem pelo Booking.com e pela Expedia. O que você responder aqui chega ao hóspede pela plataforma dele.,,screens/OtaMessages.tsx,,translated
+Unanswered ({n}),Unanswered ({n}),,Sin contestar ({n}),Sem resposta ({n}),,screens/OtaMessages.tsx,n,translated
+All conversations,All conversations,,Todas,Todas,,screens/OtaMessages.tsx,,translated
+Arrives {date},Arrives {date},,Llega el {date},Chega em {date},,screens/OtaMessages.tsx,date,translated
+You: {text},You: {text},,Tú: {text},Você: {text},,screens/OtaMessages.tsx,text,translated
+Open the booking →,Open the booking →,,Abrir la reserva →,Abrir a reserva →,,screens/OtaMessages.tsx,,translated
+View attachment,View attachment,,Ver adjunto,Ver anexo,,screens/OtaMessages.tsx,,translated
+Write your reply…,Write your reply…,,Escribe tu respuesta…,Escreva sua resposta…,,screens/OtaMessages.tsx,,translated
+No reply needed,No reply needed,,No necesita respuesta,Não precisa de resposta,,screens/OtaMessages.tsx,,translated
+Reaches the guest on {platform},Reaches the guest on {platform},,Le llega al huésped en {platform},Chega ao hóspede em {platform},,screens/OtaMessages.tsx,platform,translated
+No unanswered messages.,No unanswered messages.,,No hay mensajes sin contestar.,Não há mensagens sem resposta.,,screens/OtaMessages.tsx,,translated
+No messages from the platforms yet.,No messages from the platforms yet.,,Todavía no hay mensajes de las plataformas.,Ainda não há mensagens das plataformas.,,screens/OtaMessages.tsx,,translated
+Platform messages are not enabled in Channex.,Platform messages are not enabled in Channex.,,Los mensajes de las plataformas no están activados en Channex.,As mensagens das plataformas não estão ativadas no Channex.,,screens/OtaMessages.tsx,,translated
+{start} to {end},{start} to {end},,{start} al {end},{start} a {end},,components/OtaMessagesCard.tsx,start end,translated
+Messages from {platform},Messages from {platform},,Mensajes de {platform},Mensagens de {platform},,components/OtaMessagesCard.tsx,platform,translated
+"Unanswered · the latest, {ago}","Unanswered · the latest, {ago}",,"Sin contestar · el último, {ago}","Sem resposta · a última, {ago}",,components/OtaMessagesCard.tsx,ago,translated
+"Answered · the latest, {ago}","Answered · the latest, {ago}",,"Contestado · el último, {ago}","Respondida · a última, {ago}",,components/OtaMessagesCard.tsx,ago,translated
+Open the conversation,Open the conversation,,Abrir la conversación,Abrir a conversa,,components/OtaMessagesCard.tsx,,translated

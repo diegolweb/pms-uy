@@ -134,6 +134,143 @@ def ack_revision(conn, revision_id: str) -> None:
 	_request(conn, "POST", f"booking_revisions/{revision_id}/ack")
 
 
+# ---------------------------------------------------------------------------
+# Guest messages (Channex's unified messages API: Booking.com, Expedia and
+# Airbnb only). It needs the "Channex Messages & Reviews" application on the
+# property; without it every call answers 403.
+# ---------------------------------------------------------------------------
+
+MESSAGE_PAGE_LIMIT = 100
+# provider -> the platform name staff know
+MESSAGE_PROVIDERS = {"BookingCom": "Booking.com", "Expedia": "Expedia", "AirBNB": "Airbnb"}
+ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024
+
+
+class ChannexMessagingOff(ChannexError):
+	"""403 from the messages API: the property has not installed Channex's
+	messages application."""
+
+
+def _messages_request(conn, method: str, path: str, *, params: dict | None = None,
+                      payload=None) -> dict:
+	try:
+		return _request(conn, method, path, params=params, payload=payload)
+	except ChannexRateLimited:
+		raise
+	except ChannexError as exc:
+		if exc.status == 403 and not isinstance(exc, ChannexMessagingOff):
+			raise ChannexMessagingOff(exc.status, exc.detail) from None
+		raise
+
+
+def _thread_path(thread_id: str) -> str:
+	"""message_threads/<id>: a Channex id is a UUID, nothing that walks the path."""
+	tid = str(thread_id or "")
+	if not tid or not all(c.isalnum() or c == "-" for c in tid):
+		raise ValueError("Not a Channex message thread id.")
+	return f"message_threads/{tid}"
+
+
+def _related_id(item: dict, name: str) -> str:
+	rel = ((item.get("relationships") or {}).get(name) or {}).get("data") or {}
+	return str(rel.get("id") or "") if isinstance(rel, dict) else ""
+
+
+def fetch_message_threads(conn, page: int = 1,
+                          limit: int = MESSAGE_PAGE_LIMIT) -> tuple[list[dict], dict]:
+	"""One page of the property's message threads (Channex's default order,
+	newest created first): (rows as Channex sends them, meta). A row that
+	names another property is dropped here too."""
+	body = _messages_request(conn, "GET", "message_threads", params={
+		"filter[property_id]": conn.external_property_id,
+		"pagination[page]": page,
+		"pagination[limit]": limit,
+	})
+	rows = []
+	for item in body.get("data") or []:
+		prop = _related_id(item, "property")
+		if prop and prop != str(conn.external_property_id):
+			continue
+		rows.append(item)
+	return rows, body.get("meta") or {}
+
+
+def fetch_thread_messages(conn, thread_id: str, limit: int = MESSAGE_PAGE_LIMIT) -> list[dict]:
+	"""A thread's messages (id, attributes, relationships), oldest first."""
+	body = _messages_request(conn, "GET", f"{_thread_path(thread_id)}/messages",
+	                         params={"pagination[limit]": limit})
+	rows = [item for item in body.get("data") or [] if isinstance(item, dict)]
+	return sorted(rows, key=lambda item: str((item.get("attributes") or {}).get("inserted_at") or ""))
+
+
+def send_thread_message(conn, thread_id: str, text: str) -> dict:
+	"""Post a text into the thread: the created message's attributes (with id)."""
+	body = _messages_request(conn, "POST", f"{_thread_path(thread_id)}/messages",
+	                         payload={"message": {"message": text}})
+	return _attributes(body.get("data") or {})
+
+
+def mark_no_reply_needed(conn, thread_id: str) -> None:
+	"""Booking.com only: the guest's last message needs no answer."""
+	_messages_request(conn, "POST", f"{_thread_path(thread_id)}/no_reply_needed")
+
+
+def _relative_attachment(rel: str) -> str:
+	"""The attachment's path under the API endpoint; ValueError for anything
+	that is not a plain relative path (a scheme, a host, '..', '//')."""
+	from urllib.parse import urlsplit
+
+	text = str(rel or "").strip()
+	parts = urlsplit(text)
+	if (not text or parts.scheme or parts.netloc or text.startswith("//") or "\\" in text
+	        or ".." in text.split("?")[0].split("/") or any(ord(c) < 32 for c in text)):
+		raise ValueError("Not a relative Channex attachment path.")
+	return text.lstrip("/")
+
+
+def fetch_attachment(conn, rel: str) -> tuple[bytes, str]:
+	"""An attachment a guest sent, read with the connection's key from
+	<endpoint>/<rel>: (content, content-type). rel must be relative."""
+	from urllib.parse import urljoin, urlsplit
+
+	import requests
+
+	path = _relative_attachment(rel)
+	key = conn.get_password("api_key", raise_exception=False)
+	base = (conn.endpoint or DEFAULT_ENDPOINT).rstrip("/")
+	url, api_host = f"{base}/{path}", urlsplit(base).netloc
+	for _hop in range(4):
+		# the key goes to Channex's own host only: a redirect to storage
+		# (another host) is followed without it
+		headers = {"user-api-key": key or ""} if urlsplit(url).netloc == api_host else {}
+		try:
+			res = requests.get(url, headers=headers, timeout=20, stream=True, allow_redirects=False)
+		except (requests.Timeout, requests.ConnectionError) as exc:
+			raise ChannexError(0, type(exc).__name__) from None
+		if res.status_code not in (301, 302, 303, 307, 308) or not res.headers.get("location"):
+			break
+		url = urljoin(url, res.headers["location"])
+		res.close()
+		if urlsplit(url).scheme != "https" and urlsplit(base).scheme == "https":
+			raise ChannexError(0, "attachment redirect is not https")
+	try:
+		if res.status_code == 429:
+			raise ChannexRateLimited(429, "rate limited", _retry_after(res.headers.get("retry-after")))
+		if res.status_code == 403:
+			raise ChannexMessagingOff(403, "forbidden")
+		if not 200 <= res.status_code < 300:
+			raise ChannexError(res.status_code, "attachment not available")
+		content = b""
+		for chunk in res.iter_content(64 * 1024):
+			content += chunk
+			if len(content) > ATTACHMENT_MAX_BYTES:
+				raise ChannexError(413, "attachment too large")
+		ctype = str(res.headers.get("content-type") or "application/octet-stream").split(";")[0].strip()
+		return content, ctype
+	finally:
+		res.close()
+
+
 def verify_signature(secret: str, timestamp: str, signatures: str, raw_body: bytes,
                      now: float | None = None, tolerance: int = 300) -> bool:
 	"""Channex's webhook HMAC: hex(HMAC_SHA256(secret, f"{timestamp}.{raw_body}"))

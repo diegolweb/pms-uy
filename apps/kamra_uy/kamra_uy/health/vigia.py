@@ -13,7 +13,7 @@ deploy/monitoring/env.example.
 
 Cada vuelta:
 1. `GET /api/method/ping`. Sin «pong», la señal `caida`, que solo avisa tras HR_VIGIA_CAIDA_CONFIRMA vueltas seguidas
-   (3: un despliegue o un reinicio no avisan); mientras Kamra no responde, las demás señales guardan su estado, y
+   (3: un despliegue o un reinicio no avisan) y tras HR_VIGIA_CAIDA_MIN minutos sin respuesta (2, HR-374); mientras Kamra no responde, las demás señales guardan su estado, y
    cuando vuelve, `programador` espera HR_VIGIA_GRACIA_MIN (10) antes de avisar: el programador de Frappe no late
    hasta su primer tick (4 min) tras arrancar.
 2. `GET /api/method/kamra_uy.health.status` con la cabecera X-HR-Health-Token: el estado de cada señal de Kamra
@@ -96,6 +96,7 @@ class Config:
 	estado: str = DEFAULT_STATE
 	intervalo: int = 60
 	caida_confirma: int = 3
+	caida_min: int = 2
 	repite_min: int = 240
 	gracia_min: int = 10
 	discos: list = field(default_factory=list)
@@ -138,6 +139,7 @@ def config_from_env(env) -> Config:
 		url=url, token=g("HR_VIGIA_TOKEN"), host=g("HR_VIGIA_HOST"), basic_auth=g("HR_VIGIA_BASIC_AUTH"),
 		nombre=g("HR_VIGIA_NOMBRE", "producción"), estado=os.path.expanduser(g("HR_VIGIA_ESTADO", DEFAULT_STATE)),
 		intervalo=_int(env, "HR_VIGIA_INTERVALO", 60), caida_confirma=_int(env, "HR_VIGIA_CAIDA_CONFIRMA", 3),
+		caida_min=_int(env, "HR_VIGIA_CAIDA_MIN", 2),
 		repite_min=_int(env, "HR_VIGIA_REPITE_MIN", 240), gracia_min=_int(env, "HR_VIGIA_GRACIA_MIN", 10),
 		discos=_list(env.get("HR_VIGIA_DISCOS")),
 		disco_pct=_int(env, "HR_VIGIA_DISCO_PCT", 90), latido_url=g("HR_VIGIA_LATIDO_URL"),
@@ -292,7 +294,11 @@ def decide(state: dict, seen: dict, now: datetime, cfg: Config) -> tuple:
 			alerted = _parse(prev.get("alerted_at"))
 			need = cfg.caida_confirma if name == "caida" else 1
 			waiting = name in GRACE_SIGNALS and grace_until is not None and now < grace_until
-			if alerted is None and entry["fails"] >= need and not waiting:
+			# HR-374 (el fundador, 26-11: «debería ser 2 minutos»): la caída no avisa hasta llevar HR_VIGIA_CAIDA_MIN
+			# minutos sin respuesta, contados desde la primera vuelta que la vio caída, sea cual sea el intervalo
+			red_since = _parse(entry["since"]) or now
+			long_enough = name != "caida" or now - red_since >= timedelta(minutes=cfg.caida_min)
+			if alerted is None and entry["fails"] >= need and long_enough and not waiting:
 				notices.append({"kind": "alerta", "signal": name, "detail": entry["detail"], "since": entry["since"]})
 				entry["alerted_at"] = _iso(now)
 			elif alerted is not None and now - alerted >= timedelta(minutes=cfg.repite_min):
@@ -468,7 +474,8 @@ def main(argv=None) -> int:
 		print("vigía: sin HR_VIGIA_TOKEN: Kamra solo enseña el estado de cada señal, sin el detalle", file=sys.stderr)
 	if args.comprobar:
 		print(f"vigía: {cfg.url} ({cfg.nombre}) · canales: {', '.join(cfg.channels()) or 'ninguno'} · "
-		      f"cada {cfg.intervalo} s · caída tras {cfg.caida_confirma} vueltas · repite cada {cfg.repite_min} min")
+		      f"cada {cfg.intervalo} s · caída tras {cfg.caida_confirma} vueltas · caída tras {cfg.caida_min} min · "
+		      f"repite cada {cfg.repite_min} min")
 		return 0
 	if args.estado:
 		print(json.dumps(observe(cfg), ensure_ascii=False, indent=1))

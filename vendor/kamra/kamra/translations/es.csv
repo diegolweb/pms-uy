@@ -1463,3 +1463,13 @@ Card network must be one of: {0}.,El tipo de tarjeta debe ser uno de estos: {0}.
 Your own role. What it may do is set in Role Permission Manager.,Es su propio rol. Lo que puede hacer se define en Role Permission Manager.
 Only a Hotel Admin can set a job title.,Solo un administrador del hotel puede asignar un cargo.
 Only a Hotel Admin can grant or remove {0}.,Solo un administrador del hotel puede otorgar o quitar {0}.
+New message from {0}: {1},Mensaje nuevo de {0}: {1}
+Guest from {0},Huésped de {0}
+Nothing to send.,No hay nada que enviar.
+{0} did not accept the message: {1},{0} no aceptó el mensaje: {1}
+Channex is busy; try again in a minute.,Channex está ocupado; prueba de nuevo en un minuto.
+Could not read the conversation from Channex: {0},No se pudo leer la conversación desde Channex: {0}
+This property has no active Channex connection.,Esta propiedad no tiene una conexión activa con Channex.
+Conversation not found.,No se encontró la conversación.
+Only Booking.com conversations can be marked as not needing a reply.,Solo las conversaciones de Booking.com se pueden marcar como que no necesitan respuesta.
+Attachment not found.,No se encontró el adjunto.

@@ -89,6 +89,8 @@ scheduler_events = {
 		# a Channex booking-revisions pull per connection (catches a missed webhook)
 		"* * * * *": ["kamra.webhooks.retry_due",
 		              "kamra.channel_manager.enqueue_channex_pulls",
+		              # the OTA guest-message index per Channex connection (channel_messages)
+		              "kamra.channel_messages.enqueue_message_pulls",
 		              # the ARI outbox: what waited for its batch window, pause or retry
 		              "kamra.channel_ari.enqueue_ari_flushes"],
 		# 06:20 (03:20 in Montevideo on a UTC scheduler) - the ARI outbox's
@@ -279,7 +281,7 @@ _PROPERTY_SCOPED = (
 	"Agent Action Log", "AI Assistant Settings", "Allowance Request", "Banquet Checklist Template",
 	"Banquet Dish", "Banquet Function Task", "Banquet Menu",
 	"Banquet Service Item", "Cancelled Invoice", "Cash Transfer", "Cashier", "Cashier Session", "Cashier Terminal",
-	"Cashier Transaction", "Channel ARI Outbox", "Channel Manager Connection", "Channel Restriction",
+	"Cashier Transaction", "Channel ARI Outbox", "Channel Manager Connection", "Channel Message Thread", "Channel Restriction",
 	"Channel Provider Connection", "City Ledger Account", "City Ledger Entry",
 	"Company Payment Request", "Copilot Conversation", "Credit Note", "Daily KPI Snapshot", "Discount Voucher",
 	"ERPNext Sync Log",

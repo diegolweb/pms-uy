@@ -407,6 +407,8 @@ def webhook(connection: str | None = None, **kwargs):
 _CHANNEX_BOOKING_EVENTS = ("booking", "booking_new", "booking_modification",
                            "booking_cancellation", "non_acked_booking")
 _CHANNEX_UNMAPPED_EVENTS = ("booking_unmapped_room", "booking_unmapped_rate")
+# a guest wrote, or a thread joined its booking: re-read the message index
+_CHANNEX_MESSAGE_EVENTS = ("message", "message_thread_booking_assigned")
 
 
 def _channex_signal(conn, payload: dict) -> dict:
@@ -426,6 +428,11 @@ def _channex_signal(conn, payload: dict) -> dict:
 		                 message=f"{event}: {json.dumps(ids, sort_keys=True)}")
 	if event in _CHANNEX_BOOKING_EVENTS or event in _CHANNEX_UNMAPPED_EVENTS:
 		enqueue_feed_pull(conn.name)
+		return {"ok": True, "queued": True}
+	if event in _CHANNEX_MESSAGE_EVENTS:
+		# ids only, and the message text never logged: the index is re-read
+		from kamra.channel_messages import enqueue_messages_pull
+		enqueue_messages_pull(conn.name)
 		return {"ok": True, "queued": True}
 	return {"ok": True, "ignored": event}
 

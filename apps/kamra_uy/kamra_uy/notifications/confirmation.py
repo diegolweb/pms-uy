@@ -21,12 +21,20 @@ kamra_uy.receipts). Y nunca frena la confirmación: si no se puede montar o
 encolar (sin cuenta de correo saliente, sendmail LANZA), se deshace solo el correo y su porqué (el tipo del error, sin
 datos personales) va al Error Log de la reserva (HR-224).
 
+HR-374 (el fundador, 26-11): la confirmación también para las reservas que carga recepción (`RECEPCION`: Manual, Phone
+y Walk-in) cuando el huésped tiene correo, al pasar a Confirmed (al crearla así o al confirmarla), una vez, con la misma
+plantilla y su entrada propia (no dice «Recibimos tu pago»); nunca a una de plataforma (OTA, o con canal o referencia de
+la OTA: les escribe la plataforma). Sus textos nuevos van tras texts.BORRADORES_OK: apagado, no sale. Los
+correos al huésped salen del correo de la Property («Hotel Roosevelt» <reservas@…>: deploy/prod/lib/cuentas.py, la
+cuenta «Hotel Roosevelt Reservas»), y las respuestas, al mismo. Su aviso de cancelación: kamra_uy.notifications.cancelada.
+
 Los campos `uy_booking_language` y `uy_confirmation_mail_on` los crea `ensure_fields` (after_install y after_migrate).
 """
 
 from __future__ import annotations
 
 import re
+from email.utils import formataddr
 from html import escape
 
 import frappe
@@ -34,6 +42,7 @@ from frappe.utils import cint, date_diff, flt, now_datetime
 
 from kamra_uy.branding import correo, marca
 from kamra_uy.notifications import cancelacion, formato
+from kamra_uy.notifications import texts
 from kamra_uy.notifications.texts import TEXTOS
 from kamra_uy.pure.turismo import aviso_iva_residentes
 
@@ -41,6 +50,7 @@ MODULE = "Kamra UY"
 LANGUAGE_FIELD = "uy_booking_language"
 SENT_FIELD = "uy_confirmation_mail_on"
 SOURCE = "Website"
+RECEPCION = ("Manual", "Phone", "Walk-in")  # las que carga recepción (HR-374); OTA, AI Agent y PMS, no
 HELD = ("Pending Payment", "Held")
 LOG_TITLE = "kamra_uy: correo de confirmación de la reserva en línea sin enviar"
 _SAVEPOINT = "kamra_uy_confirmation_mail"
@@ -104,9 +114,34 @@ def _confirmed_by_payment(doc) -> bool:
 	return bool(before) and before.get("status") in HELD
 
 
+def de_plataforma(doc) -> bool:
+	"""Una reserva de Booking, Expedia u otra plataforma: les escribe la plataforma, nunca kamra_uy."""
+	return doc.get("source") == "OTA" or bool(doc.get("channel") or doc.get("ota_ref"))
+
+
+def _quiet() -> bool:
+	return any(frappe.flags.get(f) for f in ("in_import", "in_install", "in_migrate", "in_patch",
+	                                          "kamra_uy_sin_correo_al_huesped"))
+
+
+def _confirmed_by_the_desk(doc) -> bool:
+	"""HR-374: una reserva de recepción que pasa a Confirmed (al crearla así o al confirmarla), sin correo todavía."""
+	if not texts.BORRADORES_OK or doc.get("source") not in RECEPCION or de_plataforma(doc):
+		return False
+	if doc.get("status") != "Confirmed" or doc.get(SENT_FIELD) or _quiet():
+		return False
+	# creada ya confirmada: en el insert la «copia de antes» no es de antes. El after_insert de Kamra hace un db_set
+	# (precheckin_token) y Frappe, al no haber copia, carga la fila recién insertada, ya Confirmed
+	if doc.flags.get("in_insert"):
+		return True
+	before = doc.get_doc_before_save()
+	return before is None or before.get("status") != "Confirmed"
+
+
 def on_reservation_update(doc, method=None) -> None:
-	"""on_update de Reservation: la reserva web que confirma un pago se lleva su correo, una vez."""
-	if _confirmed_by_payment(doc):
+	"""on_update de Reservation: la reserva web que confirma un pago se lleva su correo, una vez; y la de recepción que
+	se confirma, también (HR-374)."""
+	if _confirmed_by_payment(doc) or _confirmed_by_the_desk(doc):
 		send(doc)
 
 
@@ -120,7 +155,8 @@ def send(res) -> bool:
 			mail = compose(res)
 		if mail:
 			frappe.sendmail(recipients=[mail["to"]], subject=mail["subject"], message=mail["message"],
-			                reply_to=mail["reply_to"], reference_doctype="Reservation", reference_name=res.name)
+			                sender=mail["sender"], reply_to=mail["reply_to"], reference_doctype="Reservation",
+			                reference_name=res.name)
 			sent = now_datetime()
 			frappe.db.set_value("Reservation", res.name, SENT_FIELD, sent, update_modified=False)
 	except Exception as e:
@@ -136,15 +172,45 @@ def send(res) -> bool:
 	return True
 
 
+def guest_email(res) -> str:
+	return (frappe.db.get_value("Guest", res.guest, "email") or "").strip() if res.get("guest") else ""
+
+
+def sender(prop) -> str | None:
+	"""«Hotel Roosevelt» <reservas@…>: el correo de la Property, con su nombre (HR-374). Frappe manda por la cuenta
+	saliente de ese correo; si no hay ninguna, por la de por defecto, con su dirección."""
+	correo_ = (prop.email or "").strip()
+	return formataddr((prop.property_name or "", correo_)) if correo_ else None
+
+
+def direccion(prop) -> str:
+	"""La calle y la ciudad, sin repetirla si la calle ya la lleva (la del hotel termina en «Punta del Este, Maldonado»):
+	como el pie."""
+	calle, ciudad = (prop.address_line or "").strip(), (prop.city or "").strip()
+	if ciudad and ciudad.casefold() in calle.casefold():
+		return calle
+	return ", ".join(x for x in (calle, ciudad) if x)
+
+
+def room_name(res, idioma: str) -> str:
+	if not res.get("room_type"):
+		return ""
+	rt = frappe.db.get_value("Room Type", res.room_type, ["room_type_name", "room_type_code"], as_dict=True) or {}
+	nombre = rt.get("room_type_name") or res.get("room_type") or ""
+	return texts.habitacion(nombre, rt.get("room_type_code"), idioma)
+
+
+PROPERTY_FIELDS = ["property_name", "address_line", "city", "phone", "email", "currency", "checkin_time",
+                   "checkout_time", "booking_language", "free_cancel_days", "cancellation_fee", "no_show_charge"]
+
+
 def compose(res) -> dict | None:
-	"""{to, subject, message, reply_to, idioma} del correo de `res`, o None si el huésped no tiene correo."""
-	to = (frappe.db.get_value("Guest", res.guest, "email") or "").strip() if res.get("guest") else ""
+	"""{to, subject, message, sender, reply_to, idioma} del correo de `res`, o None si el huésped no tiene correo."""
+	to = guest_email(res)
 	if not to:
 		return None
 	prop = frappe.db.get_value(
-		"Property", res.property,
-		["property_name", "address_line", "city", "phone", "email", "currency", "checkin_time", "checkout_time",
-		 "booking_language", "free_cancel_days", "cancellation_fee", "no_show_charge"], as_dict=True)
+		"Property", res.property, PROPERTY_FIELDS, as_dict=True)
 	idioma = marca.idioma(res.get(LANGUAGE_FIELD) or prop.booking_language)
 	datos = {
 		"hotel": prop.property_name or res.property,
@@ -153,23 +219,24 @@ def compose(res) -> dict | None:
 		"llegada": res.check_in_date,
 		"salida": res.check_out_date,
 		"noches": cint(res.get("nights")) or date_diff(res.check_out_date, res.check_in_date),
-		"habitacion": (frappe.db.get_value("Room Type", res.room_type, "room_type_name") if res.get("room_type")
-		               else None) or res.get("room_type") or "",
+		"habitacion": room_name(res, idioma),
 		"huespedes": cint(res.get("adults")) + cint(res.get("children")),
 		"total": flt(res.get("amount_after_tax")),
 		"pagado": flt(res.get("advance_paid")),
 		"moneda": (prop.currency or "").upper(),
 		"entrada": formato.hora(prop.checkin_time),
 		"salida_hora": formato.hora(prop.checkout_time),
-		"direccion": ", ".join(x.strip() for x in (prop.address_line, prop.city) if x and x.strip()),
+		"direccion": direccion(prop),
 		"telefono": (prop.phone or "").strip(),
 		"correo": (prop.email or "").strip(),
 		"cancelacion": _cancelacion(res, prop),
 		"recibo": _recibo(res.name),
+		# HR-374: la de recepción no se confirma por un pago de la web: su entrada no dice «Recibimos tu pago»
+		"recepcion": res.get("source") != SOURCE,
 	}
 	subject, html = render(datos, idioma)
-	return {"to": to, "subject": subject, "message": correo.envolver(html, idioma), "reply_to": datos["correo"] or None,
-	        "idioma": idioma}
+	return {"to": to, "subject": subject, "message": correo.envolver(html, idioma), "sender": sender(prop),
+	        "reply_to": datos["correo"] or None, "idioma": idioma}
 
 
 def _recibo(reservation: str) -> dict | None:
@@ -223,13 +290,15 @@ def render(datos: dict, idioma: str) -> tuple[str, str]:
 	pagado_todo = datos["pagado"] >= datos["total"] - 0.005
 	if pagado_todo:
 		filas.append((t["total"], f"{total} · {t['pagado']}"))
-	else:
+	elif datos["pagado"] > 0.005:
 		filas += [(t["total"], total), (t["pagado"], formato.importe(datos["pagado"], datos["moneda"], idioma))]
+	else:  # HR-374: una de recepción sin cobrar todavía no dice «Pagado US$ 0»
+		filas.append((t["total"], total))
 
 	partes = [
 		f'<h1 style="margin:0 0 16px 0;font-size:24px;line-height:32px;">{escape(t["confirmada"])}</h1>',
 		f"<p>{escape(t['saludo'].format(nombre=datos['nombre']))}</p>" if datos["nombre"] else "",
-		f"<p>{escape(t['intro'])}</p>",
+		f"<p>{escape(texts.BORRADORES[idioma]['intro_recepcion'] if datos.get('recepcion') else t['intro'])}</p>",
 		'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" '
 		'style="border-collapse:collapse;margin:16px 0 24px 0;">' + "".join(_fila(*f) for f in filas) + "</table>",
 	]

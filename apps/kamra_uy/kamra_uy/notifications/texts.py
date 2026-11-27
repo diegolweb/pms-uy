@@ -200,3 +200,66 @@ MESES = {
 	"pt": ("jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"),
 	"en": ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
 }
+
+# HR-374: el nombre de cada habitación en portugués y en inglés, el titular h2 de su sección en
+# web/content/{pt,en}/habitaciones.md (aprobados con la web, D-HR-30), por el código del tipo en Kamra (room_type_code, el
+# que casa la web con Kamra: CODIGOS_TIPO de web/src/booking/reglas.ts, HR-273). En español va el nombre de Kamra, como
+# hasta ahora; un tipo que no está aquí, también. La guarda contra la web es tests/unit/test_textos_aprobados.py.
+HABITACIONES_DE_LA_WEB = {
+	"pt": {"doble-camas-separadas": "Quarto Duplo Solteiro", "doble-matrimonial": "Quarto Duplo Superior",
+	       "triple": "Quarto Triplo", "apartamento": "Apartamento para 5 pessoas"},
+	"en": {"doble-camas-separadas": "Twin Room", "doble-matrimonial": "Superior Double Room",
+	       "triple": "Triple Room", "apartamento": "Apartment for 5 people"},
+}
+CODIGOS_TIPO = {"doble-camas-separadas": ("DOBLE", "TWN"), "doble-matrimonial": ("DOBLESUPERIOR", "DBL"),
+                "triple": ("TRIPLE",), "apartamento": ("APARTAMENTO",)}
+
+# HR-374, los textos NUEVOS de los correos al huésped (el fundador, 26-11, pidió la confirmación de las reservas que carga
+# recepción y el aviso de cancelación; y el texto del enlace de WhatsApp del pie en su idioma, que la web solo tiene en
+# español). Son BORRADORES para su tanda de OK (D-HR-44): mientras BORRADORES_OK sea False no sale ninguno (ni esos dos
+# correos, ni el texto de WhatsApp en pt y en, que sigue el de la web). Con su OK, el hub pone BORRADORES_OK = True.
+BORRADORES_OK = False
+BORRADORES = {
+	"es": {
+		"whatsapp": "¡Hola! Para solicitar una reserva:",  # el de la web (inicio.md), aprobado: no es borrador en es
+		"intro_recepcion": "Tu reserva está confirmada. Estos son los datos de tu estadía.",
+		"asunto_cancelada": "Tu reserva en {hotel} está cancelada",
+		"cancelada": "Reserva cancelada",
+		"intro_cancelada": "Cancelamos tu reserva. Estos eran sus datos.",
+		"numero_cancelacion": "Número de cancelación",
+		"cargo_cancelacion": "Cargo por la cancelación",
+		"ayuda_cancelada": "Si tienes una duda sobre la cancelación, escríbenos.",
+		"despedida_cancelada": "Esperamos verte pronto en {hotel}.",
+	},
+	"pt": {
+		"whatsapp": "Olá! Para solicitar uma reserva:",
+		"intro_recepcion": "A sua reserva está confirmada. Estes são os dados da sua estadia.",
+		"asunto_cancelada": "Sua reserva no {hotel} está cancelada",
+		"cancelada": "Reserva cancelada",
+		"intro_cancelada": "Cancelamos a sua reserva. Estes eram os dados dela.",
+		"numero_cancelacion": "Número do cancelamento",
+		"cargo_cancelacion": "Valor cobrado pelo cancelamento",
+		"ayuda_cancelada": "Se você tiver alguma dúvida sobre o cancelamento, fale com a gente.",
+		"despedida_cancelada": "Esperamos ver você em breve no {hotel}.",
+	},
+	"en": {
+		"whatsapp": "Hello! To request a booking:",
+		"intro_recepcion": "Your booking is confirmed. Here are the details of your stay.",
+		"asunto_cancelada": "Your booking at {hotel} has been cancelled",
+		"cancelada": "Booking cancelled",
+		"intro_cancelada": "We have cancelled your booking. These were its details.",
+		"numero_cancelacion": "Cancellation number",
+		"cargo_cancelacion": "Cancellation charge",
+		"ayuda_cancelada": "If you have any question about the cancellation, get in touch.",
+		"despedida_cancelada": "We hope to see you soon at {hotel}.",
+	},
+}
+
+
+def habitacion(nombre_kamra: str, codigo: str | None, idioma: str) -> str:
+	"""El nombre de la habitación en el idioma del correo: en pt y en, el de la web por su código; si no, el de Kamra."""
+	codigo = (codigo or "").upper()
+	for clave, codigos in CODIGOS_TIPO.items():
+		if codigo in codigos:
+			return HABITACIONES_DE_LA_WEB.get(idioma, {}).get(clave) or nombre_kamra
+	return nombre_kamra

@@ -42,7 +42,19 @@ def test_book_y_su_estado_pasan_por_la_residencia() -> None:
         "kamra.public_api.book": "kamra_uy.booking.residence.book",
         "kamra.public_api.booking_status": "kamra_uy.booking.residence.booking_status",
         "kamra.public_api.search_stay": "kamra_uy.booking.stay_search.search_stay",
+        "kamra.public_api.hosting_enquiry": "kamra_uy.closed.hosting_enquiry",
     }
+
+
+def test_el_formulario_de_alojamiento_de_kamra_queda_cerrado_por_todas_las_vias() -> None:
+    # HR-374: el borde niega su ruta, pero el `cmd` de Frappe la alcanza por cualquier ruta; su sustituta existe y NO
+    # está en la lista blanca, así que Frappe contesta 403 sin ejecutarla.
+    target = _hooks()["override_whitelisted_methods"]["kamra.public_api.hosting_enquiry"]
+    module, name = target.rsplit(".", 1)
+    tree = ast.parse((PACKAGE.parent / Path(*module.split("."))).with_suffix(".py").read_text())
+    funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    assert name in funcs, target
+    assert not [d for d in funcs[name].decorator_list if "whitelist" in ast.unparse(d)], f"{target} no puede ser pública"
 
 
 def test_la_reserva_web_guarda_su_idioma_y_lo_declarado_al_crearse() -> None:
@@ -59,7 +71,8 @@ def test_los_campos_se_crean_al_instalar_y_en_cada_migrate() -> None:
                                "kamra_uy.booking.residence.ensure_fields",
                                "kamra_uy.contact.form.ensure_fields",  # HR-314: el destinatario de la web
                                "kamra_uy.payments.payer.ensure_fields",  # HR-360: quien pagó
-                               "kamra_uy.fiscal.agency.ensure_fields"], hook  # HR-236: la agencia del MINTUR
+                               "kamra_uy.fiscal.agency.ensure_fields",  # HR-236: la agencia del MINTUR
+                               "kamra_uy.notifications.cancelada.ensure_fields"], hook  # HR-374: el aviso de cancelación
 
 
 def test_las_consultas_de_la_web_salen_de_la_cola_cada_hora() -> None:

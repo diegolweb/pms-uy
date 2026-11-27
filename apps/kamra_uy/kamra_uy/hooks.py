@@ -94,6 +94,7 @@ doc_events = {
 			"kamra_uy.fiscal.events.on_reservation_update",
 			"kamra_uy.fiscal.forfeit.on_reservation_update",
 			"kamra_uy.notifications.confirmation.on_reservation_update",
+			"kamra_uy.notifications.cancelada.on_reservation_update",
 			"kamra_uy.booking.residence.on_reservation_update",
 		],
 		"on_cancel": "kamra_uy.contingency.alerts.on_reservation_change",
@@ -119,12 +120,13 @@ extend_bootinfo = ["kamra_uy.health.sentry.extend_bootinfo"]
 # HR-314: el destinatario de las consultas de la web, un ajuste de la Property (kamra_uy/contact/form.py)
 # HR-360: el documento de quien pagó por Mercado Pago, en la Reservation (kamra_uy/payments/payer.py)
 # HR-236: la constancia del MINTUR de la agencia de viajes, en la Corporate Account (kamra_uy/fiscal/agency.py)
+# HR-374: cuándo salió el aviso de cancelación al huésped, en la Reservation (kamra_uy/notifications/cancelada.py)
 after_install = ["kamra_uy.notifications.confirmation.ensure_fields", "kamra_uy.booking.residence.ensure_fields",
                  "kamra_uy.contact.form.ensure_fields", "kamra_uy.payments.payer.ensure_fields",
-                 "kamra_uy.fiscal.agency.ensure_fields"]
+                 "kamra_uy.fiscal.agency.ensure_fields", "kamra_uy.notifications.cancelada.ensure_fields"]
 after_migrate = ["kamra_uy.notifications.confirmation.ensure_fields", "kamra_uy.booking.residence.ensure_fields",
                  "kamra_uy.contact.form.ensure_fields", "kamra_uy.payments.payer.ensure_fields",
-                 "kamra_uy.fiscal.agency.ensure_fields"]
+                 "kamra_uy.fiscal.agency.ensure_fields", "kamra_uy.notifications.cancelada.ensure_fields"]
 
 # El IVA del residente al reservar (HR-266, D-HR-47): book de la página pública (la de la web y la de /book de Kamra)
 # pide en Uruguay la residencia declarada y cobra con ella el IVA de cada noche, y booking_status lleva su desglose
@@ -136,6 +138,8 @@ override_whitelisted_methods = {
 	"kamra.public_api.booking_status": "kamra_uy.booking.residence.booking_status",
 	# HR-337: la cotización pública con presupuesto por IP y ráfaga, medidos por noches (sin tope de noches: D-HR-49)
 	"kamra.public_api.search_stay": "kamra_uy.booking.stay_search.search_stay",
+	# HR-374: el formulario comercial de la empresa de Kamra, cerrado (kamra_uy/closed.py: sin lista blanca, 403)
+	"kamra.public_api.hosting_enquiry": "kamra_uy.closed.hosting_enquiry",
 }
 
 # HR-349: los recibos de la reserva, en sus conexiones del escritorio (kamra_uy/receipts/issue.py)

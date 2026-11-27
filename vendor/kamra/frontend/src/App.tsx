@@ -87,6 +87,7 @@ const CalendarView = lazy(() =>
   import("./components/CalendarView").then((m) => ({ default: m.CalendarView })),
 )
 const WhatsAppChat = lazy(() => import("./screens/WhatsAppChat"))
+const OtaMessages = lazy(() => import("./screens/OtaMessages"))
 const CashierTill = lazy(() => import("./screens/CashierTill"))
 const CashierSessions = lazy(() => import("./screens/CashierSessions"))
 const CashierBoard = lazy(() => import("./screens/CashierBoard"))
@@ -359,6 +360,7 @@ export default function App() {
           <Route path="revenue-reports" element={<RevenueReports />} />
           <Route path="ops-sla" element={<OpsSLA />} />
           <Route path="whatsapp" element={<WhatsAppChat />} />
+          <Route path="ota-messages" element={<OtaMessages />} />
           <Route
             path="channels"
             element={<ConfiguredScreen config="channelConnectionsConfig" />}

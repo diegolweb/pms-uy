@@ -1,0 +1,10 @@
+{
+ "creation": "2026-11-26 22:00:00.000000",
+ "doc_type": "Channel Message Thread",
+ "doctype": "Permission Type",
+ "modified": "2026-11-26 22:00:00.000000",
+ "modified_by": "Administrator",
+ "name": "channel_message_thread_reply_messages",
+ "owner": "Administrator",
+ "perm_type": "reply_messages"
+}

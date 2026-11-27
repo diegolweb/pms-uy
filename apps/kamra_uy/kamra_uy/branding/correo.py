@@ -17,17 +17,24 @@ botón, con sus textos aprobados; aquí solo va la identidad:
 
 Todo va en estilos en línea y tablas, que es lo que respetan los clientes de correo; Frappe además lo pasa por
 premailer (frappe.email.email_body.inline_style_in_html). Los textos del paquete van escapados.
+
+HR-374: la hoja de correo de Frappe le pone a cada celda su letra del sistema (-apple-system, Segoe UI…) y premailer la
+mete en línea, así que las filas de un cuerpo salían en otra letra que los párrafos. Cada tabla y celda del cuerpo lleva
+la pila de la identidad en línea (premailer no pisa lo que ya está en línea). Y en pt y en, el texto con que el enlace de
+WhatsApp del pie abre el chat va en su idioma (texts.BORRADORES: hasta su OK, el de la web, en español).
 """
 
 from __future__ import annotations
 
 import re
 from html import escape
+from urllib.parse import quote
 
 import frappe
 from frappe.utils import get_url
 
 from kamra_uy.branding import marca as marca_
+from kamra_uy.notifications import texts
 
 # El logo de la cabecera y el del pie, al alto del logo de la web en escritorio (tokens «pagina.logo-l», 36 px).
 ALTO_LOGO = 36
@@ -62,10 +69,36 @@ def _enlace(href: str, texto: str, color: str, peso: int, entero: bool = False) 
 	return f'<a href="{escape(href)}" style="{estilo}">{escape(texto)}</a>'
 
 
-def _pie(m: dict, datos: dict) -> str:
+_CELDA = re.compile(r"<(table|td|th)\b([^>]*)>")
+_WHATSAPP = re.compile(r"^(https://wa\.me/[0-9]+)\?text=")
+
+
+def _con_letra(html: str, pila: str) -> str:
+	"""Cada <table>, <td> y <th> de `html` con la pila en línea, salvo si ya lleva una letra (HR-374)."""
+	def pon(m: re.Match) -> str:
+		etiqueta, attrs = m.group(1), m.group(2)
+		if "font-family:" in attrs:
+			return m.group(0)
+		if ' style="' in attrs:
+			attrs = attrs.replace(' style="', ' style="font-family:' + pila + ';', 1)
+			return f"<{etiqueta}{attrs}>"
+		return f'<{etiqueta}{attrs} style="font-family:{pila};">'
+	return _CELDA.sub(pon, html)
+
+
+def _contacto_href(href: str, idioma: str) -> str:
+	"""El enlace de WhatsApp del pie, con el texto del chat en `idioma` (HR-374); los demás, tal cual."""
+	m = _WHATSAPP.match(href)
+	if not m or idioma == "es" or not texts.BORRADORES_OK:
+		return href
+	return f"{m.group(1)}?text={quote(texts.BORRADORES[idioma]['whatsapp'], safe='!:')}"
+
+
+def _pie(m: dict, datos: dict, idioma: str = "es") -> str:
 	c, pila = m["color"], m["fuente"]["pila"]
 	peso = m["fuente"]["texto"]
-	contacto = " · ".join(_enlace(d["href"], d["texto"], c["blanco"], peso, entero=True) for d in m["contacto"])
+	contacto = " · ".join(_enlace(_contacto_href(d["href"], idioma), d["texto"], c["blanco"], peso, entero=True)
+	                      for d in m["contacto"])
 	legales = [_enlace(datos["privacidad"]["url"], datos["privacidad"]["texto"], c["blanco"], peso)]
 	if datos["condiciones"]["aprobado"]:
 		legales.append(_enlace(datos["condiciones"]["url"], datos["condiciones"]["texto"], c["blanco"], peso))
@@ -88,8 +121,10 @@ def envolver(cuerpo_html: str, idioma: str | None = None) -> str:
 	m = marca_.guardada()
 	if not m:
 		return cuerpo_html
-	datos = m["idiomas"][marca_.idioma(idioma)]
+	idioma = marca_.idioma(idioma)
+	datos = m["idiomas"][idioma]
 	c, pila = m["color"], m["fuente"]["pila"]
+	cuerpo_html = _con_letra(cuerpo_html, pila)
 	tabla = 'role="presentation" cellpadding="0" cellspacing="0" border="0"'
 	return (
 		f'<table {tabla} width="100%" data-marca="fondo" style="background-color:{c["lavanda"]};'
@@ -103,7 +138,7 @@ def envolver(cuerpo_html: str, idioma: str | None = None) -> str:
 		f'style="{_a(c["morado"], False, m["fuente"]["texto"])}">{_img(m["urls"]["logo"], m["activos"]["logo"], m["nombre"])}</a></td></tr>'
 		f'<tr><td data-marca="cuerpo" style="padding:24px 32px 32px 32px;font-family:{pila};font-size:16px;'
 		f'line-height:24px;font-weight:{m["fuente"]["texto"]};color:{c["tinta"]};">{cuerpo_html}</td></tr>'
-		f"<tr>{_pie(m, datos)}</tr>"
+		f"<tr>{_pie(m, datos, idioma)}</tr>"
 		"</table></td></tr></table>"
 	)
 

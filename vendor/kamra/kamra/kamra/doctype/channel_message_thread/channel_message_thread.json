@@ -1,0 +1,164 @@
+{
+ "doctype": "DocType",
+ "name": "Channel Message Thread",
+ "module": "Kamra",
+ "engine": "InnoDB",
+ "naming_rule": "By fieldname",
+ "autoname": "field:thread_id",
+ "in_create": 1,
+ "track_changes": 0,
+ "description": "Guest conversations from the OTAs that Channex brings in (Booking.com, Expedia, Airbnb). An index only: ids, counts and the linked reservation; the messages themselves are read live from Channex.",
+ "field_order": [
+  "connection",
+  "property",
+  "thread_id",
+  "provider",
+  "channex_booking_id",
+  "reservation",
+  "column_break_a",
+  "message_count",
+  "last_message_at",
+  "last_sender",
+  "is_closed",
+  "no_reply_needed",
+  "notified_count"
+ ],
+ "fields": [
+  {
+   "fieldname": "connection",
+   "fieldtype": "Link",
+   "label": "Connection",
+   "options": "Channel Manager Connection",
+   "reqd": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Property",
+   "options": "Property",
+   "reqd": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "thread_id",
+   "fieldtype": "Data",
+   "label": "Thread ID",
+   "reqd": 1,
+   "unique": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "provider",
+   "fieldtype": "Data",
+   "label": "Provider",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "channex_booking_id",
+   "fieldtype": "Data",
+   "label": "Channex Booking ID",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "reservation",
+   "fieldtype": "Link",
+   "label": "Reservation",
+   "options": "Reservation",
+   "in_list_view": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "column_break_a",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "message_count",
+   "fieldtype": "Int",
+   "label": "Messages",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_message_at",
+   "fieldtype": "Datetime",
+   "label": "Last Message At",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_sender",
+   "fieldtype": "Select",
+   "label": "Last Sender",
+   "options": "\nguest\nproperty\nsystem",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "is_closed",
+   "fieldtype": "Check",
+   "label": "Closed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "no_reply_needed",
+   "fieldtype": "Check",
+   "label": "No Reply Needed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notified_count",
+   "fieldtype": "Int",
+   "label": "Notified Count",
+   "read_only": 1,
+   "description": "Messages already announced in the bell."
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1,
+   "reply_messages": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1,
+   "reply_messages": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1,
+   "reply_messages": 1
+  },
+  {
+   "role": "Night Auditor",
+   "read": 1,
+   "report": 1,
+   "reply_messages": 1
+  }
+ ],
+ "sort_field": "last_message_at",
+ "sort_order": "DESC",
+ "title_field": "thread_id",
+ "links": [],
+ "actions": [],
+ "states": [],
+ "allow_rename": 0,
+ "creation": "2026-11-26 22:00:00.000000",
+ "modified": "2026-11-26 22:00:00.000000",
+ "modified_by": "Administrator",
+ "owner": "Administrator"
+}

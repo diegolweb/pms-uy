@@ -21,7 +21,7 @@ from kamra.tests.audit_fixtures import (
 	make_room_type,
 )
 
-from kamra_uy.contingency import alerts, api, report
+from kamra_uy.contingency import alerts, api, report, setup
 from kamra_uy.www import contingencia as page
 
 PROP = "UT UY Contingencia"
@@ -332,6 +332,44 @@ class TestContingencyAlerts(ContingencyCase):
 		with patch.object(alerts, "is_daily_report_hour", return_value=True):
 			alerts.daily_report()
 		self.assertEqual(self.mails(), before)
+
+
+class TestContingencyRecipientsSetup(ContingencyCase):
+	"""HR-374 (D-HR-65): el despliegue deja los avisos del modo con su buzón, y repetirlo no cambia nada."""
+
+	BOX = "reservas@roosevelt.test"
+
+	def daily(self) -> int:
+		with patch.object(alerts, "is_daily_report_hour", return_value=True):
+			return alerts._send_daily(PROP)
+
+	def test_without_settings_nobody_is_told_and_the_setup_gives_them_the_box(self):
+		frappe.delete_doc(report.SETTINGS, PROP, ignore_permissions=True, force=True)
+		self.assertEqual(self.daily(), 0)
+		self.assertEqual(setup.ensure_recipients(PROP, self.BOX), "creado")
+		self.assertEqual(report.mode_status(PROP), "active")
+		before = self.mails()
+		self.assertEqual(self.daily(), 1)
+		self.assertEqual(self.mails(), before + 1)
+		queued = frappe.get_all("Email Queue", {"reference_doctype": report.SETTINGS, "reference_name": PROP},
+		                        pluck="name", order_by="creation desc", limit=1)[0]
+		self.assertEqual(frappe.get_all("Email Queue Recipient", {"parent": queued}, pluck="recipient"), [self.BOX])
+		self.assertEqual(setup.ensure_recipients(PROP, self.BOX), "igual")
+		self.assertEqual(frappe.db.count(report.SETTINGS, {"property": PROP}), 1)
+
+	def test_empty_recipients_are_filled_and_someone_elses_are_left_alone(self):
+		self.settings.db_set("recipients", "")
+		self.assertEqual(setup.ensure_recipients(PROP, self.BOX), "puesto")
+		self.assertEqual(frappe.db.get_value(report.SETTINGS, PROP, "recipients"), self.BOX)
+		self.settings.db_set("recipients", "gerente@roosevelt.test")
+		self.assertEqual(setup.ensure_recipients(PROP, self.BOX), "otros")
+		self.assertEqual(frappe.db.get_value(report.SETTINGS, PROP, "recipients"), "gerente@roosevelt.test")
+
+	def test_an_unknown_property_or_no_recipients_is_refused(self):
+		with self.assertRaises(frappe.ValidationError):
+			setup.ensure_recipients("UT UY No Existe", self.BOX)
+		with self.assertRaises(frappe.ValidationError):
+			setup.ensure_recipients(PROP, " , ")
 
 
 class TestContingencyPageRenders(ContingencyCase):
