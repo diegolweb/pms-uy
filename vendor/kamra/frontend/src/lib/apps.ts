@@ -303,7 +303,7 @@ export const APPS: AppDef[] = [
       { to: "/settings/revenue", label: "Settings", icon: SettingsIcon,
         roles: ["Revenue Manager", "Hotel Admin", "System Manager", "Administrator"] },
     ],
-    extraPrefixes: ["/revenue-reports"],
+    extraPrefixes: ["/revenue-reports", "/indicators"],
   },
   {
     id: "finance",

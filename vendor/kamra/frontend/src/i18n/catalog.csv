@@ -7158,3 +7158,87 @@ Messages from {platform},Messages from {platform},,Mensajes de {platform},Mensag
 "Unanswered · the latest, {ago}","Unanswered · the latest, {ago}",,"Sin contestar · el último, {ago}","Sem resposta · a última, {ago}",,components/OtaMessagesCard.tsx,ago,translated
 "Answered · the latest, {ago}","Answered · the latest, {ago}",,"Contestado · el último, {ago}","Respondida · a última, {ago}",,components/OtaMessagesCard.tsx,ago,translated
 Open the conversation,Open the conversation,,Abrir la conversación,Abrir a conversa,,components/OtaMessagesCard.tsx,,translated
+Booking pace,Booking pace,,Ritmo de reservas,Ritmo de reservas,,components/PickupPace.tsx,,translated
+"Room nights sold for the coming dates, and how many came in over the last 7 and 30 days.","Room nights sold for the coming dates, and how many came in over the last 7 and 30 days.",,Noches vendidas para las fechas que vienen y cuántas entraron en los últimos 7 y 30 días.,Noites vendidas para as próximas datas e quantas entraram nos últimos 7 e 30 dias.,,components/PickupPace.tsx,,translated
+Weeks,Weeks,,Semanas,Semanas,,components/PickupPace.tsx,,translated
+Months,Months,,Meses,Meses,,components/PickupPace.tsx,,translated
+Starting from,Starting from,,Desde,A partir de,,components/PickupPace.tsx,,translated
+Sold,Sold,,Vendidas,Vendidas,,components/PickupPace.tsx,,translated
+At this pace,At this pace,,A este ritmo,Neste ritmo,,components/PickupPace.tsx,,translated
+Behind,Behind,,Atrasada,Atrasada,,components/PickupPace.tsx,,translated
+On pace,On pace,,En ritmo,No ritmo,,components/PickupPace.tsx,,translated
+Target met,Target met,,Meta cumplida,Alvo atingido,,components/PickupPace.tsx,,translated
+No target,No target,,Sin meta,Sem alvo,,components/PickupPace.tsx,,translated
+{n} room nights short of the target,{n} room nights short of the target,,Faltan {n} noches para la meta,Faltam {n} noites para o alvo,,components/PickupPace.tsx,n,translated
+Sold and occupancy: room nights confirmed today. Last 7 and 30 days: what came in minus what was cancelled or moved to other dates.,Sold and occupancy: room nights confirmed today. Last 7 and 30 days: what came in minus what was cancelled or moved to other dates.,,Vendidas y ocupación: noches confirmadas hoy. Últimos 7 y 30 días: lo que entró menos lo que se canceló o se movió a otra fecha.,Vendidas e ocupação: noites confirmadas hoje. Últimos 7 e 30 dias: o que entrou menos o que foi cancelado ou mudou de data.,,components/PickupPace.tsx,,translated
+At this pace: the occupancy it would reach if every week brings what the last 7 days brought. The target is each month's occupancy in “Budget vs Actual”.,At this pace: the occupancy it would reach if every week brings what the last 7 days brought. The target is each month's occupancy in “Budget vs Actual”.,,A este ritmo: la ocupación que tendría si sigue entrando cada semana lo mismo que en los últimos 7 días. La meta es la ocupación de «Presupuesto frente a resultados» de cada mes.,Neste ritmo: a ocupação que teria se cada semana entrar o mesmo que nos últimos 7 dias. O alvo é a ocupação de «Orçamento vs Real» de cada mês.,,components/PickupPace.tsx,,translated
+Set each month's occupancy target in “Budget vs Actual” to see which dates are behind.,Set each month's occupancy target in “Budget vs Actual” to see which dates are behind.,,"Para ver qué fechas van atrasadas, defina la ocupación meta de cada mes en «Presupuesto frente a resultados».","Para ver quais datas estão atrasadas, defina o alvo de ocupação de cada mês em «Orçamento vs Real».",,components/PickupPace.tsx,,translated
+"By channel, for these dates","By channel, for these dates",,"Por canal, para estas fechas","Por canal, para estas datas",,components/PickupPace.tsx,,translated
+At a glance,At a glance,,Vista general,Visão geral,,components/PickupPace.tsx,,translated
+Indicators,Indicators,,Indicadores,Indicadores,,screens/Indicators.tsx;screens/ReportsHub.tsx,,translated
+"Occupancy, rates, channels, what is booked ahead and the figures from outside Kamra, as the marketing plan tracks them.","Occupancy, rates, channels, what is booked ahead and the figures from outside Kamra, as the marketing plan tracks them.",,"Ocupación, tarifas, canales, lo ya reservado y las cifras de fuera de Kamra, como las sigue el plan de marketing.","Ocupação, tarifas, canais, o já reservado e os números de fora do Kamra, como o plano de marketing os acompanha.",,screens/ReportsHub.tsx,,translated
+The marketing plan's indicators on one page.,The marketing plan's indicators on one page.,,Los indicadores del plan de marketing en una pantalla.,Os indicadores do plano de marketing numa só tela.,,screens/Indicators.tsx,,translated
+This week and what's ahead,This week and what's ahead,,Esta semana y lo que viene,Esta semana e o que vem,,screens/Indicators.tsx,,translated
+"Today, {date}. Checked every Monday.","Today, {date}. Checked every Monday.",,"Hoy, {date}. Se mira cada lunes.","Hoje, {date}. Confere-se toda segunda-feira.",,screens/Indicators.tsx,date,translated
+Average rate,Average rate,,Tarifa media,Tarifa média,,screens/Indicators.tsx,,translated
+last 7 days,last 7 days,,últimos 7 días,últimos 7 dias,,screens/Indicators.tsx,,translated
+Pace of bookings,Pace of bookings,,Ritmo de reservas,Ritmo de reservas,,screens/Indicators.tsx,,translated
++{n} room nights,+{n} room nights,,+{n} noches,+{n} noites,,screens/Indicators.tsx,n,translated
+{n} weeks behind,{n} weeks behind,,{n} semanas atrasadas,{n} semanas atrasadas,,screens/Indicators.tsx,n,translated
+1 week behind,1 week behind,,1 semana atrasada,1 semana atrasada,,screens/Indicators.tsx,,translated
+None behind,None behind,,Ninguna atrasada,Nenhuma atrasada,,screens/Indicators.tsx,,translated
+See the pace →,See the pace →,,Ver el ritmo →,Ver o ritmo →,,screens/Indicators.tsx,,translated
+"Booked, next {n} days","Booked, next {n} days",,Reservado a {n} días,Reservado a {n} dias,,screens/Indicators.tsx,n,translated
+until {date},until {date},,hasta el {date},até {date},,screens/Indicators.tsx,date,translated
+"Pace of bookings: room nights booked in the last 7 days for the next 8 weeks, less the cancelled ones. Booked: what is already sold for those dates, as on the Revenue dashboard.","Pace of bookings: room nights booked in the last 7 days for the next 8 weeks, less the cancelled ones. Booked: what is already sold for those dates, as on the Revenue dashboard.",,"Ritmo de reservas: noches que entraron en los últimos 7 días para las 8 semanas que vienen, menos las canceladas. Reservado: lo ya vendido para esas fechas, como en el Panel de ingresos.","Ritmo de reservas: noites que entraram nos últimos 7 dias para as próximas 8 semanas, menos as canceladas. Reservado: o já vendido para essas datas, como no Painel de receitas.",,screens/Indicators.tsx,,translated
+The month,The month,,El mes,O mês,,screens/Indicators.tsx,,translated
+From {from} to {to} (up to yesterday). Checked once a month.,From {from} to {to} (up to yesterday). Checked once a month.,,Del {from} al {to} (hasta ayer). Se mira una vez al mes.,De {from} a {to} (até ontem). Confere-se uma vez por mês.,,screens/Indicators.tsx,from to,translated
+From {from} to {to}. Checked once a month.,From {from} to {to}. Checked once a month.,,Del {from} al {to}. Se mira una vez al mes.,De {from} a {to}. Confere-se uma vez por mês.,,screens/Indicators.tsx,from to,translated
+This month has not started yet.,This month has not started yet.,,Este mes aún no empezó.,Este mês ainda não começou.,,screens/Indicators.tsx,,translated
+{a} of {b} room nights,{a} of {b} room nights,,{a} de {b} noches,{a} de {b} noites,,screens/Indicators.tsx,a b,translated
+per room night sold,per room night sold,,por noche vendida,por noite vendida,,screens/Indicators.tsx,,translated
+per room,per room,,por habitación,por quarto,,screens/Indicators.tsx,,translated
+Direct sales,Direct sales,,Venta directa,Venda direta,,screens/Indicators.tsx,,translated
+of room nights,of room nights,,de las noches,das noites,,screens/Indicators.tsx,,translated
+Returning guests,Returning guests,,Clientes que repiten,Clientes que voltam,,screens/Indicators.tsx,,translated
+{a} of {b} bookings,{a} of {b} bookings,,{a} de {b} reservas,{a} de {b} reservas,,screens/Indicators.tsx,a b,translated
+Contact list,Contact list,,Lista de contactos,Lista de contatos,,screens/Indicators.tsx,,translated
+with consent,with consent,,con permiso,com permissão,,screens/Indicators.tsx,,translated
+Payment and ads,Payment and ads,,Cobro y anuncios,Cobrança e anúncios,,screens/Indicators.tsx,,translated
+Distribution cost,Distribution cost,,Costo de distribución,Custo de distribuição,,screens/Indicators.tsx,,translated
+Net rate,Net rate,,Tarifa neta,Tarifa líquida,,screens/Indicators.tsx,,translated
+% missing,% missing,,Falta el %,Falta a %,,screens/Indicators.tsx,,translated
+"The commission % of {channels} is missing: until it is set, its cost and net rate show «—».","The commission % of {channels} is missing: until it is set, its cost and net rate show «—».",,"Falta el % de comisión de {channels}: hasta que se cargue, su costo y su tarifa neta salen «—».","Falta a % de comissão de {channels}: até ser carregada, o custo e a tarifa líquida aparecem «—».",,screens/Indicators.tsx,channels,translated
+Set it in Travel Agents →,Set it in Travel Agents →,,Cargarlo en Agencias de viajes →,Carregar em Agências de viagens →,,screens/Indicators.tsx,,translated
+"Room nights and revenue ({cur}) of the stays from {from} to {to}: before tax on website bookings; platform and manual ones as they came. Commission: what the platform sent or, if not, its % in Travel Agents.","Room nights and revenue ({cur}) of the stays from {from} to {to}: before tax on website bookings; platform and manual ones as they came. Commission: what the platform sent or, if not, its % in Travel Agents.",,"Noches e ingresos ({cur}) de las estadías del {from} al {to}: sin IVA en las de la web; las de plataforma y las manuales, tal como llegan. Comisión: la que mandó la plataforma o, si no, su % de Agencias de viajes.","Noites e receitas ({cur}) das estadias de {from} a {to}: sem impostos nas do site; as de plataforma e as manuais, tal como chegam. Comissão: a que a plataforma enviou ou, se não, a sua % de Agências de viagens.",,screens/Indicators.tsx,cur from to,translated
+"Payment and ads: from the month's figures below. Distribution cost: commission, payment and ads over the channel's revenue. Net rate: the average rate less those costs. Cancellations and no-shows: over the bookings arriving on those dates.","Payment and ads: from the month's figures below. Distribution cost: commission, payment and ads over the channel's revenue. Net rate: the average rate less those costs. Cancellations and no-shows: over the bookings arriving on those dates.",,"Cobro y anuncios: de los datos del mes de abajo. Costo de distribución: comisión, cobro y anuncios sobre los ingresos del canal. Tarifa neta: la tarifa media menos esos costos. Cancelaciones y no presentados: sobre las reservas con llegada en esas fechas.","Cobrança e anúncios: dos dados do mês abaixo. Custo de distribuição: comissão, cobrança e anúncios sobre as receitas do canal. Tarifa líquida: a tarifa média menos esses custos. Cancelamentos e não comparecimentos: sobre as reservas com chegada nessas datas.",,screens/Indicators.tsx,,translated
+Booking lead time by market,Booking lead time by market,,Anticipación por mercado,Antecedência por mercado,,screens/Indicators.tsx,,translated
+Lead time,Lead time,,Anticipación,Antecedência,,screens/Indicators.tsx,,translated
+No data,No data,,Sin dato,Sem dado,,screens/Indicators.tsx,,translated
+The country comes from the guest's phone; lead time is the average days between booking and arrival.,The country comes from the guest's phone; lead time is the average days between booking and arrival.,,"El país sale del teléfono del huésped; la anticipación son los días entre la reserva y la llegada, de media.",O país vem do telefone do hóspede; a antecedência é a média de dias entre a reserva e a chegada.,,screens/Indicators.tsx,,translated
+Outside Kamra,Outside Kamra,,Fuera de Kamra,Fora do Kamra,,screens/Indicators.tsx,,translated
+"What Booking, reviews and ads give. Entered once a month.","What Booking, reviews and ads give. Entered once a month.",,"Lo que dan Booking, las opiniones y los anuncios. Se carga una vez al mes.","O que dão o Booking, as avaliações e os anúncios. Carrega-se uma vez por mês.",,screens/Indicators.tsx,,translated
+Enter {month}'s figures,Enter {month}'s figures,,Cargar los datos de {month},Carregar os dados de {month},,screens/Indicators.tsx,month,translated
+{month} figures,{month} figures,,Datos de {month},Dados de {month},,screens/Indicators.tsx,month,translated
+What is not in Kamra. Entered once a month.,What is not in Kamra. Entered once a month.,,Lo que no está en Kamra. Se carga una vez al mes.,O que não está no Kamra. Carrega-se uma vez por mês.,,screens/Indicators.tsx,,translated
+Booking: views and conversion,Booking: views and conversion,,Booking: vistas y conversión,Booking: visualizações e conversão,,screens/Indicators.tsx,,translated
+Page views,Page views,,Vistas de la página,Visualizações da página,,screens/Indicators.tsx,,translated
+Booking bookings,Booking bookings,,Reservas de Booking,Reservas do Booking,,screens/Indicators.tsx,,translated
+in the month,in the month,,en el mes,no mês,,screens/Indicators.tsx,,translated
+Rating and number of reviews,Rating and number of reviews,,Nota y número de opiniones,Nota e número de avaliações,,screens/Indicators.tsx,,translated
+{score} of {scale},{score} of {scale},,{score} de {scale},{score} de {scale},,screens/Indicators.tsx,score scale,translated
+of {scale},of {scale},,de {scale},de {scale},,screens/Indicators.tsx,scale,translated
+not entered,not entered,,sin cargar,não carregado,,screens/Indicators.tsx,,translated
+Rating,Rating,,Nota,Nota,,screens/Indicators.tsx,,translated
+Ads (ROAS),Ads (ROAS),,Anuncios (ROAS),Anúncios (ROAS),,screens/Indicators.tsx,,translated
+Ads,Ads,,Anuncios,Anúncios,,screens/Indicators.tsx,,translated
+ROAS {n},ROAS {n},,ROAS {n},ROAS {n},,screens/Indicators.tsx,n,translated
+Spend {a},Spend {a},,Gasto {a},Gasto {a},,screens/Indicators.tsx,a,translated
+sales {b},sales {b},,ventas {b},vendas {b},,screens/Indicators.tsx,b,translated
+Name and channel,Name and channel,,Nombre y canal,Nome e canal,,screens/Indicators.tsx,,translated
+Spend,Spend,,Gasto,Gasto,,screens/Indicators.tsx,,translated
++ Add ad,+ Add ad,,+ Añadir anuncio,+ Adicionar anúncio,,screens/Indicators.tsx,,translated
+Payment cost by channel,Payment cost by channel,,Costo de cobro por canal,Custo de cobrança por canal,,screens/Indicators.tsx,,translated
+Where to look: Booking extranet → Analytics. Kamra counts the bookings.,Where to look: Booking extranet → Analytics. Kamra counts the bookings.,,Dónde se mira: extranet de Booking → Análisis. Las reservas las cuenta Kamra.,"Onde se vê: extranet do Booking → Análise. As reservas, conta o Kamra.",,screens/Indicators.tsx,,translated
+Where to look: each platform.,Where to look: each platform.,,Dónde se mira: cada plataforma.,Onde se vê: cada plataforma.,,screens/Indicators.tsx,,translated
+"Where to look: each ad's dashboard; there, every week while it runs.","Where to look: each ad's dashboard; there, every week while it runs.",,"Dónde se mira: el panel de cada anuncio; allí, cada semana mientras esté activo.","Onde se vê: o painel de cada anúncio; ali, toda semana enquanto estiver ativo.",,screens/Indicators.tsx,,translated

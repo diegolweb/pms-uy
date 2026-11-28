@@ -5,6 +5,7 @@ import { call, getCurrentProperty } from "../lib/api"
 import { serverError } from "../lib/resource"
 import { Button } from "../components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
+import PickupPace from "../components/PickupPace"
 import { cur, moneyLocale } from "../lib/money"
 import { getLang } from "../lib/dir"
 import { t as translate, useUILanguage } from "../lib/i18n"
@@ -359,6 +360,7 @@ export default function RevenueReports() {
         <h1 className="text-xl font-semibold tracking-tight">{translate("Revenue Reports")}</h1>
         <p className="mt-0.5 text-sm text-zinc-500">{translate("Targets vs performance, and where the business comes from.")}</p>
       </header>
+      <PickupPace />
       <BudgetVsActual />
       <Contribution />
     </div>

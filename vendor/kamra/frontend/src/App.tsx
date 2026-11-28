@@ -58,6 +58,7 @@ const InHouse = lazy(() => import("./screens/InHouse"))
 const RateCalendar = lazy(() => import("./screens/RateCalendar"))
 const ChannelRestrictions = lazy(() => import("./screens/ChannelRestrictions"))
 const RevenueReports = lazy(() => import("./screens/RevenueReports"))
+const Indicators = lazy(() => import("./screens/Indicators"))
 const OpsSLA = lazy(() => import("./screens/OpsSLA"))
 const Dashboard = lazy(() => import("./screens/Dashboard"))
 const Owner = lazy(() => import("./screens/Owner"))
@@ -358,6 +359,7 @@ export default function App() {
           <Route path="rate-calendar" element={<RateCalendar />} />
           <Route path="channel-restrictions" element={<ChannelRestrictions />} />
           <Route path="revenue-reports" element={<RevenueReports />} />
+          <Route path="indicators" element={<Indicators />} />
           <Route path="ops-sla" element={<OpsSLA />} />
           <Route path="whatsapp" element={<WhatsAppChat />} />
           <Route path="ota-messages" element={<OtaMessages />} />

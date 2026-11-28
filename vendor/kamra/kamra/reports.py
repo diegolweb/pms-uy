@@ -726,3 +726,62 @@ def booking_link_sources(property: str, from_date: str | None = None,
 	from kamra.settings import get_setting
 	return {"from_date": from_date, "to_date": to_date, "rows": rows,
 	        "enabled": bool(cint(get_setting(property, "booking_links")))}
+
+
+@frappe.whitelist()
+@require_perm("Property", "view_performance")
+def pickup_pace(property: str, start: str | None = None, grain: str = "week") -> dict:
+	"""Booking pace (pickup): room nights sold for each coming week or month,
+	what came in over the last 7 and 30 days, and whether each period is on
+	pace for its occupancy target. Only reads the rows; the rules live in
+	kamra.pickup_pace."""
+	from datetime import timedelta
+
+	from frappe.utils import now_datetime
+
+	from kamra import pickup_pace as pp
+	from kamra.no_show import property_now
+
+	if grain not in ("week", "month"):
+		frappe.throw("Booking pace: grain must be week or month")
+	today = property_now(property).date()
+	now = now_datetime()
+	first = getdate(start) if start else today
+	spans = pp.periods(first, grain)
+	begin, end = spans[0][0], spans[-1][1]
+
+	rows = frappe.db.sql(
+		"""
+		SELECT name, status, creation, cancelled_on, cancellation_note,
+		       check_in_date, check_out_date, source, channel
+		FROM `tabReservation`
+		WHERE property = %(property)s
+		  AND ((check_in_date < %(end)s AND check_out_date > %(begin)s) OR modified >= %(since)s)
+		""", {"property": property, "begin": begin, "end": end, "since": now - timedelta(days=30)},
+		as_dict=True)
+	stays = [pp.Stay(r.name, r.status, r.creation, r.cancelled_on, r.cancellation_note,
+	                 getdate(r.check_in_date), getdate(r.check_out_date), r.source, r.channel)
+	         for r in rows if r.check_in_date and r.check_out_date]
+
+	changes: dict[str, list] = {}
+	if stays:
+		for v in frappe.db.sql(
+			"""
+			SELECT docname, creation, data FROM `tabVersion`
+			WHERE ref_doctype = 'Reservation' AND docname IN %(names)s
+			ORDER BY creation
+			""", {"names": tuple(s.name for s in stays)}, as_dict=True):
+			changes.setdefault(v.docname, []).append(pp.Change(v.creation, v.data))
+
+	months = sorted({d.strftime("%Y-%m") for s, e in spans for d in (s, e - timedelta(days=1))})
+	targets = {
+		b.period: float(b.occupancy_target)
+		for b in frappe.get_all(
+			"Revenue Budget",
+			filters={"property": property, "period": ["in", months], "occupancy_target": [">", 0]},
+			fields=["period", "occupancy_target"])
+	}
+	rooms = frappe.db.count("Room", {"property": property}) or 0
+
+	return {"as_of": str(now)[:19], **pp.pace(stays, changes, now=now, today=today, start=first,
+	                                          grain=grain, rooms=rooms, targets=targets)}

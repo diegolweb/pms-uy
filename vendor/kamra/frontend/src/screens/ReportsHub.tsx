@@ -6,6 +6,7 @@ import {
   ClipboardCheck,
   FileSpreadsheet,
   FileX2,
+  Gauge,
   History,
   LayoutDashboard,
   MoonStar,
@@ -69,6 +70,8 @@ const SECTIONS: { title: string; items: ReportLink[] }[] = [
     items: [
       { to: "/dashboard", label: "Revenue dashboard", blurb: "Today and month to date by department, or the whole portfolio.", icon: LayoutDashboard, app: "revenue" },
       { to: "/revenue-reports", label: "Revenue reports", blurb: "Pickup, pace, source and segment mix.", icon: TrendingUp, app: "revenue" },
+      { to: "/indicators", label: "Indicators", blurb: "Occupancy, rates, channels, what is booked ahead and the figures from outside Kamra, as the marketing plan tracks them.", icon: Gauge, app: "revenue",
+        perm: ["Property", "view_performance"], roles: FIGURE_ROLES },
       { to: "/pos-dashboard", label: "F&B dashboard", blurb: "Outlet sales, covers and top items.", icon: BarChart3, app: "fnb" },
       { to: "/banquet-registers", label: "Banquet registers", blurb: "Functions, quotations, enquiries, receipts and sales.", icon: ScrollText, app: "events" },
     ],

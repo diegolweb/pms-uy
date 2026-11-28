@@ -288,7 +288,7 @@ _PROPERTY_SCOPED = (
 	"Exchange Rate",
 	"Exchange Transaction", "Experience", "External POS Charge", "Floor", "Folio", "Folio Ledger Entry",
 	"Folio Reprint", "Group Booking", "Holiday Package", "Housekeeping Task", "Hurdle Rate",
-	"Ingredient", "Ingredient Ledger Entry", "Ingredient Stock", "Kamra Custom Report", "Kamra Notification", "Kamra Notification Read", "Kitchen Printer",
+	"Indicator Month", "Ingredient", "Ingredient Ledger Entry", "Ingredient Stock", "Kamra Custom Report", "Kamra Notification", "Kamra Notification Read", "Kitchen Printer",
 	"Laundry Order", "Laundry Rate", "Lost And Found Item", "MCP OAuth Grant",
 	"Meal Plan", "Menu Item", "Night Audit Log", "Night Audit Run", "Outbound Webhook",
 	"Outbound Webhook Delivery", "Payment Gateway Settings",

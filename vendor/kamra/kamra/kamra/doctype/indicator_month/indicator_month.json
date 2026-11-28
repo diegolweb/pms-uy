@@ -1,0 +1,65 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-11-27 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "property",
+  "period",
+  "inputs"
+ ],
+ "fields": [
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Property",
+   "options": "Property",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "period",
+   "fieldtype": "Data",
+   "label": "Month (YYYY-MM)",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "e.g. 2027-01"
+  },
+  {
+   "fieldname": "inputs",
+   "fieldtype": "JSON",
+   "label": "Figures from outside Kamra",
+   "description": "Booking page views, reviews, ads and payment costs (the Indicators screen). Entered there only: kamra.indicators.save_month_inputs checks them."
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-11-27 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Kamra",
+ "name": "Indicator Month",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1
+  },
+  {
+   "role": "Revenue Manager",
+   "read": 1
+  },
+  {
+   "role": "Finance",
+   "read": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 0
+}
