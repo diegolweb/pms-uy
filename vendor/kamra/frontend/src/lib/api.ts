@@ -1940,11 +1940,14 @@ export interface ReservationDetail {
     due: number
     has_folio: boolean
     // "folio" once the stay has started or ended with a folio; "none" when
-    // a no-show / cancellation never opened one (nothing owed)
-    source?: "folio" | "booking" | "none"
+    // a no-show / cancellation never opened one (nothing owed); "ota" when
+    // the platform collected the room and the guest is not in yet (HR-380)
+    source?: "folio" | "booking" | "none" | "ota"
     /** No-show / cancelled with no folio: the advance to hand back. */
     refund_due?: number
   }
+  /** Who collects a channel booking and what is left to take or give back (HR-380); null otherwise. */
+  collection?: PlatformCollection | null
   /** Deposit before arrival (#114): expected by policy, received, still due. */
   deposit: import("../components/DepositPanel").DepositState
   /** the refundable security (damage) deposit; null if it could not be read */
@@ -2097,3 +2100,49 @@ export const setLateArrival = (reservation: string, late_arrival: boolean, eta?:
     late_arrival: late_arrival ? 1 : 0,
     ...(eta !== undefined ? { eta } : {}),
   })
+
+
+// --- who collects a channel booking (HR-380, kamra.channel_payments) ---------------------------
+
+export type PlatformCollector = "Hotel" | "Virtual card" | "OTA"
+
+/** kamra.channel_payments.collection: the reservation drawer's money notice. */
+export interface PlatformCollection {
+  collector: PlatformCollector
+  channel: string | null
+  /** YYYY-MM-DD: the first day the hotel can charge it */
+  charge_from: string | null
+  /** YYYY-MM-DD: the last day the guest cancels free on the channel's policy */
+  free_cancel_until: string | null
+  state: "ota_paid" | "to_collect" | "collected" | "refund_due" | "settled"
+  due: number
+  refund: number
+}
+
+export type PlatformCollectionState = "refund" | "no_show" | "cancelled" | "arrival" | "now" | "upcoming"
+
+export interface PlatformCollectionRow {
+  name: string
+  guest_name: string
+  channel: string | null
+  ota_ref_tail: string | null
+  status: string
+  collector: PlatformCollector
+  check_in_date: string
+  nights: number
+  charge_from: string | null
+  free_cancel_until: string | null
+  /** the refund in a "refund" row, what is due in the others */
+  amount: number
+  folio: string | null
+  state: PlatformCollectionState
+}
+
+/** kamra.channel_payments.to_collect: the manager's list on Today. */
+export interface PlatformCollections {
+  count: number
+  total: number
+  refunds: { count: number; total: number }
+  today: string
+  rows: PlatformCollectionRow[]
+}

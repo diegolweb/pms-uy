@@ -6,3 +6,4 @@
 # Patches added in this section will be executed after doctypes are migrated
 kamra_uy.patches.v1_0.quita_apertura
 kamra_uy.patches.v1_0.garantia_a_cero
+kamra_uy.patches.v1_0.cobro_plataformas

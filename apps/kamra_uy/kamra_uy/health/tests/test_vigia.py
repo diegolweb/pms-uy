@@ -131,7 +131,7 @@ class ConfigTestCase(VigiaCase):
 		cfg = vigia.config_from_env({"HR_VIGIA_URL": URL + "/"})
 		self.assertEqual(cfg.url, URL)
 		self.assertEqual((cfg.intervalo, cfg.caida_confirma, cfg.repite_min, cfg.disco_pct, cfg.gracia_min,
-		                  cfg.caida_min), (60, 3, 240, 90, 10, 2))
+		                  cfg.caida_min, cfg.resuelto_min), (60, 3, 720, 90, 10, 2, 15))
 		self.assertEqual(cfg.channels(), [])
 
 	def test_the_channels_come_from_their_variables(self):
@@ -210,17 +210,41 @@ class DecideTestCase(VigiaCase):
 		self.assertIn("programador", self.slack_texts()[0].lower())
 		self.assertIn("hace 6 min", self.slack_texts()[0])
 		self.run_at(1)
-		self.run_at(239)
+		self.run_at(719)
 		self.assertEqual(len(self.slack_texts()), 1)
-		self.run_at(240)
+		self.run_at(720)  # HR-381: SIGUE cada 12 h
 		self.assertEqual(len(self.slack_texts()), 2)
 		self.assertIn("SIGUE", self.slack_texts()[1])
 		self.net.set_signal("programador", "ok", "último latido hace 10 s")
-		self.run_at(241)
+		self.run_at(721)
+		self.run_at(735)
+		self.assertEqual(len(self.slack_texts()), 2)  # bien, pero aún no 15 min seguidos
+		self.run_at(736)
 		self.assertEqual(len(self.slack_texts()), 3)
 		self.assertIn("RESUELTO", self.slack_texts()[2])
-		self.run_at(242)
+		self.run_at(737)
 		self.assertEqual(len(self.slack_texts()), 3)
+
+	def test_the_flapping_of_the_27th_is_one_alert_and_one_resolution(self):
+		# HR-381 (el fundador, 28-11): el 27-11, las cachés de DNS daban una vuelta «ok» de 1 min entre fallos y salieron
+		# 7 parejas ALERTA/RESUELTO en 2,5 h. Ahora es un solo incidente: una ALERTA y, tras 15 min bien, un RESUELTO.
+		minute = 0
+		for _ in range(7):
+			self.net.ping = (503, b"")
+			for _ in range(20):
+				self.run_at(minute)
+				minute += 1
+			self.net.ping = (200, b'{"message":"pong"}')
+			self.run_at(minute)
+			minute += 1
+		self.net.ping = (503, b"")
+		self.run_at(minute)
+		self.net.ping = (200, b'{"message":"pong"}')
+		for _ in range(16):
+			minute += 1
+			self.run_at(minute)
+		kinds = [t.split("\n")[1].split(" · ")[0] for t in self.slack_texts()]
+		self.assertEqual(kinds, ["ALERTA", "RESUELTO"])
 
 	def test_down_needs_three_runs_in_a_row(self):
 		self.net.ping = (503, b"")
@@ -259,6 +283,29 @@ class DecideTestCase(VigiaCase):
 			self.run_at(minute)
 		self.assertEqual(len(self.slack_texts()), 2)  # revisiones y luego la caída; ningún «resuelto» de revisiones
 		self.assertNotIn("RESUELTO", " ".join(self.slack_texts()))
+
+	def test_a_deploy_window_keeps_quiet_and_alerts_after_it_if_still_down(self):
+		# HR-381: despliega.sh abre la ventana antes de parar nada; dentro, una caída no avisa (pero el vigía la mira y lo
+		# dice en su línea); si sigue caída cuando la ventana se cierra, avisa con la hora real del inicio
+		window = Path(self.cfg.estado).with_name("mantenimiento-hasta")
+		window.write_text("2026-11-21T10:30:00Z\n")
+		self.net.ping = (503, b"")
+		for minute in range(30):
+			self.run_at(minute)
+		self.assertEqual(self.slack_texts(), [])
+		self.assertIn("en mantenimiento hasta 2026-11-21T10:30:00Z", self.printed[-1])
+		window.unlink()  # la cierra el trap del despliegue: sigue caída
+		self.run_at(30)
+		self.assertEqual(len(self.slack_texts()), 1)
+		self.assertIn("ALERTA · Kamra no responde", self.slack_texts()[0])
+		self.assertIn("desde las 10:00 UTC", self.slack_texts()[0])
+		self.assertNotIn("mantenimiento", self.printed[-1])
+		window.write_text("2026-11-21T09:00:00Z\n")  # vencida: no calla nada
+		self.assertIsNone(vigia.maintenance_until(self.cfg, T0 + timedelta(minutes=31)))
+		window.write_text("2026-11-22T10:00:00Z\n")  # a más de 6 h: un fichero así no es una ventana
+		self.assertIsNone(vigia.maintenance_until(self.cfg, T0))
+		window.write_text("mañana\n")
+		self.assertIsNone(vigia.maintenance_until(self.cfg, T0))
 
 	def test_after_an_outage_the_scheduler_gets_a_grace_period(self):
 		# un despliegue: mantenimiento (503), y el programador no late hasta su primer tick (4 min) tras arrancar

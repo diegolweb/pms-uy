@@ -457,6 +457,22 @@ def _notes(rev: dict) -> str:
 	return "\n".join(line for line in lines if line)
 
 
+def _penalty_from(rooms: list) -> str | None:
+	"""When the channel starts charging a cancellation (HR-380): the earliest
+	`from` of a rooms[].meta.cancel_penalties entry with an amount, over all
+	the rooms - an ISO instant in UTC, as Channex sends it - or None."""
+	starts = []
+	for room in rooms or []:
+		for p in (room.get("meta") or {}).get("cancel_penalties") or []:
+			try:
+				charged = _amount(p.get("amount")) > 0
+			except (TypeError, ValueError):
+				continue
+			if charged and p.get("from"):
+				starts.append(str(p["from"]))
+	return min(starts) if starts else None
+
+
 def revision_events(revision: dict) -> list[dict]:
 	"""A Channex booking revision -> Kamra's normalized events.
 
@@ -482,6 +498,9 @@ def revision_events(revision: dict) -> list[dict]:
 	commission = _amount(rev.get("ota_commission"))
 	rooms_total = sum(_amount(r.get("amount")) for r in rooms)
 	notes = _notes(rev)
+	# who collects the room money and when the channel starts charging a
+	# cancellation (HR-380, kamra.channel_payments); never the card itself
+	penalty_from = _penalty_from(rooms)
 
 	out = []
 	for i, room in enumerate(rooms):
@@ -516,6 +535,9 @@ def revision_events(revision: dict) -> list[dict]:
 			"currency": rev.get("currency") or "",
 			"commission": share,
 			"notes": notes,
+			"payment_collect": rev.get("payment_collect"),
+			"payment_type": rev.get("payment_type"),
+			"penalty_from": penalty_from,
 		})
 	return out
 

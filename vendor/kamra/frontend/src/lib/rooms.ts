@@ -274,6 +274,7 @@ export const getRoomInsights = (days: number, from_date?: string, to_date?: stri
 export type WidgetId =
   | "kpis"
   | "booking_requests"
+  | "platform_collections"
   | "arrivals"
   | "departures"
   | "room_board"
@@ -299,7 +300,7 @@ export interface TodayLayoutInfo {
 /** The classic Today, used until the server answers (and if it can't). */
 export const DEFAULT_TODAY_LAYOUT: TodayLayout = {
   top: ["kpis"],
-  left: ["booking_requests", "arrivals", "departures"],
+  left: ["booking_requests", "platform_collections", "arrivals", "departures"],
   right: ["room_board", "in_house", "housekeeping", "open_tasks"],
   hidden: ["open_tasks"],
 }

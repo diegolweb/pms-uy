@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import { Link } from "react-router-dom"
 
 import { call, getCurrentProperty } from "../lib/api"
@@ -102,9 +102,9 @@ function shiftMonth(period: string, by: number) {
 function Tile(props: { label: string; value: ReactNode; sub?: ReactNode; extra?: ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col rounded-xl border border-zinc-200 bg-white p-4">
-      <span className="whitespace-nowrap text-[13px] font-medium text-zinc-500">{props.label}</span>
+      <span className="-mr-2 break-words text-[13px] font-medium text-zinc-500">{props.label}</span>
       <div className="mt-1.5 whitespace-nowrap text-2xl font-semibold tracking-tight tabular-nums text-zinc-900">{props.value}</div>
-      {props.sub != null && <div className="mt-1 whitespace-nowrap text-xs text-zinc-400">{props.sub}</div>}
+      {props.sub != null && <div className="mt-1 break-words text-xs text-zinc-400">{props.sub}</div>}
       {props.extra}
     </div>
   )
@@ -137,7 +137,7 @@ function Section(props: { title: string; sub?: string; right?: ReactNode; childr
 const H3 = ({ children }: { children: ReactNode }) => (
   <h3 className="mt-6 mb-1 whitespace-nowrap text-xs font-semibold uppercase tracking-wider text-zinc-500">{children}</h3>
 )
-const TH = "py-2 pr-3 whitespace-nowrap"
+const TH = "py-2 pr-3 whitespace-nowrap align-bottom"
 const TD = "py-2.5 pr-3 whitespace-nowrap tabular-nums"
 const Pill = () => (
   <span className="inline-block whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800 ring-1 ring-inset ring-amber-200">
@@ -160,7 +160,7 @@ const Where = ({ children }: { children: ReactNode }) => (
 function Box({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col rounded-xl border border-zinc-200 bg-white p-4">
-      <span className="whitespace-nowrap text-[13px] font-semibold text-zinc-700">{title}</span>
+      <span className="break-words text-[13px] font-semibold text-zinc-700">{title}</span>
       <div className="mt-2 flex-1 divide-y divide-zinc-100 text-sm">{children}</div>
     </div>
   )
@@ -177,7 +177,7 @@ function PaceTile() {
       .catch(() => setPace(null))
   }, [property])
   const link = (
-    <Link className="mt-1 whitespace-nowrap text-xs font-medium text-brand-700 hover:underline" to="/revenue-reports">
+    <Link className="mt-1 break-words text-xs font-medium text-brand-700 hover:underline" to="/revenue-reports">
       {translate("See the pace →")}
     </Link>
   )
@@ -221,11 +221,44 @@ function Week({ data }: { data: Data }) {
 
 // --- the month --------------------------------------------------------------------
 
+// A table that is a little too wide for its box puts its longest headers on two lines, one at a time and only as
+// many as it takes to fit; when even all of them on two lines would not do (a phone), it keeps them on one line and
+// scrolls, as before. So nothing is split where it would fit, in any language.
+function useHeadersFit(deps: unknown[]) {
+  const box = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el) return
+    const fit = () => {
+      const heads = [...el.querySelectorAll<HTMLElement>("thead th")].filter((th) => /\s/.test(th.textContent?.trim() ?? ""))
+      heads.forEach((th) => (th.style.whiteSpace = ""))
+      if (el.scrollWidth <= el.clientWidth) return
+      const text = (th: HTMLElement) => {
+        const r = document.createRange()
+        r.selectNodeContents(th)
+        return r.getBoundingClientRect().width
+      }
+      const longest = heads.map((th) => [text(th), th] as const).sort((a, b) => b[0] - a[0]).map(([, th]) => th)
+      for (const th of longest) {
+        th.style.whiteSpace = "normal"
+        if (el.scrollWidth <= el.clientWidth) return
+      }
+      heads.forEach((th) => (th.style.whiteSpace = ""))
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, deps)
+  return box
+}
+
 function ChannelTable({ data }: { data: Data }) {
   const missing = new Set(data.missing_commission)
   const tot = data.totals
+  const box = useHeadersFit([data])
   return (
-    <div className="overflow-x-auto">
+    <div ref={box} className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-zinc-200 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
@@ -238,7 +271,7 @@ function ChannelTable({ data }: { data: Data }) {
             <th className={`${TH} text-right`}>{translate("Distribution cost")}</th>
             <th className={`${TH} text-right`}>{translate("Net rate")}</th>
             <th className={`${TH} text-right`}>{translate("Cancellations")}</th>
-            <th className="py-2 whitespace-nowrap text-right">{translate("No-shows")}</th>
+            <th className="py-2 whitespace-nowrap align-bottom text-right">{translate("No-shows")}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-100">

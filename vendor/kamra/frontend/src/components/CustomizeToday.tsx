@@ -23,6 +23,7 @@ import { Button } from "./ui/button"
 export const WIDGET_LABEL: Record<WidgetId, string> = {
   kpis: "Key numbers",
   booking_requests: "Booking requests",
+  platform_collections: "Platform collections",
   arrivals: "Arrivals",
   departures: "Departures",
   room_board: "Room board",

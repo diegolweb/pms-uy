@@ -4,11 +4,14 @@ import { useRealtime } from "../lib/realtime"
 import {
   BedDouble,
   CalendarDays,
+  CircleCheck,
+  Clock,
   CreditCard,
   Fingerprint,
   FileText,
   LogIn,
   LogOut,
+  RotateCcw,
   ShieldCheck,
   Star,
   TriangleAlert,
@@ -47,9 +50,63 @@ import StayInstructions from "../components/StayInstructions"
 import OtaMessagesCard from "../components/OtaMessagesCard"
 import { cur, moneyLocale } from "../lib/money"
 import { t as translate, useUILanguage } from "../lib/i18n"
+import { momentParts } from "../lib/localDates"
+import { isoDate } from "../lib/stay"
+import type { PlatformCollection } from "../lib/api"
 
 const inr = (n: number) =>
   `${cur()}` + Number(n || 0).toLocaleString(moneyLocale(), { maximumFractionDigits: 0 })
+
+/** Who collects a channel booking and what is left to take or give back (HR-380): the notice under the money. */
+function CollectionNotice({ c, lang }: { c: PlatformCollection; lang: string }) {
+  const channel = c.channel || translate("The OTA")
+  const day = (v: string | null) => (v ? momentParts(v, lang)?.date ?? v : "")
+  // the channel's free cancellation, while it lasts: a cancel by then gets the money back
+  const freeCancel = c.free_cancel_until && c.free_cancel_until >= isoDate(new Date())
+    ? translate("If the guest cancels by {date}, it is refunded.", { date: day(c.free_cancel_until) })
+    : null
+  let tone = "", icon: React.ReactNode = null, title = "", line: string | null = null
+  if (c.state === "ota_paid") {
+    tone = "border-emerald-200 bg-emerald-50 text-emerald-900"
+    icon = <CircleCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
+    title = translate("Paid by {channel}", { channel })
+    line = translate("The guest paid {channel}; {channel} pays the hotel.", { channel })
+  } else if (c.state === "to_collect" && c.collector === "Virtual card") {
+    tone = "border-amber-200 bg-amber-50 text-amber-900"
+    icon = <Clock className="mt-0.5 size-4 shrink-0" aria-hidden />
+    title = translate("To collect: {channel}'s virtual card, from {date}", { channel, date: day(c.charge_from) })
+    line = translate("The guest paid {channel}. Charge the virtual card, not the guest.", { channel })
+  } else if (c.state === "to_collect") {
+    tone = "border-amber-200 bg-amber-50 text-amber-900"
+    icon = <Clock className="mt-0.5 size-4 shrink-0" aria-hidden />
+    title = translate("To collect: the hotel collects it")
+    line = [translate("Collect it now."), freeCancel].filter(Boolean).join(" ")
+  } else if (c.state === "collected") {
+    tone = "border-emerald-200 bg-emerald-50 text-emerald-900"
+    icon = <CircleCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
+    title = translate("Collected by the hotel")
+    line = freeCancel
+  } else if (c.state === "refund_due") {
+    tone = "border-sky-200 bg-sky-50 text-sky-900"
+    icon = <RotateCcw className="mt-0.5 size-4 shrink-0" aria-hidden />
+    title = c.collector === "Virtual card"
+      ? translate("To refund: {amount} to {channel}", { amount: inr(c.refund), channel })
+      : translate("To refund: {amount} to the guest", { amount: inr(c.refund) })
+    line = translate("Cancelled with credit. Refund it from the folio, by the same means it was charged.")
+  } else {
+    return null
+  }
+  const lineTone = tone.includes("emerald") ? "text-emerald-800" : tone.includes("amber") ? "text-amber-800" : "text-sky-800"
+  return (
+    <div className={"mt-3 flex items-start gap-2.5 rounded-lg border px-3 py-2.5 " + tone}>
+      {icon}
+      <div>
+        <p className="text-sm font-semibold">{title}</p>
+        {line && <p className={"mt-0.5 text-xs " + lineTone}>{line}</p>}
+      </div>
+    </div>
+  )
+}
 
 const STATUS_TONE: Record<string, string> = {
   Waitlist: "bg-amber-100 text-amber-800",
@@ -193,7 +250,7 @@ export default function ReservationDetail({
   reload: () => void
   onClose: () => void
 }) {
-  useUILanguage()
+  const uiLang = useUILanguage()
   const name = String(row.name)
   const [d, setD] = useState<Detail | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -306,6 +363,7 @@ export default function ReservationDetail({
 
   const datesChanged = ci !== d.check_in_date || co !== d.check_out_date
   const money = d.money
+  const lang = uiLang
 
   return (
     <div className="space-y-4">
@@ -378,11 +436,16 @@ export default function ReservationDetail({
             </div>
           </div>
         </div>
+        {d.collection && <CollectionNotice c={d.collection} lang={lang} />}
         {Number(money.refund_due ?? 0) > 0 && (
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{translate("Refund due: ")}<span className="font-semibold">{inr(money.refund_due ?? 0)}</span>{" "}{translate("- the advance taken at booking, with no folio or fee against it.")}</div>
         )}
         <p className="mt-2 text-xs text-zinc-400">
-          {money.source === "folio"
+          {d.collection?.state === "ota_paid"
+            ? translate("The room is not charged to the guest; extras are. At check-in, Kamra records {channel}'s payment on the folio.", {
+                channel: d.collection.channel || translate("The OTA"),
+              })
+            : money.source === "folio"
             ? translate("Live from the guest folio.")
             : money.source === "none"
               ? translate("The booking ended without a stay - nothing is owed.")
@@ -394,7 +457,7 @@ export default function ReservationDetail({
         </p>
       </Card>
 
-      {d.deposit && (d.deposit.can_take || d.deposit.paid > 0) && (
+      {d.deposit && (d.deposit.can_take || d.deposit.paid > 0) && d.collection?.state !== "ota_paid" && (
         <DepositPanel
           reservation={d.name}
           deposit={d.deposit}

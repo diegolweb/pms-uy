@@ -240,6 +240,12 @@ def _billing(res) -> dict:
 		"group_master_folio": master,
 		"stay_total": total, "advance_paid": paid, "balance_due": balance,
 		"options": list(PAYERS),
+		# who collects a channel booking (HR-380, kamra.channel_payments):
+		# is_pay_at_hotel follows it, so the payer above already does
+		"collector": res.get("ota_collect") or None,
+		"charge_from": str(res.ota_charge_from) if res.get("ota_charge_from") else None,
+		"free_cancel_until": str(res.ota_free_cancel_until)
+		if res.get("ota_free_cancel_until") else None,
 	}
 
 

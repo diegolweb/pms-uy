@@ -27,6 +27,7 @@ PROPERTY_KEY = "today_layout"
 WIDGETS = {
 	"kpis": "top",
 	"booking_requests": "left",
+	"platform_collections": "left",
 	"arrivals": "left",
 	"departures": "left",
 	"room_board": "right",
@@ -40,7 +41,7 @@ COLUMNS = ("top", "left", "right")
 # Open tasks is new, so it starts hidden.
 DEFAULT_LAYOUT = {
 	"top": ["kpis"],
-	"left": ["booking_requests", "arrivals", "departures"],
+	"left": ["booking_requests", "platform_collections", "arrivals", "departures"],
 	"right": ["room_board", "in_house", "housekeeping", "open_tasks"],
 	"hidden": ["open_tasks"],
 }

@@ -423,6 +423,74 @@ class ChannexFeedTestCase(_ChannexConnectionMixin, IntegrationTestCase):
 		self.assertEqual(self.row(rev).status, "Failed")
 		self.assertIn("rt-nobody-mapped", self.row(rev).last_error)
 
+	# ── HR-382: an Airbnb listing of the host's own account leaves no trace ──
+
+	def airbnb(self, status="new", room_type_id=None, **kw) -> dict:
+		"""An Airbnb revision as Channex sends it: a code like "HM…", no
+		payment data, and room_type_id null when the listing is not mapped."""
+		rev = self.rev(code="HM" + frappe.generate_hash(length=8).upper(), status=status,
+		               ota_name="Airbnb", payment_collect=None, payment_type=None, **kw)
+		rev["unique_id"] = "ABB-" + rev["ota_reservation_code"]
+		rev["rooms"][0]["room_type_id"] = room_type_id
+		rev["rooms"][0]["rate_plan_id"] = "rp-std" if room_type_id else None
+		return rev
+
+	def stay(self, code, channel="Airbnb") -> str:
+		"""A stay keyed from the sheet with the platform's code (RES-2026-00004's case)."""
+		guest = frappe.get_doc({"doctype": "Guest", "first_name": "Planilla"}).insert(ignore_permissions=True).name
+		return frappe.get_doc({"doctype": "Reservation", "property": self.property,
+			"room_type": self.room_type, "guest": guest, "status": "Confirmed",
+			"source": "OTA", "channel": channel, "ota_ref": code,
+			"check_in_date": add_days(nowdate(), 20), "check_out_date": add_days(nowdate(), 22),
+			"adults": 2}).insert(ignore_permissions=True).name
+
+	def assert_no_trace(self, rev, errors_before):
+		code, mail = rev["ota_reservation_code"], rev["customer"]["mail"]
+		self.assertEqual(self.reservations(code), [])
+		self.assertEqual(frappe.db.count("Guest", {"email": mail}), 0)
+		self.assertFalse(frappe.db.exists("Channel Booking Revision", rev["id"]))
+		self.assertEqual(frappe.db.count("Error Log"), errors_before)
+
+	def test_an_unmapped_airbnb_listing_is_acked_with_no_trace(self):
+		for status in ("new", "cancelled"):  # (f1) and (f2)
+			rev = self.airbnb(status=status)
+			self.fake.serve(rev)
+			before, acks = frappe.db.count("Error Log"), len(self.fake.acks())
+			logger = frappe.logger("kamra.channex")
+			with patch.object(logger, "info") as info:
+				out = self.pull()
+			self.assertEqual(out, {"acked": 0, "failed": 0, "skipped": 0, "ignored": 1}, status)
+			self.assertEqual(self.fake.acks()[acks:], [rev["id"]], status)
+			self.assert_no_trace(rev, before)
+			logged = " ".join(str(c) for c in info.call_args_list)
+			self.assertIn(rev["id"][:8], logged)
+			for secret in (rev["ota_reservation_code"], rev["customer"]["mail"], "Ana", "Prueba"):
+				self.assertNotIn(secret, logged, status)
+
+	def test_a_booking_com_revision_with_no_room_still_fails_unacked(self):  # (f3)
+		rev = self.rev(ota_name="BookingCom")
+		rev["rooms"][0]["room_type_id"] = None
+		self.fake.serve(rev)
+		self.assertEqual(self.pull(), {"acked": 0, "failed": 1, "skipped": 0})
+		self.assertEqual(self.fake.acks(), [])
+		self.assertEqual(self.row(rev).status, "Failed")
+
+	def test_a_hotel_airbnb_booking_moved_to_an_unmapped_listing_still_fails(self):  # (f4)
+		rev = self.airbnb(status="modified")
+		self.stay(rev["ota_reservation_code"])
+		self.fake.serve(rev)
+		self.assertEqual(self.pull(), {"acked": 0, "failed": 1, "skipped": 0})
+		self.assertEqual(self.fake.acks(), [])
+		self.assertEqual(self.row(rev).status, "Failed")
+
+	def test_a_mapped_airbnb_booking_already_on_the_sheet_is_not_duplicated(self):  # (f5)
+		rev = self.airbnb(room_type_id="rt-std")
+		res = self.stay(rev["ota_reservation_code"])
+		self.fake.serve(rev)
+		self.assertEqual(self.pull(), {"acked": 1, "failed": 0, "skipped": 0})
+		self.assertEqual(json.loads(self.row(rev).results)[0]["result"], "duplicate_ignored")
+		self.assertEqual([r.name for r in self.reservations(rev["ota_reservation_code"])], [res])
+
 	def test_new_modified_cancelled_in_one_pass_in_order(self):
 		code = "UT-SEQ-" + frappe.generate_hash(length=6)
 		new, mod, cancel = self.rev(code=code), self.rev(code=code, status="modified", nights=2), \
@@ -654,18 +722,20 @@ class ChannexWebhookTestCase(_ChannexConnectionMixin, IntegrationTestCase):
 		self.assertEqual(out, {"ok": True, "ignored": "other_property"})
 		enqueue.assert_not_called()
 
-	def test_unmapped_room_event_enqueues_and_logs_without_guest_data(self):
-		body = self.signal("booking_unmapped_room")
-		body["payload"] = {"booking_revision_id": "r-1", "property_id": "prop-ut",
-			"customer": {"name": "Ana", "mail": "ana-unmapped@example.test"}}
-		with patch("frappe.enqueue") as enqueue:
-			out = self.post(body, {"X-Webhook-Secret": "ut-secret"})
-		self.assertEqual(out, {"ok": True, "queued": True})
-		self.assertEqual(enqueue.call_count, 1)
-		logs = frappe.get_all("Error Log", filters={"method": f"Channex unmapped {self.conn.name}"},
-			fields=["error"], order_by="creation desc", limit=1)
-		self.assertTrue(logs)
-		self.assertNotIn("ana-unmapped@example.test", logs[0].error)
+	def test_unmapped_room_event_only_enqueues(self):  # (f6, HR-382)
+		# no Error Log: a hotel room nobody mapped fails its revision (and the
+		# health check says so); a host's own Airbnb listing must say nothing
+		for event in ("booking_unmapped_room", "booking_unmapped_rate"):
+			body = self.signal(event)
+			body["payload"] = {"booking_revision_id": "r-1", "property_id": "prop-ut",
+				"customer": {"name": "Ana", "mail": "ana-unmapped@example.test"}}
+			before = frappe.db.count("Error Log")
+			with patch("frappe.enqueue") as enqueue:
+				out = self.post(body, {"X-Webhook-Secret": "ut-secret"})
+			self.assertEqual(out, {"ok": True, "queued": True}, event)
+			self.assertEqual(enqueue.call_count, 1, event)
+			self.assertEqual(enqueue.call_args.args[0], "kamra.channel_manager.pull_feed", event)
+			self.assertEqual(frappe.db.count("Error Log"), before, event)
 
 	def signed(self, secret, raw, ts=None):
 		ts = ts or str(int(time.time()))

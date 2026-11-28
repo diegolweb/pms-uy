@@ -5,6 +5,7 @@ import {
   CircleCheck,
   KeyRound,
   Loader2,
+  TriangleAlert,
   MessageCircle,
   Printer,
   Star,
@@ -15,6 +16,7 @@ import { listResource, serverError } from "../lib/resource"
 import { toFullPath } from "../lib/routing"
 import { fmtMoney, sellsAlcohol } from "../lib/money"
 import { useT, t as translateUI, useUILanguage } from "../lib/i18n"
+import { momentParts } from "../lib/localDates"
 import { cn } from "../lib/utils"
 import { Button } from "./ui/button"
 import { Badge } from "./ui/badge"
@@ -133,6 +135,11 @@ interface Flow {
     advance_paid: number
     balance_due: number
     options: string[]
+    /** who collects a channel booking (HR-380): the hotel, the platform's virtual card, or the platform */
+    collector?: "Hotel" | "Virtual card" | "OTA" | null
+    /** the first day the hotel can charge it (YYYY-MM-DD) */
+    charge_from?: string | null
+    free_cancel_until?: string | null
   }
   room: {
     room: string | null
@@ -313,7 +320,7 @@ export default function CheckInDialog(props: {
   onDone: () => void
   onClose: () => void
 }) {
-  const { t } = useT()
+  const { t, lang } = useT()
   const [flow, setFlow] = useState<Flow | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1036,10 +1043,31 @@ export default function CheckInDialog(props: {
                   {sellsAlcohol() && <p className="mt-1 text-xs text-zinc-400">{t("Alcohol is always paid by the guest.")}</p>}
                 </div>
               )}
+              {payer === "OTA, guest pays here" && flow.billing.balance_due > 0 && (
+                <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-amber-900">
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+                  <div>
+                    <p className="text-sm font-semibold">{t("Not charged before arrival")}</p>
+                    <p className="mt-0.5 text-sm text-amber-800">
+                      {t("Charge the guest for the stay by card and record it in “Record payment”.")}
+                    </p>
+                  </div>
+                </div>
+              )}
               {payer === "OTA prepaid" && (
-                <p className="text-sm text-zinc-600">
-                  {t("Do not take money for the room. Extras are paid by the guest.")}
-                </p>
+                <div className="space-y-1">
+                  <p className="text-sm text-zinc-600">
+                    {t("Do not take money for the room. Extras are paid by the guest.")}
+                  </p>
+                  {flow.billing.collector === "Virtual card" && flow.billing.charge_from && (
+                    <p className="text-sm text-zinc-600">
+                      {t("{channel} collected from the guest. The hotel charges its virtual card from {date}: do not take money for the room.", {
+                        channel: flow.billing.channel || t("The OTA"),
+                        date: momentParts(flow.billing.charge_from, lang)?.date ?? flow.billing.charge_from,
+                      })}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           )}

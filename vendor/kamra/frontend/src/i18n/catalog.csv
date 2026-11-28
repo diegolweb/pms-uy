@@ -4544,8 +4544,8 @@ Orders by status,Orders by status,الطلبات حسب الحالة,Pedidos por
 Orders history,Orders history,سجل الطلبات,Historial de pedidos,Histórico de pedidos,订单历史,screens/pos/PosSidePanel.tsx,,translated
 OTA,OTA,OTA,OTA,OTA,OTA,components/BookingRequests.tsx; screens/InHouse.tsx; screens/TapeChart.tsx; screens/Today.tsx,,translated
 OTA booking ref,OTA booking ref,مرجع حجز OTA,Ref. de reserva OTA,Ref. da reserva na OTA,OTA 预订号,components/BookingDialog.tsx,,translated
-"OTA booking, guest pays here","OTA booking, guest pays here",حجز عبر وكالة، والضيف يدفع هنا,"Reserva OTA, el huésped paga aquí","Reserva OTA, o hóspede paga aqui",OTA 预订，宾客现场支付,components/CheckInDialog.tsx,,translated
-OTA has paid the room,OTA has paid the room,وكالة الحجز دفعت ثمن الغرفة,OTA ha pagado la habitación,A OTA pagou o quarto,OTA 已支付房费,components/CheckInDialog.tsx,,translated
+"OTA booking, guest pays here","OTA booking, guest pays here",حجز عبر وكالة، والضيف يدفع هنا,La cobra el hotel,O hotel cobra,OTA 预订，宾客现场支付,components/CheckInDialog.tsx,,translated
+OTA has paid the room,OTA has paid the room,وكالة الحجز دفعت ثمن الغرفة,La plataforma ya la cobró,A plataforma já cobrou,OTA 已支付房费,components/CheckInDialog.tsx,,translated
 OTA prepaid,OTA prepaid,OTA مدفوع مسبقا,Agencia en línea: prepago,OTA pré-paga,OTA 预付,,,translated
 OTA Room Mappings,OTA Room Mappings,ربط غرف OTA,Correspondencia de tipos de habitación con agencias en línea,Mapeamentos de quartos OTA,OTA 房型映射,,,translated
 "OTA, guest pays here","OTA, guest pays here",OTA، يدفع الضيف هنا,Agencia en línea: el huésped paga aquí,"OTA, hóspede paga aqui",OTA，宾客现场支付,,,translated
@@ -7242,3 +7242,35 @@ Payment cost by channel,Payment cost by channel,,Costo de cobro por canal,Custo 
 Where to look: Booking extranet → Analytics. Kamra counts the bookings.,Where to look: Booking extranet → Analytics. Kamra counts the bookings.,,Dónde se mira: extranet de Booking → Análisis. Las reservas las cuenta Kamra.,"Onde se vê: extranet do Booking → Análise. As reservas, conta o Kamra.",,screens/Indicators.tsx,,translated
 Where to look: each platform.,Where to look: each platform.,,Dónde se mira: cada plataforma.,Onde se vê: cada plataforma.,,screens/Indicators.tsx,,translated
 "Where to look: each ad's dashboard; there, every week while it runs.","Where to look: each ad's dashboard; there, every week while it runs.",,"Dónde se mira: el panel de cada anuncio; allí, cada semana mientras esté activo.","Onde se vê: o painel de cada anúncio; ali, toda semana enquanto estiver ativo.",,screens/Indicators.tsx,,translated
+Platform collections,Platform collections,,Cobros de las plataformas,Cobranças das plataformas,,components/PlatformCollections.tsx; components/CustomizeToday.tsx,,translated
+{n} to collect: {amount}. The hotel collects them.,{n} to collect: {amount}. The hotel collects them.,,{n} por cobrar: {amount}. Las cobra el hotel.,{n} a cobrar: {amount}. O hotel cobra.,,components/PlatformCollections.tsx,n amount,translated
+{n} to refund: {amount}.,{n} to refund: {amount}.,,{n} por devolver: {amount}.,{n} a devolver: {amount}.,,components/PlatformCollections.tsx,n amount,translated
+To refund,To refund,,Por devolver,A devolver,,components/PlatformCollections.tsx,,translated
+Did not show,Did not show,,No se presentó,Não compareceu,,components/PlatformCollections.tsx,,translated
+Cancelled late,Cancelled late,,Cancelada fuera de plazo,Cancelada fora do prazo,,components/PlatformCollections.tsx,,translated
+Arrives unpaid,Arrives unpaid,,Llega sin cobrar,Chega sem cobrar,,components/PlatformCollections.tsx,,translated
+Charge now,Charge now,,Cobrar ya,Cobrar já,,components/PlatformCollections.tsx,,translated
+From {date},From {date},,Desde {date},A partir de {date},,components/PlatformCollections.tsx,date,translated
+arrives {date} · {n} night,arrives {date} · {n} night,,llega {date} · {n} noche,chega {date} · {n} noite,,components/PlatformCollections.tsx,date n,translated
+arrives {date} · {n} nights,arrives {date} · {n} nights,,llega {date} · {n} noches,chega {date} · {n} noites,,components/PlatformCollections.tsx,date n,translated
+virtual card,virtual card,,tarjeta virtual,cartão virtual,,components/PlatformCollections.tsx,,translated
+policy fee,policy fee,,cargo de la política,taxa da política,,components/PlatformCollections.tsx,,translated
+cancelled with credit,cancelled with credit,,cancelada con saldo a favor,cancelada com saldo a favor,,components/PlatformCollections.tsx,,translated
+Refund it,Refund it,,Devolver,Devolver,,components/PlatformCollections.tsx,,translated
+{n} more.,{n} more.,,{n} más.,Mais {n}.,,components/PlatformCollections.tsx,n,translated
+Show all,Show all,,Ver todas,Ver todas,,components/PlatformCollections.tsx,,translated
+To collect: the hotel collects it,To collect: the hotel collects it,,Por cobrar: la cobra el hotel,A cobrar: o hotel cobra,,screens/ReservationDetail.tsx,,translated
+Collect it now.,Collect it now.,,Se cobra ya.,Cobra-se já.,,screens/ReservationDetail.tsx,,translated
+"If the guest cancels by {date}, it is refunded.","If the guest cancels by {date}, it is refunded.",,"Si cancela hasta el {date}, se le devuelve.","Se cancelar até {date}, é devolvido.",,screens/ReservationDetail.tsx,date,translated
+"To collect: {channel}'s virtual card, from {date}","To collect: {channel}'s virtual card, from {date}",,"Por cobrar: la tarjeta virtual de {channel}, desde el {date}","A cobrar: o cartão virtual da {channel}, a partir de {date}",,screens/ReservationDetail.tsx,channel date,translated
+"The guest paid {channel}. Charge the virtual card, not the guest.","The guest paid {channel}. Charge the virtual card, not the guest.",,"El huésped le pagó a {channel}. Se cobra la tarjeta virtual, no al huésped.","O hóspede pagou à {channel}. Cobra-se o cartão virtual, não o hóspede.",,screens/ReservationDetail.tsx,channel,translated
+Paid by {channel},Paid by {channel},,Pagada por {channel},Paga pela {channel},,screens/ReservationDetail.tsx,channel,translated
+The guest paid {channel}; {channel} pays the hotel.,The guest paid {channel}; {channel} pays the hotel.,,El huésped le pagó a {channel}; {channel} le paga al hotel.,O hóspede pagou à {channel}; a {channel} paga ao hotel.,,screens/ReservationDetail.tsx,channel,translated
+"The room is not charged to the guest; extras are. At check-in, Kamra records {channel}'s payment on the folio.","The room is not charged to the guest; extras are. At check-in, Kamra records {channel}'s payment on the folio.",,"No se le cobra la habitación; los extras, sí. En el check-in, Kamra apunta el pago de {channel} en el folio.","O quarto não é cobrado do hóspede; os extras, sim. No check-in, o Kamra registra o pagamento da {channel} no fólio.",,screens/ReservationDetail.tsx,channel,translated
+Collected by the hotel,Collected by the hotel,,Cobrada por el hotel,Cobrada pelo hotel,,screens/ReservationDetail.tsx,,translated
+To refund: {amount} to the guest,To refund: {amount} to the guest,,Por devolver: {amount} al huésped,A devolver: {amount} ao hóspede,,screens/ReservationDetail.tsx,amount,translated
+To refund: {amount} to {channel},To refund: {amount} to {channel},,Por devolver: {amount} a {channel},A devolver: {amount} à {channel},,screens/ReservationDetail.tsx,amount channel,translated
+"Cancelled with credit. Refund it from the folio, by the same means it was charged.","Cancelled with credit. Refund it from the folio, by the same means it was charged.",,"Cancelada con saldo a favor. Se devuelve desde el folio, por el mismo medio con que se cobró.","Cancelada com saldo a favor. Devolve-se pelo fólio, pelo mesmo meio da cobrança.",,screens/ReservationDetail.tsx,,translated
+Not charged before arrival,Not charged before arrival,,No se cobró antes de la llegada,Não foi cobrada antes da chegada,,components/CheckInDialog.tsx,,translated
+Charge the guest for the stay by card and record it in “Record payment”.,Charge the guest for the stay by card and record it in “Record payment”.,,Cóbrale la estadía al huésped con tarjeta y apúntala en «Registrar pago».,Cobre a estadia do hóspede com cartão e registre em «Registrar pagamento».,,components/CheckInDialog.tsx,,translated
+{channel} collected from the guest. The hotel charges its virtual card from {date}: do not take money for the room.,{channel} collected from the guest. The hotel charges its virtual card from {date}: do not take money for the room.,,{channel} le cobró al huésped. El hotel cobra su tarjeta virtual desde el {date}: no aceptes dinero por la habitación.,A {channel} cobrou do hóspede. O hotel cobra o cartão virtual a partir de {date}: não aceite dinheiro pelo quarto.,,components/CheckInDialog.tsx,channel date,translated

@@ -160,7 +160,11 @@ def _sync_thread(conn, item: dict, quiet: bool) -> bool:
 	sender = last.get("sender") if last.get("sender") in SENDERS else ""
 	count = cint(attrs.get("message_count"))
 	booking_id = channex._related_id(item, "booking")
-	existing = frappe.db.get_value(DT, tid, _FIELDS + ["property", "notified_count"], as_dict=True)
+	if str(attrs.get("provider") or "") == "AirBNB":
+		reservation = _reservation_for(conn.name, booking_id) if booking_id else None
+		if not reservation:
+			return False  # not positively a hotel stay (a host's own listing, or an inquiry): never indexed
+	existing =frappe.db.get_value(DT, tid, _FIELDS + ["property", "notified_count"], as_dict=True)
 	if existing and existing.property != conn.property:
 		return False  # another hotel's thread id: never moved across properties
 
@@ -292,7 +296,14 @@ def _live(conn) -> dict:
 	except Exception:
 		return {"off": False, "previews": {}}  # the index still lists; no previews this time
 	else:
-		live = {"off": False, "previews": {str(r.get("id")): _preview(r) for r in rows}}
+		# an Airbnb thread's text is cached only when the index holds it (a
+		# hotel stay): a host's own listing, or an inquiry, leaves nothing here
+		airbnb = {str(r.get("id")) for r in rows
+		          if str((r.get("attributes") or {}).get("provider") or "") == "AirBNB"}
+		indexed = set(frappe.get_all(DT, filters={"connection": conn.name, "name": ("in", list(airbnb))},
+		                             pluck="name")) if airbnb else set()
+		live = {"off": False, "previews": {str(r.get("id")): _preview(r) for r in rows
+		                                   if str(r.get("id")) not in airbnb or str(r.get("id")) in indexed}}
 		if frappe.cache.get_value(_OFF.format(connection=conn.name)) == "messaging_off":
 			# the app was installed meanwhile: the index catches up now
 			frappe.cache.delete_value(_OFF.format(connection=conn.name))

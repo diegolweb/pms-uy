@@ -39,6 +39,7 @@ import type { ShellContext } from "../AppShell"
 import CheckInDialog from "../components/CheckInDialog"
 import NoShowDialog from "../components/NoShowDialog"
 import BookingRequests from "../components/BookingRequests"
+import PlatformCollections from "../components/PlatformCollections"
 import { serverError } from "../lib/resource"
 import { cur, moneyLocale } from "../lib/money"
 import { useT, t as translate, uiDateLocale } from "../lib/i18n"
@@ -1008,6 +1009,7 @@ export default function Today() {
       </div>
     ),
     booking_requests: <BookingRequests refreshKey={refreshKey} onChanged={refresh} />,
+    platform_collections: <PlatformCollections refreshKey={refreshKey} />,
     arrivals: (
       <Card>
         <CardHeader>

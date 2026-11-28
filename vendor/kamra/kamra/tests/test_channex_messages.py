@@ -168,6 +168,43 @@ class ChannexMessagesTestCase(_ChannexConnectionMixin, IntegrationTestCase):
 				cmsg.reply(property=self.property, thread=self.th("otro"), text="Hola")
 		self.assertEqual(len([c for c in self.fake.calls if c[0] == "POST"]), 1)
 
+	# ── HR-382: an Airbnb thread enters the index only as a hotel stay ──
+
+	def test_an_airbnb_thread_not_positively_a_hotel_stay_leaves_no_trace(self):  # (m1)
+		self.fake.thread(self.th("bdc"), count=1)  # a Booking thread: the next pass is not the quiet one
+		self.pull()
+		# a Channex booking whose revision never applied (a host's own listing)
+		frappe.get_doc({"doctype": "Channel Booking Revision", "revision_id": "rev-" + self.th("bk-casa"),
+			"connection": self.conn.name, "booking_id": self.th("bk-casa"), "status": "Failed"}).insert(
+			ignore_permissions=True)
+		self.fake.thread(self.th("casa"), count=2, provider="AirBNB", booking=self.th("bk-casa"))
+		self.fake.thread(self.th("consulta"), count=1, provider="AirBNB")  # an inquiry: no booking
+		calls = len(self.fake.calls)
+		self.assertEqual(self.pull()["rang"], 0)
+		for n in ("casa", "consulta"):
+			self.assertFalse(frappe.db.exists(cmsg.DT, self.th(n)), n)
+		self.assertEqual(self.bells(), [])
+		self.assertEqual({(c[0], c[1]) for c in self.fake.calls[calls:]}, {("GET", "message_threads")})
+		# the desk lists and caches only the hotel's thread
+		with patch.object(channex, "_request", side_effect=self.fake):
+			out = cmsg.threads(property=self.property)
+		self.assertEqual([t["thread"] for t in out["threads"]], [self.th("bdc")])
+		cached = frappe.cache.get_value(cmsg._LIVE.format(connection=self.conn.name))
+		self.assertEqual(set(cached["previews"]), {self.th("bdc")})
+		self.assertEqual({(c[0], c[1]) for c in self.fake.calls[calls:]}, {("GET", "message_threads")})
+
+	def test_an_airbnb_thread_of_an_applied_booking_is_indexed_and_rings_once(self):  # (m2)
+		self.fake.thread(self.th("bdc"), count=1)
+		self.pull()
+		res = self.booked(self.th("bk"))
+		self.fake.thread(self.th("abb"), count=1, provider="AirBNB", booking=self.th("bk"))
+		self.assertEqual(self.pull()["rang"], 1)
+		self.assertEqual(self.pull()["rang"], 0)
+		row = frappe.get_doc(cmsg.DT, self.th("abb"))
+		self.assertEqual((row.reservation, row.provider, row.property), (res, "AirBNB", self.property))
+		guest = frappe.db.get_value("Reservation", res, "guest_name")
+		self.assertEqual([b.subject for b in self.bells()], [f"New message from Airbnb: {guest}"])
+
 	def test_message_webhook_without_data_queues_the_pull(self):
 		from kamra.tests.test_channex_feed import ChannexWebhookTestCase
 		for event in ("message", "message_thread_booking_assigned"):

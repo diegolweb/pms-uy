@@ -878,6 +878,9 @@ def _deposit_state(res) -> dict:
 	arrival, and any link already out with the guest."""
 	total = float(res.amount_after_tax or 0)
 	pct, expected = _deposit_terms(res, total)
+	if res.get("ota_collect") == "OTA":
+		# the platform collected the room (HR-380): nothing to secure here
+		expected = 0.0
 	paid = float(res.advance_paid or 0)
 	link = frappe.db.get_value(
 		"Folio", {"reservation": res.name, "folio_type": "Guest"},
@@ -2065,11 +2068,13 @@ def _refund_folio_payment(folio: str, amount: float, mode: str, reason: str,
 
 def _prearrival_advance_refund_ledger(doc) -> str | None:
 	"""Deposit when a pre-arrival Advance is still held there; else None
-	(record_payment_ledger defaults Refund → Guest)."""
+	(record_payment_ledger defaults Refund → Guest). A cancelled stay too
+	(HR-380): its advance never reached Guest unless a policy fee moved it
+	(post_policy_fee), so giving it back releases Deposit and advance_paid."""
 	if not doc.reservation:
 		return None
 	status = frappe.db.get_value("Reservation", doc.reservation, "status")
-	if status not in ("Confirmed", "Held", "Pending Payment", "Waitlist"):
+	if status not in ("Confirmed", "Held", "Pending Payment", "Waitlist", "Cancelled"):
 		return None
 	held = float(frappe.db.sql(
 		"""SELECT COALESCE(SUM(credit - debit), 0)
@@ -4188,14 +4193,18 @@ def _stay_balances(names: list) -> dict:
 	  is a refund due.
 	- Confirmed with an early deposit folio: the booking total is the bill,
 	  the folio holds what was paid.
-	- Confirmed with no folio: the booking-time advance is all we know."""
+	- Confirmed with no folio: the booking-time advance is all we know.
+	- A channel booking the platform collected (ota_collect "OTA", HR-380),
+	  before it is checked in: paid in full to the platform, nothing due
+	  here. In house, its folio is the bill (the check-in posts the
+	  platform's payment on it)."""
 	names = list({n for n in names if n})
 	if not names:
 		return {}
 	resv = {r.name: r for r in frappe.get_all(
 		"Reservation", filters={"name": ("in", names)},
 		fields=["name", "status", "amount_after_tax", "advance_paid",
-		        "check_out_date"])}
+		        "check_out_date", "ota_collect"])}
 	folios = _guest_folio_sums(names)
 	# A guest due out has nights the night audit has not posted yet;
 	# check-out posts them before it counts what is owed, so the board does
@@ -4220,6 +4229,9 @@ def _stay_balances(names: list) -> dict:
 			     "source": "none"}
 			if adv > 0:
 				m["refund_due"] = adv
+		elif res.ota_collect == "OTA":
+			m = {"total": total_booked, "paid": total_booked, "due": 0.0,
+			     "has_folio": bool(folio), "source": "ota"}
 		elif folio:
 			paid = float(folio.paid)
 			m = {"total": total_booked, "paid": paid,
@@ -4551,6 +4563,7 @@ def reservation_detail(reservation: str):
 				"check_out_date", order_by="check_out_date desc")
 			guest = g
 
+	from kamra.channel_payments import collection
 	money = _stay_balance(res.name)
 	# the drawer's "Open folio" link - the newest guest folio (a
 	# part-settled stay has several; the fresh one is the open one)
@@ -4651,6 +4664,9 @@ def reservation_detail(reservation: str):
 		"travel_agent": res.travel_agent,
 		"folio_name": folio.name if folio else None,
 		"money": money,
+		# who collects a channel booking and what is left to take or give
+		# back (HR-380); None for any other booking
+		"collection": collection(res, money),
 		"deposit": _deposit_state(res),
 		"security_deposit": _security_deposit_state(res),
 		"guest": guest,
@@ -4909,6 +4925,11 @@ def check_in(reservation: str, room: str | None = None,
 		doc.room = room
 	doc.status = "Checked In"
 	doc.save(ignore_permissions=True)
+	# HR-380 R5: a stay the platform collected comes in paid - its OTA Prepaid
+	# line, in this transaction (a folio saying the guest owes the room is worse
+	# than a failed check-in), with no till and on the check-in's permission
+	from kamra.channel_payments import post_platform_payment
+	post_platform_payment(doc)
 	from kamra.savings import log_action
 	if doc.room:
 		where = frappe.db.get_value("Room", doc.room, "room_number") or doc.room
@@ -5332,9 +5353,13 @@ CANCEL_REASONS = ["Guest request", "Change of plans", "Duplicate booking",
 
 def _do_cancel(res, reason: str = "Guest request", note: str | None = None,
                waive_fee: int = 0, issue_credit_note: int = 0,
-               no_fee: bool = False) -> dict:
+               no_fee: bool = False, inside_window: bool | None = None) -> dict:
 	"""Shared cancel path for desk API and OTA channel manager. no_fee: the
-	booking was never secured, so no policy fee applies (not a waiver)."""
+	booking was never secured, so no policy fee applies (not a waiver).
+	inside_window: None keeps the hotel's own window (_cancellation_terms);
+	True / False replaces it - a channel booking the hotel collects follows
+	the channel's free cancellation (HR-380). The fee basis and tier still
+	come from _cancellation_terms."""
 	from frappe.model.naming import make_autoname
 
 	if reason not in CANCEL_REASONS:
@@ -5344,8 +5369,9 @@ def _do_cancel(res, reason: str = "Guest request", note: str | None = None,
 	summary = (f"Cancel {res.name} · {reason}"
 	           + (" · fee waived" if int(waive_fee or 0) else ""))
 
+	window = terms["inside_window"] if inside_window is None else bool(inside_window)
 	fee = 0.0
-	if terms["inside_window"] and not int(waive_fee or 0) and not no_fee \
+	if window and not int(waive_fee or 0) and not no_fee \
 			and terms["fee_basis"] != "None":
 		from kamra.folio import post_policy_fee
 		tier = terms.get("tier")
@@ -5557,9 +5583,26 @@ def checkout_context(reservation: str):
 	return ctx
 
 
+def _bill_has_payment(reservation: str, folios: list[str]) -> bool:
+	"""A payment on the bill other than the OTA Prepaid lines the platform's
+	money put there (check-in and modifications, on an open folio).
+	Checked in Python, not SQL: a NULL idempotency_key inside a SQL
+	NOT(...) would skip the row."""
+	from kamra.channel_payments import _is_platform_key
+	open_ = set(frappe.get_all("Folio", filters={"name": ("in", folios), "status": "Open"},
+	                           pluck="name"))
+	pays = frappe.get_all("Folio Payment", filters={"parent": ("in", folios)},
+	                      fields=["parent", "idempotency_key"])
+	return any(not (_is_platform_key(p.idempotency_key, reservation) and p.parent in open_)
+	           for p in pays)
+
+
 def _reverse_check_in_blocker(doc) -> str | None:
 	"""Why this stay's check-in can't be reversed now, or None (OPERA's
-	Reverse Check In: checked in today, zero balance, nothing posted)."""
+	Reverse Check In: checked in today, zero balance, nothing posted).
+	The one line that doesn't count is the OTA Prepaid payment the check-in
+	put on an open folio for a booking the platform collected: reversing
+	the check-in takes it off (channel_payments.reverse_platform_payment)."""
 	from kamra.business_date import get_business_date
 	if doc.status != "Checked In":
 		return _("Only a checked-in stay can have its check-in reversed.")
@@ -5569,7 +5612,7 @@ def _reverse_check_in_blocker(doc) -> str | None:
 		         "reversed. Check the guest out instead.")
 	folios = frappe.get_all("Folio", filters={"reservation": doc.name}, pluck="name")
 	if folios and (frappe.db.exists("Folio Charge", {"parent": ("in", folios)})
-	               or frappe.db.exists("Folio Payment", {"parent": ("in", folios)})):
+	               or _bill_has_payment(doc.name, folios)):
 		return _("A charge or payment is on the bill: void it, or check the guest out.")
 	# an authorization holds the deposit with no payment on the bill
 	if frappe.db.exists("Security Deposit", {"reservation": doc.name,
@@ -5596,6 +5639,9 @@ def reverse_check_in(reservation: str, reason: str, pin: str | None = None):
 	if blocker:
 		frappe.throw(blocker)
 	require_cashier_pin(doc.property, pin)
+	# the platform's payment the check-in posted comes off with it (R5)
+	from kamra.channel_payments import reverse_platform_payment
+	reverse_platform_payment(doc, reason)
 	rooms = doc._occupied_rooms(checking_in=False)
 	doc.status = "Confirmed"
 	frappe.flags.kamra_status_transition = True

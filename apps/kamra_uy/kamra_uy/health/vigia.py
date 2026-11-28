@@ -19,9 +19,15 @@ Cada vuelta:
 2. `GET /api/method/kamra_uy.health.status` con la cabecera X-HR-Health-Token: el estado de cada señal de Kamra
    (programador, revisiones, ari, cfe, errores, disco, core; kamra_uy/health/checks.py) y su detalle.
 3. El disco de las rutas de HR_VIGIA_DISCOS, visto desde aquí (`disco_servidor`).
-4. Avisa: ALERTA cuando una señal pasa a roja, SIGUE cada HR_VIGIA_REPITE_MIN minutos mientras siga roja y RESUELTO
-   cuando vuelve a verde; todo lo de una vuelta va en un solo mensaje, por todos los canales configurados. Si no lo
-   entrega ninguno, la vuelta siguiente lo intenta otra vez. El estado vive en HR_VIGIA_ESTADO (JSON).
+4. Avisa: ALERTA cuando una señal pasa a roja, SIGUE cada HR_VIGIA_REPITE_MIN minutos (720: cada 12 h) desde la
+   ALERTA mientras siga roja y RESUELTO cuando lleva HR_VIGIA_RESUELTO_MIN minutos seguidos bien (15, HR-381): si vuelve
+   a fallar antes, es el mismo incidente, sin RESUELTO ni ALERTA nueva. Todo lo de una vuelta va en un solo mensaje, por
+   todos los canales configurados. Si no lo entrega ninguno, la vuelta siguiente lo intenta otra vez. El estado vive en
+   HR_VIGIA_ESTADO (JSON).
+   Ventana de mantenimiento (HR-381): si junto al estado hay un fichero `mantenimiento-hasta` con una hora UTC futura
+   (lo escriben deploy/prod/despliega.sh y deshacer.sh antes de parar nada, y lo borran al acabar), el vigía sigue
+   mirando y guardando el estado, pero no manda ALERTA ni SIGUE; al cerrarse (o al vencer), si sigue roto, avisa como
+   siempre, con la hora real del inicio. Si falta, no se lee, está vencido o pasa de MAX_WINDOW (6 h), no hay ventana.
 5. Si hay HR_VIGIA_LATIDO_URL (p. ej. Healthchecks.io), la llama: si el servidor entero se cae, el vigía calla y ese
    servicio avisa.
 
@@ -66,6 +72,8 @@ GRACE_SIGNALS = ("programador",)
 PING = "/api/method/ping"
 STATUS = "/api/method/kamra_uy.health.status"
 DEFAULT_STATE = "~/.local/state/hotel-roosevelt/vigia.json"
+WINDOW_FILE = "mantenimiento-hasta"  # junto al estado: en el servidor, /opt/hr-vigia/estado/mantenimiento-hasta
+MAX_WINDOW = timedelta(hours=6)  # una hora más lejana no es una ventana: un fichero mal escrito no calla al vigía días
 
 
 class ConfigError(Exception):
@@ -97,7 +105,8 @@ class Config:
 	intervalo: int = 60
 	caida_confirma: int = 3
 	caida_min: int = 2
-	repite_min: int = 240
+	repite_min: int = 720
+	resuelto_min: int = 15
 	gracia_min: int = 10
 	discos: list = field(default_factory=list)
 	disco_pct: int = 90
@@ -140,7 +149,8 @@ def config_from_env(env) -> Config:
 		nombre=g("HR_VIGIA_NOMBRE", "producción"), estado=os.path.expanduser(g("HR_VIGIA_ESTADO", DEFAULT_STATE)),
 		intervalo=_int(env, "HR_VIGIA_INTERVALO", 60), caida_confirma=_int(env, "HR_VIGIA_CAIDA_CONFIRMA", 3),
 		caida_min=_int(env, "HR_VIGIA_CAIDA_MIN", 2),
-		repite_min=_int(env, "HR_VIGIA_REPITE_MIN", 240), gracia_min=_int(env, "HR_VIGIA_GRACIA_MIN", 10),
+		repite_min=_int(env, "HR_VIGIA_REPITE_MIN", 720), resuelto_min=_int(env, "HR_VIGIA_RESUELTO_MIN", 15),
+		gracia_min=_int(env, "HR_VIGIA_GRACIA_MIN", 10),
 		discos=_list(env.get("HR_VIGIA_DISCOS")),
 		disco_pct=_int(env, "HR_VIGIA_DISCO_PCT", 90), latido_url=g("HR_VIGIA_LATIDO_URL"),
 		timeout=_int(env, "HR_VIGIA_TIMEOUT", 10), slack_webhook=g("HR_VIGIA_SLACK_WEBHOOK"),
@@ -276,10 +286,17 @@ def _parse(value) -> datetime | None:
 		return None
 
 
-def decide(state: dict, seen: dict, now: datetime, cfg: Config) -> tuple:
-	"""(estado nuevo, avisos). Un aviso: {"kind": alerta|sigue|resuelto, "signal", "detail", "since"}. Puro."""
+def decide(state: dict, seen: dict, now: datetime, cfg: Config, quiet_until: datetime | None = None) -> tuple:
+	"""(estado nuevo, avisos). Un aviso: {"kind": alerta|sigue|resuelto, "signal", "detail", "since"}. Puro.
+
+	HR-381 (el fundador, 28-11: 20 correos por una caída): un incidente, un aviso. Una señal avisada solo da RESUELTO
+	tras `resuelto_min` minutos seguidos bien (`ok_since`); si vuelve a fallar antes, sigue siendo el mismo incidente:
+	ni RESUELTO ni ALERTA nueva, y SIGUE cuenta desde la ALERTA original (`alerted_at`) con el inicio real
+	(`incident_since`). Con `quiet_until` en el futuro (la ventana de mantenimiento de un despliegue) no sale ni ALERTA
+	ni SIGUE, pero el estado se lleva igual: al acabar, lo que siga roto avisa con la hora en que empezó."""
 	signals = {k: dict(v) for k, v in (state.get("signals") or {}).items()}
 	notices = []
+	quiet = quiet_until is not None and now < quiet_until
 	recovered = state.get("recovered_at")
 	if (seen.get("caida") or {}).get("status") == "ok" and (signals.get("caida") or {}).get("status") == "fail":
 		recovered = _iso(now)  # Kamra acaba de volver
@@ -289,28 +306,51 @@ def decide(state: dict, seen: dict, now: datetime, cfg: Config) -> tuple:
 		prev = signals.get(name) or {"status": "ok", "fails": 0, "alerted_at": None, "since": _iso(now)}
 		entry = {"status": obs["status"], "detail": obs.get("detail", ""), "alerted_at": prev.get("alerted_at"),
 		         "since": prev.get("since") if prev.get("status") == obs["status"] else _iso(now)}
+		alerted = _parse(prev.get("alerted_at"))
+		if alerted is not None:
+			entry["incident_since"] = prev.get("incident_since") or prev.get("since")
 		if obs["status"] == "fail":
 			entry["fails"] = (prev.get("fails") or 0) + 1 if prev.get("status") == "fail" else 1
-			alerted = _parse(prev.get("alerted_at"))
 			need = cfg.caida_confirma if name == "caida" else 1
 			waiting = name in GRACE_SIGNALS and grace_until is not None and now < grace_until
 			# HR-374 (el fundador, 26-11: «debería ser 2 minutos»): la caída no avisa hasta llevar HR_VIGIA_CAIDA_MIN
 			# minutos sin respuesta, contados desde la primera vuelta que la vio caída, sea cual sea el intervalo
 			red_since = _parse(entry["since"]) or now
 			long_enough = name != "caida" or now - red_since >= timedelta(minutes=cfg.caida_min)
-			if alerted is None and entry["fails"] >= need and long_enough and not waiting:
+			if quiet:
+				pass  # en la ventana de mantenimiento: mira y guarda, no avisa
+			elif alerted is None and entry["fails"] >= need and long_enough and not waiting:
 				notices.append({"kind": "alerta", "signal": name, "detail": entry["detail"], "since": entry["since"]})
 				entry["alerted_at"] = _iso(now)
+				entry["incident_since"] = entry["since"]
 			elif alerted is not None and now - alerted >= timedelta(minutes=cfg.repite_min):
-				notices.append({"kind": "sigue", "signal": name, "detail": entry["detail"], "since": entry["since"]})
+				notices.append({"kind": "sigue", "signal": name, "detail": entry["detail"],
+				                "since": entry["incident_since"]})
 				entry["alerted_at"] = _iso(now)
 		else:
 			entry["fails"] = 0
-			if prev.get("alerted_at"):
-				notices.append({"kind": "resuelto", "signal": name, "detail": entry["detail"], "since": entry["since"]})
-			entry["alerted_at"] = None
+			if alerted is not None:
+				ok_since = (_parse(prev.get("ok_since")) if prev.get("status") != "fail" else None) or now
+				if now - ok_since >= timedelta(minutes=cfg.resuelto_min):
+					notices.append({"kind": "resuelto", "signal": name, "detail": entry["detail"], "since": entry["since"]})
+					entry["alerted_at"] = None
+					entry.pop("incident_since", None)
+				else:
+					entry["ok_since"] = _iso(ok_since)  # bien, pero aún no lo bastante: el incidente sigue abierto
+			else:
+				entry["alerted_at"] = None
 		signals[name] = entry
 	return {"signals": signals, "last_run": _iso(now), "recovered_at": recovered}, notices
+
+
+def maintenance_until(cfg: Config, now: datetime) -> datetime | None:
+	"""El fin de la ventana de mantenimiento, si hay una abierta (HR-381); None si el fichero falta, no se lee, está
+	vencido o pasa de MAX_WINDOW."""
+	try:
+		until = _parse(Path(cfg.estado).with_name(WINDOW_FILE).read_text().strip())
+	except (OSError, ValueError):
+		return None
+	return until if until is not None and now < until <= now + MAX_WINDOW else None
 
 
 def _ago(since: str | None, now: datetime) -> str:
@@ -321,13 +361,20 @@ def _ago(since: str | None, now: datetime) -> str:
 	return f" (desde hace {minutes // 60} h {minutes % 60} min)" if minutes >= 60 else ""
 
 
+def _started(since: str | None, now: datetime) -> str:
+	"""La hora real del inicio de una ALERTA que llega tarde (tras una ventana de mantenimiento o un margen)."""
+	start = _parse(since)
+	return f" (desde las {start:%H:%M} UTC)" if start and now - start >= timedelta(minutes=5) else ""
+
+
 def compose(notices: list, cfg: Config, now: datetime) -> tuple:
 	"""(asunto, texto) de un mensaje con todos los avisos de la vuelta."""
 	lines = []
 	for n in notices:
 		label = LABELS.get(n["signal"], n["signal"])
 		tail = "" if n["kind"] == "resuelto" else (f": {n['detail']}" if n["detail"] else "")
-		lines.append(f"{KINDS[n['kind']]} · {label}{tail}{_ago(n['since'], now) if n['kind'] == 'sigue' else ''}")
+		when = {"sigue": _ago, "alerta": _started}.get(n["kind"])
+		lines.append(f"{KINDS[n['kind']]} · {label}{tail}{when(n['since'], now) if when else ''}")
 	worst = "ALERTA" if any(n["kind"] != "resuelto" for n in notices) else "Resuelto"
 	labels = ", ".join(dict.fromkeys(LABELS.get(n["signal"], n["signal"]) for n in notices))
 	subject = f"[Hotel Roosevelt · {cfg.nombre}] {worst}: {labels}"
@@ -417,7 +464,8 @@ def run_once(cfg: Config, now: datetime | None = None, http=http, smtp=smtp_conn
 	now = now or datetime.now(UTC)
 	state = _load_state(cfg.estado)
 	seen = observe(cfg, http=http, disk_usage=disk_usage)
-	new_state, notices = decide(state, seen, now, cfg)
+	window = maintenance_until(cfg, now)
+	new_state, notices = decide(state, seen, now, cfg, quiet_until=window)
 	sent = ""
 	if notices:
 		subject, text = compose(notices, cfg, now)
@@ -434,7 +482,8 @@ def run_once(cfg: Config, now: datetime | None = None, http=http, smtp=smtp_conn
 					new_state["signals"][n["signal"]] = previous
 	_save_state(cfg.estado, new_state)
 	failing = [k for k, v in seen.items() if v["status"] == "fail"]
-	out(f"{_iso(now)} {'fail: ' + ', '.join(failing) if failing else 'ok'}{sent}")
+	quiet = f" · en mantenimiento hasta {_iso(window)}: sin ALERTA ni SIGUE" if window else ""
+	out(f"{_iso(now)} {'fail: ' + ', '.join(failing) if failing else 'ok'}{sent}{quiet}")
 	if cfg.latido_url:
 		try:
 			http("GET", cfg.latido_url, timeout=cfg.timeout)
@@ -475,7 +524,7 @@ def main(argv=None) -> int:
 	if args.comprobar:
 		print(f"vigía: {cfg.url} ({cfg.nombre}) · canales: {', '.join(cfg.channels()) or 'ninguno'} · "
 		      f"cada {cfg.intervalo} s · caída tras {cfg.caida_confirma} vueltas · caída tras {cfg.caida_min} min · "
-		      f"repite cada {cfg.repite_min} min")
+		      f"repite cada {cfg.repite_min} min · resuelto tras {cfg.resuelto_min} min bien")
 		return 0
 	if args.estado:
 		print(json.dumps(observe(cfg), ensure_ascii=False, indent=1))

@@ -22,7 +22,7 @@ from decimal import Decimal
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, nowdate
+from frappe.utils import add_days, getdate, nowdate
 
 from kamra.authz import require_perm
 from kamra.channels import provider_for
@@ -420,12 +420,10 @@ def _channex_signal(conn, payload: dict) -> dict:
 	property_id = payload.get("property_id") or body.get("property_id")
 	if property_id and property_id != conn.external_property_id:
 		return {"ok": True, "ignored": "other_property"}
-	if event in _CHANNEX_UNMAPPED_EVENTS:
-		# ids only: the payload may carry the guest
-		ids = {k: body.get(k) for k in ("booking_id", "booking_revision_id", "revision_id",
-		                                "room_type_id", "rate_plan_id") if body.get(k)}
-		frappe.log_error(title=f"Channex unmapped {conn.name}",
-		                 message=f"{event}: {json.dumps(ids, sort_keys=True)}")
+	# An unmapped room or rate only queues the pull, with no Error Log: a hotel
+	# room nobody mapped is reported by its failed revision (_fail_revision and
+	# the "revisiones" health check), and an Airbnb listing of the host's own
+	# account is acked unseen by the feed (_foreign_listing).
 	if event in _CHANNEX_BOOKING_EVENTS or event in _CHANNEX_UNMAPPED_EVENTS:
 		enqueue_feed_pull(conn.name)
 		return {"ok": True, "queued": True}
@@ -524,7 +522,8 @@ def _reservations_for_booking(property: str, booking_id: str) -> list[dict]:
 	if not booking_id:
 		return []
 	return frappe.db.sql(
-		"""SELECT name, status, ota_ref FROM `tabReservation`
+		"""SELECT name, status, ota_ref, ota_collect, ota_free_cancel_until
+		   FROM `tabReservation`
 		   WHERE property = %(p)s
 		     AND (ota_ref = %(b)s OR ota_ref LIKE %(bl)s)""",
 		{"p": property, "b": booking_id, "bl": booking_id + "-%"},
@@ -602,10 +601,16 @@ def _apply_event(conn, e: dict, requested_reason: str | None = None) -> dict:
 		existing = _sibling_reservation(conn.property, e)
 
 	if e["event"] == "cancel":
-		# A cancel frees the room(s) and - per the property's cancellation
-		# policy, which carries no OTA exception - issues a 6-month credit
-		# note instead of a cash refund. Reuse the exact front-desk path.
+		# A cancel frees the room(s) through the exact front-desk path. Who
+		# collected decides the fee (HR-380, kamra.channel_payments): none
+		# when the platform did; when the hotel did, the channel's free
+		# cancellation (free through ota_free_cancel_until, then the hotel's
+		# policy fee; the hotel's own window when the channel sent none).
+		# A channel booking gets its money back from the folio, never a
+		# 6-month credit note; one with no ota_collect keeps the old way.
 		from kamra.api import _do_cancel
+		from kamra.channel_payments import PLATFORM, _local_today
+		today = _local_today(conn.property)
 		rows = _reservations_for_booking(
 			conn.property, e.get("booking_id") or e.get("ota_ref"))
 		if not rows:
@@ -622,8 +627,13 @@ def _apply_event(conn, e: dict, requested_reason: str | None = None) -> dict:
 				_release(res, "Booked elsewhere", note)
 				cancelled.append(r.name)
 				continue
+			until = r.get("ota_free_cancel_until")
+			inside = (today > getdate(until)) if until and r.get("ota_collect") \
+				and r.get("ota_collect") != PLATFORM else None
 			out = _do_cancel(res, reason="Booked elsewhere", note=note,
-			                 issue_credit_note=1)
+			                 no_fee=r.get("ota_collect") == PLATFORM,
+			                 inside_window=inside,
+			                 issue_credit_note=0 if r.get("ota_collect") else 1)
 			cancelled.append(r.name)
 			if out.get("credit_note_voucher"):
 				vouchers.append(out["credit_note_voucher"])
@@ -668,6 +678,9 @@ def _apply_event(conn, e: dict, requested_reason: str | None = None) -> dict:
 			doc.amount_after_tax = e.get("total") or 0
 		if not doc.auto_price:
 			lock_channel_rates(doc, e.get("total"), e.get("nightly"))
+		# who collects and from when (HR-380): recomputed, money kept
+		from kamra.channel_payments import apply_to as apply_collection
+		apply_collection(doc, e)
 		old_transition = frappe.flags.kamra_status_transition
 		try:
 			if requested_reason:
@@ -676,6 +689,10 @@ def _apply_event(conn, e: dict, requested_reason: str | None = None) -> dict:
 			doc.save(ignore_permissions=True)
 		finally:
 			frappe.flags.kamra_status_transition = old_transition
+		if doc.status == "Checked In":
+			# the platform's payment on the bill follows the new total (HR-380)
+			from kamra.channel_payments import adjust_platform_payment
+			adjust_platform_payment(doc, e.get("revision_id"))
 		return {"ota_ref": e["ota_ref"], "result": "modified",
 		        "reservation": existing.name}
 
@@ -713,6 +730,9 @@ def _apply_event(conn, e: dict, requested_reason: str | None = None) -> dict:
 	if e.get("total"):
 		doc.amount_after_tax = e["total"]
 		lock_channel_rates(doc, e["total"], e.get("nightly"))
+	# who collects the room money and from when (HR-380)
+	from kamra.channel_payments import apply_to as apply_collection
+	apply_collection(doc, e)
 	try:
 		doc.insert(ignore_permissions=True)
 	except frappe.DuplicateEntryError:
@@ -977,6 +997,22 @@ def _feed_error(conn, exc: Exception) -> None:
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- feed worker: keep the error log of a failed pass
 
 
+def _foreign_listing(conn, rev: dict) -> bool:
+	"""An Airbnb revision Channex mapped to no room: a listing of the host's own
+	account the hotel does not sell. True only when every room has no
+	room_type_id and no stay of the property carries its code (a hotel booking
+	moved to such a listing still fails, for staff)."""
+	if canonical_channel(rev.get("ota_name")) != "Airbnb":
+		return False
+	rooms = rev.get("rooms") or []
+	if not rooms or not all(isinstance(r, dict) and not r.get("room_type_id") for r in rooms):
+		return False
+	code = str(rev.get("ota_reservation_code") or rev.get("unique_id")
+	           or rev.get("booking_id") or "")
+	refs = [code] + [f"{code}-{i}" for i in range(len(rooms))]
+	return not frappe.db.exists("Reservation", {"property": conn.property, "ota_ref": ("in", refs)})
+
+
 def _pause(conn, seconds: int) -> dict:
 	until = time.time() + seconds
 	frappe.cache.set_value(_FEED_PAUSE.format(connection=conn.name), until, expires_in_sec=seconds)
@@ -1018,6 +1054,20 @@ def pull_feed(connection: str) -> dict:
 			_feed_error(conn, ValueError(f"Revision {rev.get('id')} is for Channex property "
 			                             f"{rev.get('property_id')!r}, not {conn.external_property_id!r}: "
 			                             "skipped, not acked."))
+			continue
+		if _foreign_listing(conn, rev):
+			# the host's own Airbnb listing: acked (Channex then wipes its guest),
+			# never applied, stored nor reported - only its short id in the log
+			try:
+				channex.ack_revision(conn, rev["id"])
+			except channex.ChannexRateLimited as exc:
+				return _pause(conn, exc.retry_after)
+			except Exception as exc:
+				_feed_error(conn, exc)
+				continue
+			counts["ignored"] = counts.get("ignored", 0) + 1
+			frappe.logger("kamra.channex").info(
+				f"Airbnb revision {str(rev['id'])[:8]} of an unmapped listing acked, not applied")
 			continue
 		booking = rev.get("booking_id") or rev.get("ota_reservation_code") or rev["id"]
 		if booking in held_back:

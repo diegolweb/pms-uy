@@ -194,10 +194,13 @@ def audit_outcome(res, pol, business_date, run_at: datetime) -> frappe._dict:
 
 def fee_decision(res, pol) -> frappe._dict:
 	"""A stay that is being marked No Show: does the policy charge a fee,
-	charge nothing, or waive it because an OTA collects?"""
+	charge nothing, or waive it because an OTA collects? A channel booking
+	the hotel collects itself (ota_collect Hotel / Virtual card, HR-380) is
+	charged like any other: no one else bills the guest."""
 	if pol.charge == "None":
 		return frappe._dict(outcome="no_show", reason="", fee="none")
-	if pol.waive_ota and is_ota_booking(res):
+	if pol.waive_ota and is_ota_booking(res) and \
+			res.get("ota_collect") not in ("Hotel", "Virtual card"):
 		return frappe._dict(outcome="no_show",
 		                    reason=f"{res.get('channel') or res.get('source') or 'OTA'} booking",
 		                    fee="waived")
